@@ -185,3 +185,115 @@ async def test_clink_tool_truncates_without_summary(monkeypatch):
     assert metadata.get("output_truncated") is True
     assert metadata.get("events_removed_for_normal") is True
     assert metadata.get("output_original_length") == len(long_text)
+
+
+@pytest.mark.asyncio
+async def test_clink_tool_with_json_schema(monkeypatch):
+    """Verify json_schema parameter is passed to agent."""
+    tool = CLinkTool()
+    received_schema = None
+
+    async def fake_run(**kwargs):
+        nonlocal received_schema
+        received_schema = kwargs.get("json_schema")
+        return AgentOutput(
+            parsed=ParsedCLIResponse(content="Response with schema", metadata={"schema_used": True}),
+            sanitized_command=["claude", "--json-schema", '{"type": "object"}'],
+            returncode=0,
+            stdout='{"response": "Success"}',
+            stderr="",
+            duration_seconds=0.1,
+            parser_name="claude_json",
+            output_file_content=None,
+        )
+
+    class DummyAgent:
+        async def run(self, **kwargs):
+            return await fake_run(**kwargs)
+
+    monkeypatch.setattr("tools.clink.create_agent", lambda client: DummyAgent())
+
+    schema = {"type": "object", "properties": {"result": {"type": "string"}}}
+    arguments = {
+        "prompt": "Test prompt",
+        "cli_name": "claude",
+        "json_schema": schema,
+        "absolute_file_paths": [],
+        "images": [],
+    }
+
+    result = await tool.execute(arguments)
+    assert len(result) == 1
+    assert received_schema == schema
+
+
+@pytest.mark.asyncio
+async def test_clink_tool_with_empty_json_schema(monkeypatch):
+    """Test empty dict {} is handled gracefully."""
+    tool = CLinkTool()
+
+    async def fake_run(**kwargs):
+        return AgentOutput(
+            parsed=ParsedCLIResponse(content="Response", metadata={}),
+            sanitized_command=["claude", "--json-schema", "{}"],
+            returncode=0,
+            stdout='{"response": "Success"}',
+            stderr="",
+            duration_seconds=0.1,
+            parser_name="claude_json",
+            output_file_content=None,
+        )
+
+    class DummyAgent:
+        async def run(self, **kwargs):
+            return await fake_run(**kwargs)
+
+    monkeypatch.setattr("tools.clink.create_agent", lambda client: DummyAgent())
+
+    arguments = {
+        "prompt": "Test",
+        "cli_name": "claude",
+        "json_schema": {},  # Empty schema
+        "absolute_file_paths": [],
+        "images": [],
+    }
+
+    result = await tool.execute(arguments)
+    assert len(result) == 1
+
+
+@pytest.mark.asyncio
+async def test_clink_tool_json_schema_backwards_compat(monkeypatch):
+    """Test calls without json_schema continue to work."""
+    tool = CLinkTool()
+
+    async def fake_run(**kwargs):
+        # Verify json_schema is None or not present
+        assert kwargs.get("json_schema") is None
+        return AgentOutput(
+            parsed=ParsedCLIResponse(content="Normal response", metadata={}),
+            sanitized_command=["claude"],
+            returncode=0,
+            stdout='{"response": "Success"}',
+            stderr="",
+            duration_seconds=0.1,
+            parser_name="claude_json",
+            output_file_content=None,
+        )
+
+    class DummyAgent:
+        async def run(self, **kwargs):
+            return await fake_run(**kwargs)
+
+    monkeypatch.setattr("tools.clink.create_agent", lambda client: DummyAgent())
+
+    arguments = {
+        "prompt": "Test",
+        "cli_name": "claude",
+        # No json_schema parameter
+        "absolute_file_paths": [],
+        "images": [],
+    }
+
+    result = await tool.execute(arguments)
+    assert len(result) == 1

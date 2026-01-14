@@ -53,8 +53,10 @@ class CLinkRequest(BaseModel):
     json_schema: dict | None = Field(
         default=None,
         description=(
-            "Optional JSON schema for structured output. When provided, the CLI agent will be "
-            "instructed to format its response according to this schema. Only supported by Claude CLI."
+            "Optional JSON schema for structured output. When provided, the schema is passed to "
+            "the CLI agent via --json-schema flag. The schema must be JSON-serializable (dict, list, "
+            "str, int, float, bool, None). Schema validation is performed by the CLI agent; invalid "
+            "schemas will cause the CLI to return an error. Only supported by Claude CLI."
         ),
     )
 
@@ -153,8 +155,10 @@ class CLinkTool(SimpleTool):
             "json_schema": {
                 "type": "object",
                 "description": (
-                    "Optional JSON schema for structured output. When provided, the CLI agent will be "
-                    "instructed to format its response according to this schema. Only supported by Claude CLI."
+                    "Optional JSON schema for structured output. When provided, the schema is passed to "
+                    "the CLI agent via --json-schema flag. The schema must be JSON-serializable (dict, list, "
+                    "str, int, float, bool, None). Schema validation is performed by the CLI agent; invalid "
+                    "schemas will cause the CLI to return an error. Only supported by Claude CLI."
                 ),
             },
         }

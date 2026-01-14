@@ -1,0 +1,46 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "title": "Code Analysis Result",
+  "description": "Schema for structured code analysis output",
+  "properties": {
+    "summary": {
+      "type": "string",
+      "description": "Brief summary of the code"
+    },
+    "complexity": {
+      "type": "string",
+      "enum": ["low", "medium", "high"],
+      "description": "Overall code complexity"
+    },
+    "issues": {
+      "type": "array",
+      "description": "List of issues found",
+      "items": {
+        "type": "object",
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": ["critical", "high", "medium", "low"]
+          },
+          "description": {
+            "type": "string"
+          },
+          "line": {
+            "type": "integer",
+            "description": "Line number (if applicable)"
+          }
+        },
+        "required": ["severity", "description"]
+      }
+    },
+    "suggestions": {
+      "type": "array",
+      "description": "Improvement suggestions",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": ["summary", "complexity"]
+}

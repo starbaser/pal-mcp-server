@@ -8,7 +8,7 @@ from collections.abc import Sequence
 from clink.models import ResolvedCLIRole
 from clink.parsers.base import ParserError
 
-from .base import AgentOutput, BaseCLIAgent
+from .base import AgentOutput, BaseCLIAgent, CLIAgentError
 
 
 class ClaudeAgent(BaseCLIAgent):
@@ -46,7 +46,14 @@ class ClaudeAgent(BaseCLIAgent):
 
         schema_to_use = json_schema if json_schema is not None else getattr(self, "_json_schema", None)
         if schema_to_use is not None:
-            command.extend(["--json-schema", json.dumps(schema_to_use)])
+            try:
+                schema_json = json.dumps(schema_to_use)
+            except (TypeError, ValueError) as exc:
+                raise CLIAgentError(
+                    f"Failed to serialize json_schema for CLI '{self.client.name}': {exc}. "
+                    f"Schema must be JSON-serializable. Received type: {type(schema_to_use).__name__}"
+                ) from exc
+            command.extend(["--json-schema", schema_json])
 
         command.extend(role.role_args)
         return command

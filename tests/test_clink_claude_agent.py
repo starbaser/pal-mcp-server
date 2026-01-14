@@ -109,3 +109,28 @@ async def test_claude_agent_propagates_unparseable_output(monkeypatch, claude_ag
 
     with pytest.raises(CLIAgentError):
         await _run_agent_with_process(monkeypatch, agent, role, process)
+
+
+@pytest.mark.asyncio
+async def test_claude_agent_rejects_non_serializable_schema(monkeypatch, claude_agent):
+    """Verify TypeError handling for non-serializable json_schema."""
+    agent, role = claude_agent
+
+    # Mock subprocess
+    def fake_which(executable_name):
+        return f"/usr/bin/{executable_name}"
+
+    monkeypatch.setattr(shutil, "which", fake_which)
+
+    # Non-serializable object
+    invalid_schema = {"func": lambda x: x}
+
+    with pytest.raises(CLIAgentError, match="Failed to serialize json_schema"):
+        await agent.run(
+            role=role,
+            prompt="Test prompt",
+            system_prompt="System prompt",
+            files=[],
+            images=[],
+            json_schema=invalid_schema,
+        )

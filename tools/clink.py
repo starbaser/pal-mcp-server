@@ -50,6 +50,13 @@ class CLinkRequest(BaseModel):
         default=None,
         description=COMMON_FIELD_DESCRIPTIONS["continuation_id"],
     )
+    json_schema: dict | None = Field(
+        default=None,
+        description=(
+            "Optional JSON schema for structured output. When provided, the CLI agent will be "
+            "instructed to format its response according to this schema. Only supported by Claude CLI."
+        ),
+    )
 
 
 class CLinkTool(SimpleTool):

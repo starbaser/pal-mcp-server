@@ -1,5 +1,5 @@
 {
-  "name": "claude-z",
+  "name": "claude-zai",
   "command": "claude",
   "additional_args": ["--permission-mode", "acceptEdits", "--model", "sonnet"],
   "env": {

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.12"
 # dependencies = [
@@ -36,12 +36,11 @@ import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 import attrs
 import jsonschema
 import tyro
-from typing import Annotated
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.syntax import Syntax
@@ -234,9 +233,7 @@ def build_shell_command(
         import hashlib
         import time
 
-        delimiter_base = hashlib.sha256(
-            f"{prompt}{time.time_ns()}".encode()
-        ).hexdigest()[:16].upper()
+        delimiter_base = hashlib.sha256(f"{prompt}{time.time_ns()}".encode()).hexdigest()[:16].upper()
         delimiter = f"CLINK_EOF_{delimiter_base}"
 
         # Using <(cat <<'EOF' ...) with unique delimiter
@@ -338,7 +335,7 @@ async def execute_clink(
         if full_prompt:
             console.print(f"\n[cyan]Prompt length:[/cyan] {len(full_prompt)} characters")
         else:
-            console.print(f"\n[cyan]Mode:[/cyan] Interactive (no prompt)")
+            console.print("\n[cyan]Mode:[/cyan] Interactive (no prompt)")
 
     if preview:
         return {"output": None, "metadata": {}, "command": command}
@@ -367,32 +364,32 @@ async def execute_clink(
 
         # Remove uv's virtual environment modifications
         # We want the subprocess to use ONLY the caller's original environment
-        if 'VIRTUAL_ENV' in env:
-            uv_venv_path = env['VIRTUAL_ENV']
-            del env['VIRTUAL_ENV']
+        if "VIRTUAL_ENV" in env:
+            uv_venv_path = env["VIRTUAL_ENV"]
+            del env["VIRTUAL_ENV"]
 
             # Strip uv's venv from PATH
-            if 'PATH' in env:
-                path_entries = env['PATH'].split(':')
+            if "PATH" in env:
+                path_entries = env["PATH"].split(":")
                 # Remove any path entries that point to uv's venv
                 cleaned_path = [p for p in path_entries if uv_venv_path not in p]
-                env['PATH'] = ':'.join(cleaned_path)
+                env["PATH"] = ":".join(cleaned_path)
 
         if verbose:
-            console.print(f"\n[yellow]After cleaning uv's venv from environment:[/yellow]")
+            console.print("\n[yellow]After cleaning uv's venv from environment:[/yellow]")
             console.print(f"  Cleaned env vars: {len(env)}")
             console.print(f"  VIRTUAL_ENV: {env.get('VIRTUAL_ENV', 'Removed ✓')}")
             console.print(f"  PATH (first entry): {env.get('PATH', '').split(':')[0]}")
             # Show some user env vars to prove it's the caller's environment
-            if 'ZAI_API_KEY' in env:
+            if "ZAI_API_KEY" in env:
                 console.print(f"  ZAI_API_KEY: {env['ZAI_API_KEY'][:10]}... (from caller)")
-            if 'HOME' in env:
+            if "HOME" in env:
                 console.print(f"  HOME: {env['HOME']} (from caller)")
 
         env.update(expand_env_vars(client.env))
 
         if verbose:
-            console.print(f"\n[yellow]After adding CLI-specific vars:[/yellow]")
+            console.print("\n[yellow]After adding CLI-specific vars:[/yellow]")
             console.print(f"  Total env vars: {len(env)}")
             console.print(f"  CLI-specific vars added: {len(client.env)}")
             # Show that PATH is still from caller
@@ -400,13 +397,14 @@ async def execute_clink(
 
             # Show which executable will be used
             import shutil
+
             cli_executable = command[0]
-            which_result = shutil.which(cli_executable, path=env.get('PATH'))
-            console.print(f"\n[yellow]CLI Executable Resolution:[/yellow]")
+            which_result = shutil.which(cli_executable, path=env.get("PATH"))
+            console.print("\n[yellow]CLI Executable Resolution:[/yellow]")
             console.print(f"  Looking for: {cli_executable}")
             console.print(f"  Will use: {which_result}")
-            if which_result and 'uv' not in which_result:
-                console.print(f"  ✓ From caller's PATH, not uv's venv")
+            if which_result and "uv" not in which_result:
+                console.print("  ✓ From caller's PATH, not uv's venv")
 
         # Execute subprocess
         try:

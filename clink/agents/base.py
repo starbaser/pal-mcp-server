@@ -200,8 +200,11 @@ class BaseCLIAgent:
         return base
 
     def _build_environment(self) -> dict[str, str]:
+        from utils.env import expand_env_vars
+
         env = os.environ.copy()
-        env.update(self.client.env)
+        expanded_client_env = expand_env_vars(self.client.env)
+        env.update(expanded_client_env)
         return env
 
     # ------------------------------------------------------------------

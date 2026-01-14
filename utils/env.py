@@ -89,6 +89,31 @@ def get_all_env() -> dict[str, str | None]:
     return dict(_DOTENV_VALUES)
 
 
+def expand_env_vars(env_dict: dict[str, str]) -> dict[str, str]:
+    """Expand ${VAR_NAME} syntax in environment variable values.
+
+    Replaces ${VAR_NAME} with the actual environment variable value.
+    Uses get_env() to respect PAL_MCP_FORCE_ENV_OVERRIDE setting.
+
+    Args:
+        env_dict: Dictionary with potentially unexpanded ${VAR} values
+
+    Returns:
+        Dictionary with all ${VAR} patterns replaced with actual values
+
+    Example:
+        >>> expand_env_vars({"TOKEN": "${API_KEY}"})
+        {"TOKEN": "actual_api_key_value"}
+    """
+    import re
+
+    expanded = {}
+    for key, value in env_dict.items():
+        # Replace ${VAR} with get_env(VAR) to respect override settings
+        expanded[key] = re.sub(r"\$\{([^}]+)\}", lambda m: get_env(m.group(1), "") or "", value)
+    return expanded
+
+
 @contextmanager
 def suppress_env_vars(*names: str):
     """Temporarily remove environment variables during the context.

@@ -196,6 +196,7 @@ async def test_consensus_multi_model_consultations(monkeypatch, openai_model):
     ModelProviderRegistry.reset_for_testing()
 
 
+@pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.no_mock_provider
 async def test_consensus_auto_mode_with_openrouter_and_gemini(monkeypatch):

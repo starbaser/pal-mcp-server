@@ -60,10 +60,11 @@ class BaseCLIAgent:
         system_prompt: str | None = None,
         files: Sequence[str],
         images: Sequence[str],
+        json_schema: dict | None = None,
     ) -> AgentOutput:
         # Files and images are already embedded into the prompt by the tool; they are
         # accepted here only to keep parity with SimpleTool callers.
-        _ = (files, images)
+        _ = (files, images, json_schema)
         # The runner simply executes the configured CLI command for the selected role.
         command = self._build_command(role=role, system_prompt=system_prompt)
         env = self._build_environment()

@@ -20,6 +20,10 @@
     "codereviewer": {
       "prompt_path": "systemprompts/clink/default_codereviewer.txt",
       "role_args": []
+    },
+    "agency": {
+      "prompt_path": "systemprompts/clink/agency.txt",
+      "role_args": []
     }
   }
 }

@@ -150,6 +150,13 @@ class CLinkTool(SimpleTool):
             "absolute_file_paths": SchemaBuilder.SIMPLE_FIELD_SCHEMAS["absolute_file_paths"],
             "images": SchemaBuilder.COMMON_FIELD_SCHEMAS["images"],
             "continuation_id": SchemaBuilder.COMMON_FIELD_SCHEMAS["continuation_id"],
+            "json_schema": {
+                "type": "object",
+                "description": (
+                    "Optional JSON schema for structured output. When provided, the CLI agent will be "
+                    "instructed to format its response according to this schema. Only supported by Claude CLI."
+                ),
+            },
         }
 
         schema = {
@@ -218,6 +225,7 @@ class CLinkTool(SimpleTool):
                 system_prompt=system_prompt_text if system_prompt_text.strip() else None,
                 files=absolute_file_paths,
                 images=images,
+                json_schema=request.json_schema,
             )
         except CLIAgentError as exc:
             metadata = self._build_error_metadata(client_config, exc)

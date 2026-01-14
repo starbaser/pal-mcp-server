@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Sequence
+
 from clink.models import ResolvedCLIRole
 from clink.parsers.base import ParserError
 
@@ -11,13 +14,39 @@ from .base import AgentOutput, BaseCLIAgent
 class ClaudeAgent(BaseCLIAgent):
     """Claude CLI agent with system-prompt injection support."""
 
-    def _build_command(self, *, role: ResolvedCLIRole, system_prompt: str | None) -> list[str]:
+    async def run(
+        self,
+        *,
+        role: ResolvedCLIRole,
+        prompt: str,
+        system_prompt: str | None = None,
+        files: Sequence[str],
+        images: Sequence[str],
+        json_schema: dict | None = None,
+    ) -> AgentOutput:
+        self._json_schema = json_schema
+        return await super().run(
+            role=role,
+            prompt=prompt,
+            system_prompt=system_prompt,
+            files=files,
+            images=images,
+            json_schema=json_schema,
+        )
+
+    def _build_command(
+        self, *, role: ResolvedCLIRole, system_prompt: str | None, json_schema: dict | None = None
+    ) -> list[str]:
         command = list(self.client.executable)
         command.extend(self.client.internal_args)
         command.extend(self.client.config_args)
 
         if system_prompt and "--append-system-prompt" not in self.client.config_args:
             command.extend(["--append-system-prompt", system_prompt])
+
+        schema_to_use = json_schema if json_schema is not None else getattr(self, "_json_schema", None)
+        if schema_to_use is not None:
+            command.extend(["--json-schema", json.dumps(schema_to_use)])
 
         command.extend(role.role_args)
         return command

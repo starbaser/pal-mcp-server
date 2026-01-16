@@ -317,4 +317,28 @@ isort --check-only .
 - All dependencies from `requirements.txt` installed
 - Proper API keys configured in `.env` file
 
+### Environment Variables Set by PAL MCP
+
+When PAL MCP Server invokes CLI tools through the `clink` tool, it automatically sets:
+
+- **`PAL_MCP_CLINK=1`** - Identifies that the CLI is running through PAL's clink tool
+
+This is useful for Claude Code hooks to distinguish between:
+- **Interactive sessions**: User is actively working in Claude Code
+- **Headless sessions**: Claude Code is being invoked by PAL MCP via clink
+
+**Example - Notification Hook for Interactive Sessions Only:**
+```bash
+#!/bin/bash
+# ~/.config/claude/hooks/user-prompt-submit
+
+# Ignore notifications from headless clink sessions
+if [ -n "$PAL_MCP_CLINK" ]; then
+    exit 0  # Silently exit without notifying
+fi
+
+# Normal notification logic for interactive sessions
+notify-send "Claude Code" "Processing your request..."
+```
+
 This guide provides everything needed to efficiently work with the PAL MCP Server codebase using Claude. Always run quality checks before and after making changes to ensure code integrity.

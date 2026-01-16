@@ -126,6 +126,31 @@ then codereview to verify the implementation"
 5. **Seamless return** - Results flow back into your conversation with full context preserved
 6. **Continuation support** - Future tools and models can reference Gemini's findings via [continuation support](../context-revival.md) within PAL.
 
+## Environment Variables
+
+Clink automatically sets the following environment variable for all CLI invocations:
+
+- **`PAL_MCP_CLINK=1`** - Identifies that the CLI is running through PAL's clink tool
+
+This is useful for:
+- **Claude Code hooks**: Distinguish headless clink sessions from interactive sessions in notification hooks
+- **Custom tooling**: Detect when your CLI is being orchestrated by PAL
+- **Debugging**: Identify clink invocations in logs
+
+**Example - Notification Hook for Interactive Sessions Only:**
+```bash
+#!/bin/bash
+# ~/.config/claude/hooks/user-prompt-submit
+
+# Ignore notifications from headless clink sessions
+if [ -n "$PAL_MCP_CLINK" ]; then
+    exit 0  # Silently exit without notifying
+fi
+
+# Normal notification logic for interactive sessions
+notify-send "Claude Code" "Processing your request..."
+```
+
 ## Best Practices
 
 - **Pre-authenticate CLIs**: Install and configure Gemini CLI first (`npm install -g @google/gemini-cli`)

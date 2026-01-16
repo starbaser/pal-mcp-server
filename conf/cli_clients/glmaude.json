@@ -14,10 +14,6 @@
     "default": {
       "prompt_path": "systemprompts/clink/default.txt",
       "role_args": []
-    },
-    "agency": {
-      "prompt_path": "systemprompts/clink/agency.txt",
-      "role_args": []
     }
   }
 }

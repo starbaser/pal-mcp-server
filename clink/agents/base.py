@@ -203,6 +203,10 @@ class BaseCLIAgent:
         from utils.env import expand_env_vars
 
         env = os.environ.copy()
+
+        # Set marker variable to identify clink invocations
+        env["PAL_MCP_CLINK"] = "1"
+
         expanded_client_env = expand_env_vars(self.client.env)
         env.update(expanded_client_env)
         return env

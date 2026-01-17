@@ -6,24 +6,45 @@ import logging
 import re
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 from mcp.types import TextContent
 from pydantic import BaseModel, Field
 
 from clink import get_registry
+from clink.agent_definitions import (
+    AgentDefinition,
+    AgentDefinitionError,
+    is_agent_role,
+    load_agent_definition,
+    parse_agent_role,
+)
 from clink.agents import AgentOutput, CLIAgentError, create_agent
+from clink.constants import BUILTIN_PROMPTS_DIR
 from clink.models import ResolvedCLIClient, ResolvedCLIRole
 from config import TEMPERATURE_BALANCED
 from tools.models import ToolModelCategory, ToolOutput
 from tools.shared.base_models import COMMON_FIELD_DESCRIPTIONS
 from tools.shared.exceptions import ToolExecutionError
 from tools.simple.base import SchemaBuilder, SimpleTool
+from utils.env import get_env
 
 logger = logging.getLogger(__name__)
 
 MAX_RESPONSE_CHARS = 20_000
 SUMMARY_PATTERN = re.compile(r"<SUMMARY>(.*?)</SUMMARY>", re.IGNORECASE | re.DOTALL)
+
+# Base system prompt applied to all agent roles
+BASE_PROMPT_PATH = BUILTIN_PROMPTS_DIR / "default.txt"
+
+
+def _load_base_prompt() -> str:
+    """Load the base system prompt that applies to all agent roles."""
+    try:
+        return BASE_PROMPT_PATH.read_text(encoding="utf-8").strip()
+    except Exception as exc:
+        logger.warning("Failed to load base prompt from %s: %s", BASE_PROMPT_PATH, exc)
+        return ""
 
 
 class CLinkRequest(BaseModel):
@@ -58,6 +79,10 @@ class CLinkRequest(BaseModel):
             "str, int, float, bool, None). Schema validation is performed by the CLI agent; invalid "
             "schemas will cause the CLI to return an error. Only supported by Claude CLI."
         ),
+    )
+    model: str | None = Field(
+        default=None,
+        description="Model override (e.g., 'opus', 'sonnet', 'haiku'). Overrides CLI client default.",
     )
 
 
@@ -127,8 +152,10 @@ class CLinkTool(SimpleTool):
                 "Configured CLI client name (from conf/cli_clients). Available: " + cli_available + default_text
             )
             role_description = (
-                "Optional role preset defined for the selected CLI (defaults to 'default'). Roles per CLI: "
+                "Role preset or agent definition. Standard roles per CLI: "
                 + "; ".join(role_descriptions)
+                + ". Agent roles: 'agent' (general purpose), 'agent:<name>' (agent by name in .claude/agents/), "
+                + "or 'agent:<absolute_path>' (agent from file path)."
             )
         else:
             cli_description = "Configured CLI client name (from conf/cli_clients)."
@@ -146,7 +173,6 @@ class CLinkTool(SimpleTool):
             },
             "role": {
                 "type": "string",
-                "enum": self._all_roles or ["default"],
                 "description": role_description,
             },
             "absolute_file_paths": SchemaBuilder.SIMPLE_FIELD_SCHEMAS["absolute_file_paths"],
@@ -160,6 +186,10 @@ class CLinkTool(SimpleTool):
                     "str, int, float, bool, None). Schema validation is performed by the CLI agent; invalid "
                     "schemas will cause the CLI to return an error. Only supported by Claude CLI."
                 ),
+            },
+            "model": {
+                "type": "string",
+                "description": "Model override (e.g., 'opus', 'sonnet', 'haiku'). Overrides CLI client default.",
             },
         }
 
@@ -187,7 +217,22 @@ class CLinkTool(SimpleTool):
         if path_error:
             self._raise_tool_error(path_error)
 
-        selected_cli = request.cli_name or self._default_cli_name
+        # Environment variable override takes precedence over request parameter
+        cli_override = get_env("CLINK_CLI_OVERRIDE")
+        if cli_override:
+            if cli_override not in self._cli_names:
+                logger.warning(
+                    "CLINK_CLI_OVERRIDE=%s not in configured clients %s, ignoring override",
+                    cli_override,
+                    self._cli_names,
+                )
+                selected_cli = request.cli_name or self._default_cli_name
+            else:
+                logger.debug("CLINK_CLI_OVERRIDE forcing CLI: %s", cli_override)
+                selected_cli = cli_override
+        else:
+            selected_cli = request.cli_name or self._default_cli_name
+
         if not selected_cli:
             self._raise_tool_error("No CLI clients are configured for clink.")
 
@@ -199,18 +244,38 @@ class CLinkTool(SimpleTool):
         # Save client reference for use in prompt preparation
         self._current_client = client_config
 
-        try:
-            role_config = client_config.get_role(request.role)
-        except KeyError as exc:
-            self._raise_tool_error(str(exc))
+        # Handle agent roles specially
+        agent_definition: AgentDefinition | None = None
+        if is_agent_role(request.role):
+            try:
+                agent_definition = self._resolve_agent_role(request.role)
+            except AgentDefinitionError as exc:
+                self._raise_tool_error(str(exc))
+
+            # Create synthetic role config for agent definitions
+            role_config = ResolvedCLIRole(
+                name=agent_definition.name if agent_definition else "agent",
+                prompt_path=agent_definition.path if agent_definition else Path("<none>"),
+                role_args=[],
+                description=f"Agent: {agent_definition.name}" if agent_definition else "General purpose agent",
+            )
+            # Base prompt + agent-specific content
+            base_prompt = _load_base_prompt()
+            agent_prompt = agent_definition.get_system_prompt() if agent_definition else ""
+            system_prompt_text = f"{base_prompt}\n\n{agent_prompt}".strip() if agent_prompt else base_prompt
+        else:
+            # Standard role resolution (legacy roles use their own prompt without base)
+            try:
+                role_config = client_config.get_role(request.role)
+            except KeyError as exc:
+                self._raise_tool_error(str(exc))
+            system_prompt_text = role_config.prompt_path.read_text(encoding="utf-8")
 
         absolute_file_paths = self.get_request_files(request)
         images = self.get_request_images(request)
         continuation_id = self.get_request_continuation_id(request)
 
         self._model_context = arguments.get("_model_context")
-
-        system_prompt_text = role_config.prompt_path.read_text(encoding="utf-8")
         include_system_prompt = not self._use_external_system_prompt(client_config)
 
         try:
@@ -233,6 +298,7 @@ class CLinkTool(SimpleTool):
                 files=absolute_file_paths,
                 images=images,
                 json_schema=request.json_schema,
+                model=request.model,
             )
         except CLIAgentError as exc:
             metadata = self._build_error_metadata(client_config, exc)
@@ -281,9 +347,28 @@ class CLinkTool(SimpleTool):
         return [TextContent(type="text", text=tool_output.model_dump_json())]
 
     async def prepare_prompt(self, request) -> str:
-        client_config = self._registry.get_client(request.cli_name)
-        role_config = client_config.get_role(request.role)
-        system_prompt_text = role_config.prompt_path.read_text(encoding="utf-8")
+        cli_name = request.cli_name or self._default_cli_name
+        if not cli_name:
+            raise ValueError("No CLI name specified and no default configured")
+        client_config = self._registry.get_client(cli_name)
+
+        # Handle agent roles specially
+        if is_agent_role(request.role):
+            agent_definition = self._resolve_agent_role(request.role)
+            role_config = ResolvedCLIRole(
+                name=agent_definition.name if agent_definition else "agent",
+                prompt_path=agent_definition.path if agent_definition else Path("<none>"),
+                role_args=[],
+                description=f"Agent: {agent_definition.name}" if agent_definition else "General purpose agent",
+            )
+            # Base prompt + agent-specific content
+            base_prompt = _load_base_prompt()
+            agent_prompt = agent_definition.get_system_prompt() if agent_definition else ""
+            system_prompt_text = f"{base_prompt}\n\n{agent_prompt}".strip() if agent_prompt else base_prompt
+        else:
+            role_config = client_config.get_role(request.role)
+            system_prompt_text = role_config.prompt_path.read_text(encoding="utf-8")
+
         include_system_prompt = not self._use_external_system_prompt(client_config)
         return await self._prepare_prompt_for_role(
             request,
@@ -456,7 +541,7 @@ class CLinkTool(SimpleTool):
             metadata["stderr"] = exc.stderr.strip()
         return metadata
 
-    def _raise_tool_error(self, message: str, metadata: dict[str, Any] | None = None) -> None:
+    def _raise_tool_error(self, message: str, metadata: dict[str, Any] | None = None) -> NoReturn:
         error_output = ToolOutput(status="error", content=message, content_type="text", metadata=metadata)
         raise ToolExecutionError(error_output.model_dump_json())
 
@@ -483,3 +568,23 @@ class CLinkTool(SimpleTool):
             except OSError:
                 references.append(f"- {file_path} (unavailable)")
         return "\n".join(references)
+
+    def _resolve_agent_role(self, role: str | None) -> AgentDefinition | None:
+        """Resolve agent role to agent definition.
+
+        Supports patterns:
+        - "agent" - plain general purpose
+        - "agent:researcher" - named agent from .claude/agents/
+        - "agent:/path/to/agent.md" - agent from file path
+        """
+        if role is None or role == "agent":
+            logger.debug("Using general purpose agent (no definition)")
+            return None
+
+        definition = parse_agent_role(role)
+        if not definition:
+            logger.debug("Using general purpose agent (no definition after parse)")
+            return None
+
+        project_dir = Path.cwd()
+        return load_agent_definition(definition, project_dir=project_dir)

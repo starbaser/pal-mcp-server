@@ -9,6 +9,7 @@
 """Simple test script using Anthropic SDK with ZAI endpoint."""
 
 import os
+
 from anthropic import Anthropic
 
 # Get API key from environment
@@ -23,13 +24,7 @@ client = Anthropic(
 )
 
 # Make a simple request
-response = client.messages.create(
-    model="sonnet",
-    max_tokens=1024,
-    messages=[
-        {"role": "user", "content": "what's 2+2"}
-    ]
-)
+response = client.messages.create(model="sonnet", max_tokens=1024, messages=[{"role": "user", "content": "what's 2+2"}])
 
 for block in response.content:
     if block.type == "text":

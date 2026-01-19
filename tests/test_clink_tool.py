@@ -35,6 +35,7 @@ async def test_clink_tool_execute(monkeypatch):
 
     arguments = {
         "prompt": "Summarize the project",
+        "cwd": "/tmp",
         "cli_name": "gemini",
         "role": "default",
         "absolute_file_paths": [],
@@ -93,6 +94,7 @@ async def test_clink_tool_defaults_to_first_cli(monkeypatch):
 
     arguments = {
         "prompt": "Hello",
+        "cwd": "/tmp",
         "absolute_file_paths": [],
         "images": [],
     }
@@ -131,6 +133,7 @@ async def test_clink_tool_truncates_large_output(monkeypatch):
 
     arguments = {
         "prompt": "Summarize",
+        "cwd": "/tmp",
         "cli_name": tool._default_cli_name,
         "absolute_file_paths": [],
         "images": [],
@@ -172,6 +175,7 @@ async def test_clink_tool_truncates_without_summary(monkeypatch):
 
     arguments = {
         "prompt": "Summarize",
+        "cwd": "/tmp",
         "cli_name": tool._default_cli_name,
         "absolute_file_paths": [],
         "images": [],
@@ -216,6 +220,7 @@ async def test_clink_tool_with_json_schema(monkeypatch):
     schema = {"type": "object", "properties": {"result": {"type": "string"}}}
     arguments = {
         "prompt": "Test prompt",
+        "cwd": "/tmp",
         "cli_name": "claude",
         "json_schema": schema,
         "absolute_file_paths": [],
@@ -252,6 +257,7 @@ async def test_clink_tool_with_empty_json_schema(monkeypatch):
 
     arguments = {
         "prompt": "Test",
+        "cwd": "/tmp",
         "cli_name": "claude",
         "json_schema": {},  # Empty schema
         "absolute_file_paths": [],
@@ -289,6 +295,7 @@ async def test_clink_tool_json_schema_backwards_compat(monkeypatch):
 
     arguments = {
         "prompt": "Test",
+        "cwd": "/tmp",
         "cli_name": "claude",
         # No json_schema parameter
         "absolute_file_paths": [],

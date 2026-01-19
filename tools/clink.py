@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, NoReturn
 
 from mcp.types import TextContent
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from clink import get_registry
 from clink.agent_definitions import (
@@ -24,7 +24,7 @@ from clink.constants import BUILTIN_PROMPTS_DIR
 from clink.models import ResolvedCLIClient, ResolvedCLIRole
 from config import TEMPERATURE_BALANCED
 from tools.models import ToolModelCategory, ToolOutput
-from tools.shared.base_models import COMMON_FIELD_DESCRIPTIONS
+from tools.shared.base_models import COMMON_FIELD_DESCRIPTIONS, ToolRequest
 from tools.shared.exceptions import ToolExecutionError
 from tools.simple.base import SchemaBuilder, SimpleTool
 from utils.env import get_env
@@ -47,10 +47,31 @@ def _load_base_prompt() -> str:
         return ""
 
 
-class CLinkRequest(BaseModel):
-    """Request model for clink tool."""
+class CLinkRequest(ToolRequest):
+    """Request model for clink tool.
+
+    Inherits from ToolRequest for common fields (model, continuation_id, images, etc.)
+    and adds clink-specific fields for CLI agent invocation.
+    """
 
     prompt: str = Field(..., description="Prompt forwarded to the target CLI.")
+    cwd: str = Field(
+        ...,
+        description=(
+            "REQUIRED. The absolute path where the agent will execute. This determines:\n"
+            "- Which CLAUDE.md the agent discovers (project context)\n"
+            "- Which .claude/agents/ directory is searched first\n"
+            "- The agent's working directory for all file operations\n\n"
+            "CWD Decision Matrix:\n"
+            "| Scenario | CWD Value |\n"
+            "|----------|----------|\n"
+            "| Working on a project | Project root (e.g., /home/user/dev/myproject) |\n"
+            "| General task, no project | Current working directory |\n"
+            "| Specific directory context | That directory's absolute path |\n\n"
+            "CRITICAL: Always pass the directory where you want the agent to operate. "
+            "Incorrect CWD means the agent misses project-specific instructions and context."
+        ),
+    )
     cli_name: str | None = Field(
         default=None,
         description="Configured CLI client name to invoke. Defaults to the first configured CLI if omitted.",
@@ -63,13 +84,10 @@ class CLinkRequest(BaseModel):
         default_factory=list,
         description=COMMON_FIELD_DESCRIPTIONS["absolute_file_paths"],
     )
-    images: list[str] = Field(
+    # Override images to default to empty list instead of None for CLI compatibility
+    images: list[str] = Field(  # type: ignore[assignment]
         default_factory=list,
         description=COMMON_FIELD_DESCRIPTIONS["images"],
-    )
-    continuation_id: str | None = Field(
-        default=None,
-        description=COMMON_FIELD_DESCRIPTIONS["continuation_id"],
     )
     json_schema: dict | None = Field(
         default=None,
@@ -79,10 +97,6 @@ class CLinkRequest(BaseModel):
             "str, int, float, bool, None). Schema validation is performed by the CLI agent; invalid "
             "schemas will cause the CLI to return an error. Only supported by Claude CLI."
         ),
-    )
-    model: str | None = Field(
-        default=None,
-        description="Model override (e.g., 'opus', 'sonnet', 'haiku'). Overrides CLI client default.",
     )
 
 
@@ -166,6 +180,23 @@ class CLinkTool(SimpleTool):
                 "type": "string",
                 "description": "User request forwarded to the CLI (conversation context is pre-applied).",
             },
+            "cwd": {
+                "type": "string",
+                "description": (
+                    "REQUIRED. The absolute path where the agent will execute. This determines:\n"
+                    "- Which CLAUDE.md the agent discovers (project context)\n"
+                    "- Which .claude/agents/ directory is searched first\n"
+                    "- The agent's working directory for all file operations\n\n"
+                    "CWD Decision Matrix:\n"
+                    "| Scenario | CWD Value |\n"
+                    "|----------|----------|\n"
+                    "| Working on a project | Project root (e.g., /home/user/dev/myproject) |\n"
+                    "| General task, no project | Current working directory |\n"
+                    "| Specific directory context | That directory's absolute path |\n\n"
+                    "CRITICAL: Always pass the directory where you want the agent to operate. "
+                    "Incorrect CWD means the agent misses project-specific instructions and context."
+                ),
+            },
             "cli_name": {
                 "type": "string",
                 "enum": self._cli_names,
@@ -196,7 +227,7 @@ class CLinkTool(SimpleTool):
         schema = {
             "type": "object",
             "properties": properties,
-            "required": ["prompt"],
+            "required": ["prompt", "cwd"],
             "additionalProperties": False,
         }
 
@@ -216,6 +247,15 @@ class CLinkTool(SimpleTool):
         path_error = self._validate_file_paths(request)
         if path_error:
             self._raise_tool_error(path_error)
+
+        # Validate cwd parameter
+        cwd_path = Path(request.cwd)
+        if not cwd_path.is_absolute():
+            self._raise_tool_error(f"cwd must be an absolute path, got: {request.cwd}")
+        if not cwd_path.exists():
+            self._raise_tool_error(f"cwd path does not exist: {request.cwd}")
+        if not cwd_path.is_dir():
+            self._raise_tool_error(f"cwd must be a directory, not a file: {request.cwd}")
 
         # Environment variable override takes precedence over request parameter
         cli_override = get_env("CLINK_CLI_OVERRIDE")
@@ -248,7 +288,7 @@ class CLinkTool(SimpleTool):
         agent_definition: AgentDefinition | None = None
         if is_agent_role(request.role):
             try:
-                agent_definition = self._resolve_agent_role(request.role)
+                agent_definition = self._resolve_agent_role(request.role, project_dir=cwd_path)
             except AgentDefinitionError as exc:
                 self._raise_tool_error(str(exc))
 
@@ -299,6 +339,7 @@ class CLinkTool(SimpleTool):
                 images=images,
                 json_schema=request.json_schema,
                 model=request.model,
+                cwd=request.cwd,
             )
         except CLIAgentError as exc:
             metadata = self._build_error_metadata(client_config, exc)
@@ -353,8 +394,9 @@ class CLinkTool(SimpleTool):
         client_config = self._registry.get_client(cli_name)
 
         # Handle agent roles specially
+        project_dir = Path(request.cwd) if hasattr(request, "cwd") and request.cwd else None
         if is_agent_role(request.role):
-            agent_definition = self._resolve_agent_role(request.role)
+            agent_definition = self._resolve_agent_role(request.role, project_dir=project_dir)
             role_config = ResolvedCLIRole(
                 name=agent_definition.name if agent_definition else "agent",
                 prompt_path=agent_definition.path if agent_definition else Path("<none>"),
@@ -569,13 +611,18 @@ class CLinkTool(SimpleTool):
                 references.append(f"- {file_path} (unavailable)")
         return "\n".join(references)
 
-    def _resolve_agent_role(self, role: str | None) -> AgentDefinition | None:
+    def _resolve_agent_role(self, role: str | None, project_dir: Path | None = None) -> AgentDefinition | None:
         """Resolve agent role to agent definition.
 
         Supports patterns:
         - "agent" - plain general purpose
         - "agent:researcher" - named agent from .claude/agents/
         - "agent:/path/to/agent.md" - agent from file path
+
+        Args:
+            role: The role string to resolve
+            project_dir: The project directory to search for agent definitions.
+                         If None, defaults to current working directory.
         """
         if role is None or role == "agent":
             logger.debug("Using general purpose agent (no definition)")
@@ -586,5 +633,5 @@ class CLinkTool(SimpleTool):
             logger.debug("Using general purpose agent (no definition after parse)")
             return None
 
-        project_dir = Path.cwd()
-        return load_agent_definition(definition, project_dir=project_dir)
+        resolved_project_dir = project_dir if project_dir is not None else Path.cwd()
+        return load_agent_definition(definition, project_dir=resolved_project_dir)

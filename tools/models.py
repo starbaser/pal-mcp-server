@@ -48,7 +48,7 @@ class ToolOutput(BaseModel):
     content_type: Literal["text", "markdown", "json"] = "text"
     metadata: Optional[dict[str, Any]] = Field(default_factory=dict)
     continuation_offer: Optional[ContinuationOffer] = Field(
-        None, description="Optional offer for Agent to continue conversation"
+        default=None, description="Optional offer for Agent to continue conversation"
     )
 
 

@@ -24,6 +24,7 @@ class ClaudeAgent(BaseCLIAgent):
         images: Sequence[str],
         json_schema: dict | None = None,
         model: str | None = None,
+        cwd: str | None = None,
     ) -> AgentOutput:
         self._json_schema = json_schema
         self._model = model
@@ -35,6 +36,7 @@ class ClaudeAgent(BaseCLIAgent):
             images=images,
             json_schema=json_schema,
             model=model,
+            cwd=cwd,
         )
 
     def _build_command(

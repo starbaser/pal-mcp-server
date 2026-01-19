@@ -62,6 +62,7 @@ class BaseCLIAgent:
         images: Sequence[str],
         json_schema: dict | None = None,
         model: str | None = None,
+        cwd: str | None = None,
     ) -> AgentOutput:
         # Files and images are already embedded into the prompt by the tool; they are
         # accepted here only to keep parity with SimpleTool callers.
@@ -82,7 +83,8 @@ class BaseCLIAgent:
 
         sanitized_command = list(command)
 
-        cwd = str(self.client.working_dir) if self.client.working_dir else None
+        # Use explicit cwd parameter if provided, otherwise fall back to client working_dir
+        effective_cwd = cwd if cwd else (str(self.client.working_dir) if self.client.working_dir else None)
         limit = DEFAULT_STREAM_LIMIT
 
         stdout_text = ""
@@ -106,8 +108,8 @@ class BaseCLIAgent:
             sanitized_command = list(command_with_output_flag)
 
         self._logger.debug("Executing CLI command: %s", " ".join(sanitized_command))
-        if cwd:
-            self._logger.debug("Working directory: %s", cwd)
+        if effective_cwd:
+            self._logger.debug("Working directory: %s", effective_cwd)
 
         try:
             process = await asyncio.create_subprocess_exec(
@@ -115,7 +117,7 @@ class BaseCLIAgent:
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                cwd=cwd,
+                cwd=effective_cwd,
                 limit=limit,
                 env=env,
             )
@@ -137,6 +139,7 @@ class BaseCLIAgent:
 
         duration = time.monotonic() - start_time
         return_code = process.returncode
+        assert return_code is not None, "returncode should be set after communicate()"
         stdout_text = stdout_bytes.decode("utf-8", errors="replace")
         stderr_text = stderr_bytes.decode("utf-8", errors="replace")
 

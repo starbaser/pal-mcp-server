@@ -47,12 +47,64 @@ class AgentDefinition:
         self.frontmatter = frontmatter or {}
 
     def get_system_prompt(self) -> str:
-        """Extract content without frontmatter for use as system prompt."""
+        """Get system prompt with @ imports resolved and appended."""
+        content = self._strip_frontmatter()
+        imports = self._extract_imports(content)
+        resolved_blocks = self._resolve_imports_to_blocks(imports)
+
+        if resolved_blocks:
+            # Append resolved imports AFTER the agent definition (Claude Code style)
+            return f"{content}\n\n\n{resolved_blocks}"
+        return content
+
+    def _strip_frontmatter(self) -> str:
+        """Extract content without frontmatter."""
         match = FRONTMATTER_PATTERN.match(self.content)
         if match:
-            # Return content after frontmatter
             return self.content[match.end() :].strip()
         return self.content.strip()
+
+    def _extract_imports(self, content: str) -> list[tuple[str, Path | None]]:
+        """Extract @path references and resolve their paths."""
+        # Match @path.md, @~/path.md, @./path.md
+        pattern = r"@(~?\.?/?[\w./\-]+\.md)\b"
+        imports = []
+        seen: set[str] = set()  # Deduplicate
+        for match in re.finditer(pattern, content):
+            path_str = match.group(1)
+            if path_str not in seen:
+                seen.add(path_str)
+                resolved = self._resolve_import_path(path_str)
+                imports.append((path_str, resolved))
+        return imports
+
+    def _resolve_imports_to_blocks(self, imports: list[tuple[str, Path | None]]) -> str:
+        """Format resolved imports as Claude-style content blocks."""
+        blocks = []
+        for _, resolved_path in imports:
+            if resolved_path and resolved_path.exists():
+                try:
+                    file_content = resolved_path.read_text(encoding="utf-8")
+                    block = f"Contents of {resolved_path} (agent imported context):\n\n{file_content}"
+                    blocks.append(block)
+                except Exception:
+                    pass  # Skip unreadable files
+        return "\n\n".join(blocks)
+
+    def _resolve_import_path(self, path_str: str) -> Path | None:
+        """Resolve import path relative to agent file location."""
+        if path_str.startswith("~"):
+            return Path(path_str).expanduser()
+
+        path = Path(path_str)
+        if path.is_absolute():
+            return path
+
+        # Relative to agent file's directory
+        if self.path:
+            return (self.path.parent / path).resolve()
+
+        return None
 
     def __repr__(self) -> str:
         return f"AgentDefinition(name={self.name!r}, path={self.path})"

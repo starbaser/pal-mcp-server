@@ -1,0 +1,32 @@
+# Clark Configuration Example
+
+[core]
+log_level = "info"
+
+[archive]
+period = "30d"
+path = "~/.local/share/clark/archive.tar.gz"
+include = ["**/*.jsonl"]
+auto_clean = false
+
+[neo4j]
+enabled = true
+uri = "bolt://localhost:7687"
+username = "neo4j"
+password = "password"
+max_connection_pool_size = 50
+connection_timeout = 30
+
+# Docker container management (optional)
+# When enabled, clarkd automatically manages a Neo4j container
+[neo4j.container]
+enabled = true
+image = "neo4j"
+tag = "5.28-community"
+name = "clark-neo4j"
+volume = "clark-neo4j-data"
+bolt_port = 7687
+http_port = 7474
+stop_on_exit = false
+startup_timeout = "60s"
+pull_policy = "if_not_present"  # "always", "if_not_present", or "never"

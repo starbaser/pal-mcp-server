@@ -152,25 +152,39 @@ class CLinkTool(SimpleTool):
         # Surface configured CLI names and roles directly in the schema so MCP clients
         # (and downstream agents) can discover available options without consulting
         # a separate registry call.
-        role_descriptions = []
-        for name in self._cli_names:
-            roles = ", ".join(sorted(self._role_map.get(name, ["default"]))) or "default"
-            role_descriptions.append(f"{name}: {roles}")
 
-        if role_descriptions:
-            cli_available = ", ".join(self._cli_names) if self._cli_names else "(none configured)"
+        if self._cli_names:
+            cli_available = ", ".join(self._cli_names)
             default_text = (
                 f" Default: {self._default_cli_name}." if self._default_cli_name and len(self._cli_names) <= 1 else ""
             )
             cli_description = (
                 "Configured CLI client name (from conf/cli_clients). Available: " + cli_available + default_text
             )
-            role_description = (
-                "Role preset or agent definition. Standard roles per CLI: "
-                + "; ".join(role_descriptions)
-                + ". Agent roles: 'agent' (general purpose), 'agent:<name>' (agent by name in .claude/agents/), "
-                + "or 'agent:<absolute_path>' (agent from file path)."
-            )
+
+            # Check if all CLIs have identical roles - collapse if so
+            unique_role_sets = set(tuple(sorted(roles)) for roles in self._role_map.values())
+            if len(unique_role_sets) == 1:
+                # All identical - collapse
+                shared_roles = ", ".join(sorted(self._all_roles))
+                role_description = (
+                    "Role preset or agent definition. "
+                    "Agent roles: 'agent' (general purpose), 'agent:<name>' (agent by name in .claude/agents/), "
+                    "or 'agent:<absolute_path>' (agent from file path). "
+                    f"Standard roles (all CLIs): {shared_roles}."
+                )
+            else:
+                # Different roles per CLI - list each
+                role_descriptions = []
+                for name in self._cli_names:
+                    roles = ", ".join(sorted(self._role_map.get(name, ["default"]))) or "default"
+                    role_descriptions.append(f"{name}: {roles}")
+                role_description = (
+                    "Role preset or agent definition. "
+                    "Agent roles: 'agent' (general purpose), 'agent:<name>' (agent by name in .claude/agents/), "
+                    "or 'agent:<absolute_path>' (agent from file path). "
+                    "Standard roles per CLI: " + "; ".join(role_descriptions) + "."
+                )
         else:
             cli_description = "Configured CLI client name (from conf/cli_clients)."
             role_description = "Optional role preset defined for the selected CLI (defaults to 'default')."
@@ -220,7 +234,7 @@ class CLinkTool(SimpleTool):
             },
             "model": {
                 "type": "string",
-                "description": "Model override (e.g., 'opus', 'sonnet', 'haiku'). Overrides CLI client default.",
+                "description": "Optional model override passed to the CLI. Leave empty to use CLI default.",
             },
         }
 

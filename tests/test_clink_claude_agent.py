@@ -134,3 +134,25 @@ async def test_claude_agent_rejects_non_serializable_schema(monkeypatch, claude_
             images=[],
             json_schema=invalid_schema,
         )
+
+
+@pytest.mark.asyncio
+async def test_claude_agent_parses_structured_output(monkeypatch, claude_agent):
+    """Parser extracts structured_output when result is empty (json-schema mode)."""
+    agent, role = claude_agent
+    stdout_payload = json.dumps(
+        {
+            "type": "result",
+            "subtype": "success",
+            "is_error": False,
+            "result": "",
+            "structured_output": {"status": "ok", "data": [1, 2, 3]},
+        }
+    ).encode()
+    process = DummyProcess(stdout=stdout_payload)
+
+    result = await _run_agent_with_process(monkeypatch, agent, role, process)
+
+    assert '"status": "ok"' in result.parsed.content
+    assert '"data"' in result.parsed.content
+    assert result.parsed.metadata["is_error"] is False

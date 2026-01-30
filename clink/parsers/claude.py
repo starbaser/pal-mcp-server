@@ -60,6 +60,14 @@ class ClaudeJSONParser(BaseParser):
         if content:
             return ParsedCLIResponse(content=content, metadata=metadata)
 
+        # Check for structured_output (used with --json-schema)
+        structured_output = payload.get("structured_output")
+        if structured_output is not None:
+            return ParsedCLIResponse(
+                content=json.dumps(structured_output, indent=2),
+                metadata=metadata,
+            )
+
         message = self._extract_message(payload)
         if message is None and assistant_entry and assistant_entry is not payload:
             message = self._extract_message(assistant_entry)

@@ -131,8 +131,14 @@ class ClinkRegistry:
 
         normalized_name = raw.name.strip()
         internal_defaults = INTERNAL_DEFAULTS.get(normalized_name.lower())
+        if internal_defaults is None and raw.command:
+            # Fall back to command field to infer CLI type
+            internal_defaults = INTERNAL_DEFAULTS.get(raw.command.lower())
         if internal_defaults is None:
-            raise RegistryLoadError(f"CLI '{raw.name}' is not supported by clink")
+            available = ", ".join(sorted(INTERNAL_DEFAULTS.keys()))
+            raise RegistryLoadError(
+                f"CLI '{raw.name}' is not supported. Use a name or command matching: {available}"
+            )
 
         executable = self._resolve_executable(raw, internal_defaults, source_path)
 

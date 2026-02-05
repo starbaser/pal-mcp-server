@@ -141,6 +141,11 @@ def _calculate_mcp_prompt_limit() -> int:
 
 MCP_PROMPT_SIZE_LIMIT = _calculate_mcp_prompt_limit()
 
+# Maximum token count for MCP tool responses.
+# When a clink agent response exceeds this limit, the content is saved to a file
+# and a reference is returned instead.
+MAX_MCP_OUTPUT_TOKENS = int(get_env("MAX_MCP_OUTPUT_TOKENS") or 25_000)
+
 # Language/Locale Configuration
 # LOCALE: Language/locale specification for AI responses
 # When set, all AI tools will respond in the specified language while

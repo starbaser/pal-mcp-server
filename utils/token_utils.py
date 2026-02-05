@@ -1,13 +1,23 @@
 """
-Token counting utilities for managing API context limits
-
-This module provides functions for estimating token counts to ensure
-requests stay within the Gemini API's context window limits.
-
-Note: The estimation uses a simple character-to-token ratio which is
-approximate. For production systems requiring precise token counts,
-consider using the actual tokenizer for the specific model.
+Token counting utilities for managing API context limits.
 """
+
+from __future__ import annotations
+
+import functools
+
+
+@functools.lru_cache(maxsize=1)
+def _get_encoding():
+    import tiktoken
+    return tiktoken.get_encoding("cl100k_base")
+
+
+def count_tokens(text: str) -> int:
+    """Count tokens using the cl100k_base tiktoken encoding."""
+    if not text:
+        return 0
+    return len(_get_encoding().encode(text))
 
 # Default fallback for token limit (conservative estimate)
 DEFAULT_CONTEXT_WINDOW = 200_000  # Conservative fallback for unknown models

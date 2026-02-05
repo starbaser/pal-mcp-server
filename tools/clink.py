@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-import re
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, NoReturn
@@ -22,7 +22,7 @@ from clink.agent_definitions import (
 from clink.agents import AgentOutput, CLIAgentError, create_agent
 from clink.constants import BUILTIN_PROMPTS_DIR
 from clink.models import ResolvedCLIClient, ResolvedCLIRole
-from config import TEMPERATURE_BALANCED
+from config import MAX_MCP_OUTPUT_TOKENS, TEMPERATURE_BALANCED
 from tools.models import ToolModelCategory, ToolOutput
 from tools.shared.base_models import COMMON_FIELD_DESCRIPTIONS, ToolRequest
 from tools.shared.exceptions import ToolExecutionError
@@ -30,9 +30,6 @@ from tools.simple.base import SchemaBuilder, SimpleTool
 from utils.env import get_env
 
 logger = logging.getLogger(__name__)
-
-MAX_RESPONSE_CHARS = 20_000
-SUMMARY_PATTERN = re.compile(r"<SUMMARY>(.*?)</SUMMARY>", re.IGNORECASE | re.DOTALL)
 
 # Base system prompt applied to all agent roles
 BASE_PROMPT_PATH = BUILTIN_PROMPTS_DIR / "default.txt"
@@ -355,6 +352,9 @@ class CLinkTool(SimpleTool):
             client_config,
             result.parsed.content,
             metadata,
+            cwd=request.cwd,
+            is_json=request.json_schema is not None,
+            session_id=result.parsed.metadata.get("session_id"),
         )
 
         model_info = {
@@ -484,73 +484,49 @@ class CLinkTool(SimpleTool):
         client: ResolvedCLIClient,
         content: str,
         metadata: dict[str, Any],
+        *,
+        cwd: str,
+        is_json: bool = False,
+        session_id: str | None = None,
     ) -> tuple[str, dict[str, Any]]:
-        if len(content) <= MAX_RESPONSE_CHARS:
+        from utils.token_utils import count_tokens
+
+        token_count = count_tokens(content)
+        if token_count <= MAX_MCP_OUTPUT_TOKENS:
             return content, metadata
 
-        summary = self._extract_summary(content)
-        if summary:
-            summary_text = summary
-            if len(summary_text) > MAX_RESPONSE_CHARS:
-                logger.debug(
-                    "Clink summary from %s exceeded %d chars; truncating summary to fit.",
-                    client.name,
-                    MAX_RESPONSE_CHARS,
-                )
-                summary_text = summary_text[:MAX_RESPONSE_CHARS]
-            summary_metadata = self._prune_metadata(metadata, client, reason="summary")
-            summary_metadata.update(
-                {
-                    "output_summarized": True,
-                    "output_original_length": len(content),
-                    "output_summary_length": len(summary_text),
-                    "output_limit": MAX_RESPONSE_CHARS,
-                }
-            )
-            logger.info(
-                "Clink compressed %s output via <SUMMARY>: original=%d chars, summary=%d chars",
-                client.name,
-                len(content),
-                len(summary_text),
-            )
-            return summary_text, summary_metadata
+        file_id = session_id or uuid.uuid4().hex[:12]
+        ext = ".json" if is_json else ".md"
+        output_dir = Path(cwd) / ".claude" / "output"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        output_path = output_dir / f"{file_id}{ext}"
+        output_path.write_text(content, encoding="utf-8")
 
-        truncated_metadata = self._prune_metadata(metadata, client, reason="truncated")
-        truncated_metadata.update(
+        logger.info(
+            "Clink offloaded %s output to %s: %d tokens exceeds limit of %d",
+            client.name,
+            output_path,
+            token_count,
+            MAX_MCP_OUTPUT_TOKENS,
+        )
+
+        offload_metadata = self._prune_metadata(metadata, client, reason="offloaded")
+        offload_metadata.update(
             {
-                "output_truncated": True,
-                "output_original_length": len(content),
-                "output_limit": MAX_RESPONSE_CHARS,
+                "output_offloaded": True,
+                "output_file": str(output_path),
+                "output_token_count": token_count,
+                "output_limit": MAX_MCP_OUTPUT_TOKENS,
             }
         )
 
-        excerpt_limit = min(4000, MAX_RESPONSE_CHARS // 2)
-        excerpt = content[:excerpt_limit]
-        truncated_metadata["output_excerpt_length"] = len(excerpt)
-
-        logger.warning(
-            "Clink truncated %s output: original=%d chars exceeds limit=%d; excerpt_length=%d",
-            client.name,
-            len(content),
-            MAX_RESPONSE_CHARS,
-            len(excerpt),
-        )
-
         message = (
-            f"CLI '{client.name}' produced {len(content)} characters, exceeding the configured clink limit "
-            f"({MAX_RESPONSE_CHARS} characters). The full output was suppressed to stay within MCP response caps. "
-            "Please narrow the request (review fewer files, summarize results) or run the CLI directly for the full log.\n\n"
-            f"--- Begin excerpt ({len(excerpt)} of {len(content)} chars) ---\n{excerpt}\n--- End excerpt ---"
+            f"The agent response exceeded the MCP output token limit "
+            f"({token_count} tokens > {MAX_MCP_OUTPUT_TOKENS} limit).\n"
+            f"Full output saved to: {output_path}"
         )
 
-        return message, truncated_metadata
-
-    def _extract_summary(self, content: str) -> str | None:
-        match = SUMMARY_PATTERN.search(content)
-        if not match:
-            return None
-        summary = match.group(1).strip()
-        return summary or None
+        return message, offload_metadata
 
     def _prune_metadata(
         self,

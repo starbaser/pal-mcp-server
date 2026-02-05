@@ -1,11 +1,13 @@
 import json
+from pathlib import Path
 
 import pytest
 
 from clink import get_registry
 from clink.agents import AgentOutput
 from clink.parsers.base import ParsedCLIResponse
-from tools.clink import MAX_RESPONSE_CHARS, CLinkTool
+from config import MAX_MCP_OUTPUT_TOKENS
+from tools.clink import CLinkTool
 
 
 @pytest.mark.asyncio
@@ -107,15 +109,18 @@ async def test_clink_tool_defaults_to_first_cli(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_clink_tool_truncates_large_output(monkeypatch):
+async def test_clink_tool_offloads_large_output(monkeypatch, tmp_path):
     tool = CLinkTool()
 
-    summary_section = "<SUMMARY>This is the condensed summary.</SUMMARY>"
-    long_text = "A" * (MAX_RESPONSE_CHARS + 500) + summary_section
+    # Generate text that exceeds the token limit (~4 chars per token)
+    long_text = "word " * (MAX_MCP_OUTPUT_TOKENS + 1000)
 
     async def fake_run(**kwargs):
         return AgentOutput(
-            parsed=ParsedCLIResponse(content=long_text, metadata={"events": ["event1", "event2"]}),
+            parsed=ParsedCLIResponse(
+                content=long_text,
+                metadata={"events": ["event1", "event2"], "session_id": "test-session-123"},
+            ),
             sanitized_command=["codex"],
             returncode=0,
             stdout="{}",
@@ -133,7 +138,7 @@ async def test_clink_tool_truncates_large_output(monkeypatch):
 
     arguments = {
         "prompt": "Summarize",
-        "cwd": "/tmp",
+        "cwd": str(tmp_path),
         "cli_name": tool._default_cli_name,
         "absolute_file_paths": [],
         "images": [],
@@ -142,53 +147,18 @@ async def test_clink_tool_truncates_large_output(monkeypatch):
     result = await tool.execute(arguments)
     payload = json.loads(result[0].text)
     assert payload["status"] in {"success", "continuation_available"}
-    assert payload["content"].strip() == "This is the condensed summary."
+    assert "exceeded the MCP output token limit" in payload["content"]
+
     metadata = payload.get("metadata", {})
-    assert metadata.get("output_summarized") is True
-    assert metadata.get("events_removed_for_normal") is True
-    assert metadata.get("output_original_length") == len(long_text)
+    assert metadata.get("output_offloaded") is True
+    assert metadata.get("output_limit") == MAX_MCP_OUTPUT_TOKENS
 
-
-@pytest.mark.asyncio
-async def test_clink_tool_truncates_without_summary(monkeypatch):
-    tool = CLinkTool()
-
-    long_text = "B" * (MAX_RESPONSE_CHARS + 1000)
-
-    async def fake_run(**kwargs):
-        return AgentOutput(
-            parsed=ParsedCLIResponse(content=long_text, metadata={"events": ["event"]}),
-            sanitized_command=["codex"],
-            returncode=0,
-            stdout="{}",
-            stderr="",
-            duration_seconds=0.2,
-            parser_name="codex_jsonl",
-            output_file_content=None,
-        )
-
-    class DummyAgent:
-        async def run(self, **kwargs):
-            return await fake_run(**kwargs)
-
-    monkeypatch.setattr("tools.clink.create_agent", lambda client: DummyAgent())
-
-    arguments = {
-        "prompt": "Summarize",
-        "cwd": "/tmp",
-        "cli_name": tool._default_cli_name,
-        "absolute_file_paths": [],
-        "images": [],
-    }
-
-    result = await tool.execute(arguments)
-    payload = json.loads(result[0].text)
-    assert payload["status"] in {"success", "continuation_available"}
-    assert "exceeding the configured clink limit" in payload["content"]
-    metadata = payload.get("metadata", {})
-    assert metadata.get("output_truncated") is True
-    assert metadata.get("events_removed_for_normal") is True
-    assert metadata.get("output_original_length") == len(long_text)
+    # Verify file was written with correct content
+    output_file = Path(metadata["output_file"])
+    assert output_file.exists()
+    assert output_file.read_text(encoding="utf-8") == long_text
+    assert output_file.suffix == ".md"
+    assert output_file.parent == tmp_path / ".claude" / "output"
 
 
 @pytest.mark.asyncio

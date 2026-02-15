@@ -169,7 +169,8 @@ class CLinkTool(SimpleTool):
                 "Role preset or agent definition. Standard roles per CLI: "
                 + "; ".join(role_descriptions)
                 + ". Agent roles: 'agent' (general purpose), 'agent:<name>' (agent by name in .claude/agents/), "
-                + "or 'agent:<absolute_path>' (agent from file path)."
+                + "'agent:<absolute_path>' (agent from file path), "
+                + "or 'agent:<relative_path>' (resolved relative to cwd, e.g. 'agent:./agents/custom.md')."
             )
         else:
             cli_description = "Configured CLI client name (from conf/cli_clients)."
@@ -668,12 +669,13 @@ class CLinkTool(SimpleTool):
         Supports patterns:
         - "agent" - plain general purpose
         - "agent:researcher" - named agent from .claude/agents/
-        - "agent:/path/to/agent.md" - agent from file path
+        - "agent:/path/to/agent.md" - agent from absolute file path
+        - "agent:./relative/agent.md" - agent from path relative to cwd
 
         Args:
             role: The role string to resolve
-            project_dir: The project directory to search for agent definitions.
-                         If None, defaults to current working directory.
+            project_dir: The project directory (resolved cwd) used for agent
+                         name search and relative path resolution.
         """
         if role is None or role == "agent":
             logger.debug("Using general purpose agent (no definition)")

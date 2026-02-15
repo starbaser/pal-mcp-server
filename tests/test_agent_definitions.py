@@ -1,8 +1,14 @@
-"""Tests for agent definition @ import resolution."""
+"""Tests for agent definition loading and @ import resolution."""
 
+import pytest
 from pathlib import Path
 
-from clink.agent_definitions import AgentDefinition
+from clink.agent_definitions import (
+    AgentDefinition,
+    AgentDefinitionError,
+    _is_relative_path,
+    load_agent_definition,
+)
 
 
 def load_agent_definition_from_path(path: Path) -> AgentDefinition:
@@ -134,3 +140,86 @@ class TestAgentImportResolution:
 
         assert "# Absolute Import" in prompt
         assert "Contents of" in prompt
+
+
+class TestIsRelativePath:
+    """Tests for _is_relative_path helper."""
+
+    def test_dot_slash_prefix(self):
+        assert _is_relative_path("./agents/custom.md") is True
+
+    def test_dot_dot_slash_prefix(self):
+        assert _is_relative_path("../shared/agent.md") is True
+
+    def test_contains_slash(self):
+        assert _is_relative_path("subdir/agent.md") is True
+
+    def test_plain_name(self):
+        assert _is_relative_path("researcher") is False
+
+    def test_name_with_extension(self):
+        assert _is_relative_path("custom.md") is False
+
+    def test_name_with_dots(self):
+        assert _is_relative_path("my.agent.v2") is False
+
+
+class TestLoadAgentDefinitionRelativePath:
+    """Tests for load_agent_definition with relative file paths."""
+
+    def test_dot_slash_relative(self, tmp_path):
+        """./path resolves relative to project_dir."""
+        agent_file = tmp_path / "my-agent.md"
+        agent_file.write_text("---\nname: myagent\n---\n\n# My Agent")
+
+        defn = load_agent_definition("./my-agent.md", project_dir=tmp_path)
+        assert defn.name == "myagent"
+        assert "# My Agent" in defn.content
+
+    def test_dot_dot_slash_relative(self, tmp_path):
+        """../path resolves relative to project_dir."""
+        agent_file = tmp_path / "shared" / "agent.md"
+        agent_file.parent.mkdir()
+        agent_file.write_text("---\nname: shared\n---\n\n# Shared Agent")
+
+        subdir = tmp_path / "project"
+        subdir.mkdir()
+
+        defn = load_agent_definition("../shared/agent.md", project_dir=subdir)
+        assert defn.name == "shared"
+
+    def test_subdir_slash_relative(self, tmp_path):
+        """subdir/file resolves relative to project_dir."""
+        agents_dir = tmp_path / "agents"
+        agents_dir.mkdir()
+        agent_file = agents_dir / "custom.md"
+        agent_file.write_text("---\nname: custom\n---\n\n# Custom Agent")
+
+        defn = load_agent_definition("agents/custom.md", project_dir=tmp_path)
+        assert defn.name == "custom"
+
+    def test_relative_path_not_found(self, tmp_path):
+        """Relative path to nonexistent file raises error."""
+        with pytest.raises(AgentDefinitionError, match="not found"):
+            load_agent_definition("./nonexistent.md", project_dir=tmp_path)
+
+    def test_relative_path_no_project_dir(self):
+        """Relative path without project_dir raises error."""
+        with pytest.raises(AgentDefinitionError, match="no cwd provided"):
+            load_agent_definition("./agent.md", project_dir=None)
+
+    def test_relative_path_is_directory(self, tmp_path):
+        """Relative path pointing to a directory raises error."""
+        (tmp_path / "not-a-file").mkdir()
+        with pytest.raises(AgentDefinitionError, match="not a file"):
+            load_agent_definition("./not-a-file", project_dir=tmp_path)
+
+    def test_plain_name_still_searches_by_name(self, tmp_path):
+        """Plain names without slashes still use frontmatter search."""
+        agents_dir = tmp_path / ".claude" / "agents"
+        agents_dir.mkdir(parents=True)
+        agent_file = agents_dir / "my-agent.md"
+        agent_file.write_text("---\nname: researcher\n---\n\n# Researcher Agent")
+
+        defn = load_agent_definition("researcher", project_dir=tmp_path)
+        assert defn.name == "researcher"

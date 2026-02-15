@@ -200,15 +200,27 @@ def find_agent_file_by_name(agent_name: str, project_dir: Path | None = None) ->
     return None
 
 
+def _is_relative_path(definition: str) -> bool:
+    """Check if a definition string looks like a relative file path.
+
+    Relative paths are distinguished from agent names by containing
+    path separators or explicit relative prefixes (./  ../).
+    """
+    return definition.startswith("./") or definition.startswith("../") or "/" in definition
+
+
 def load_agent_definition(
     definition: str,
     project_dir: Path | None = None,
 ) -> AgentDefinition:
-    """Load agent definition from name or path.
+    """Load agent definition from name, absolute path, or relative path.
 
     Args:
-        definition: Agent name or absolute path to agent file
-        project_dir: Optional project directory for relative path resolution
+        definition: Agent name, absolute path, or relative path to agent file.
+            Relative paths (containing '/' or starting with './' or '../')
+            are resolved against project_dir (the clink cwd).
+        project_dir: Project directory used for agent name search and
+            relative path resolution (the resolved clink cwd)
 
     Returns:
         AgentDefinition instance
@@ -226,6 +238,25 @@ def load_agent_definition(
             raise AgentDefinitionError(f"Agent definition path is not a file: {path}")
 
         logger.debug("Loading agent definition from absolute path: %s", path)
+
+    elif _is_relative_path(definition):
+        # Relative file path - resolve against project_dir (cwd)
+        if not project_dir:
+            raise AgentDefinitionError(
+                f"Cannot resolve relative agent path '{definition}': no cwd provided"
+            )
+        path = (project_dir / path).resolve()
+        if not path.exists():
+            raise AgentDefinitionError(
+                f"Agent definition file not found: {definition} "
+                f"(resolved to {path})"
+            )
+        if not path.is_file():
+            raise AgentDefinitionError(
+                f"Agent definition path is not a file: {definition} "
+                f"(resolved to {path})"
+            )
+        logger.debug("Loading agent definition from relative path: %s -> %s", definition, path)
 
     else:
         # Treat as agent name - search by frontmatter
@@ -274,7 +305,8 @@ def parse_agent_role(role: str) -> str | None:
     """Extract definition from agent role string.
 
     Args:
-        role: Role string (e.g., "agent", "agent:researcher", "agent:/path/to/agent.md")
+        role: Role string (e.g., "agent", "agent:researcher",
+            "agent:/path/to/agent.md", "agent:./relative/agent.md")
 
     Returns:
         Agent definition string (name or path), or None for plain "agent"

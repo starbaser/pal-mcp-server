@@ -52,7 +52,7 @@ async def test_clink_tool_execute(monkeypatch):
     assert "Hello from Gemini" in payload["content"]
     metadata = payload.get("metadata", {})
     assert metadata.get("cli_name") == "gemini"
-    assert metadata.get("command") == ["gemini", "-o", "json"]
+    assert "command" not in metadata
 
 
 def test_registry_lists_roles():
@@ -105,7 +105,7 @@ async def test_clink_tool_defaults_to_first_cli(monkeypatch):
     payload = json.loads(result[0].text)
     metadata = payload.get("metadata", {})
     assert metadata.get("cli_name") == tool._default_cli_name
-    assert metadata.get("events_removed_for_normal") is True
+    assert "events" in metadata.get("pruned_for_normal", [])
 
 
 @pytest.mark.asyncio

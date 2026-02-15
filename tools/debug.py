@@ -434,6 +434,14 @@ class DebugIssueTool(WorkflowTool):
         }
         return step_data
 
+    def should_include_files_in_expert_prompt(self) -> bool:
+        """Include file content in expert analysis for comprehensive debugging."""
+        return True
+
+    def should_embed_system_prompt(self) -> bool:
+        """Embed system prompt in expert analysis for proper context."""
+        return True
+
     def should_skip_expert_analysis(self, request, consolidated_findings) -> bool:
         """
         Debug tool skips expert analysis when agent has "certain" confidence.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from datetime import datetime, timezone
@@ -82,17 +83,19 @@ class CLinkRequest(ToolRequest):
         description=COMMON_FIELD_DESCRIPTIONS["absolute_file_paths"],
     )
     # Override images to default to empty list instead of None for CLI compatibility
-    images: list[str] = Field(  # type: ignore[assignment]
+    images: list[str] = Field(
         default_factory=list,
         description=COMMON_FIELD_DESCRIPTIONS["images"],
     )
-    json_schema: dict | None = Field(
+    json_schema: dict | str | None = Field(
         default=None,
         description=(
-            "Optional JSON schema for structured output. When provided, the schema is passed to "
-            "the CLI agent via --json-schema flag. The schema must be JSON-serializable (dict, list, "
-            "str, int, float, bool, None). Schema validation is performed by the CLI agent; invalid "
-            "schemas will cause the CLI to return an error. Only supported by Claude CLI."
+            "Optional JSON schema for structured output. Accepts:\n"
+            "  - dict: JSON schema object (existing behavior)\n"
+            "  - str: File path to .json file (absolute or relative to cwd) OR inline JSON string\n\n"
+            "When provided, the resolved schema is passed to the CLI agent via --json-schema flag. "
+            "Schema validation is performed by the CLI agent; invalid schemas will cause the CLI "
+            "to return an error. Only supported by Claude CLI."
         ),
     )
 
@@ -207,12 +210,17 @@ class CLinkTool(SimpleTool):
             "images": SchemaBuilder.COMMON_FIELD_SCHEMAS["images"],
             "continuation_id": SchemaBuilder.COMMON_FIELD_SCHEMAS["continuation_id"],
             "json_schema": {
-                "type": "object",
+                "anyOf": [
+                    {"type": "object"},
+                    {"type": "string"},
+                ],
                 "description": (
-                    "Optional JSON schema for structured output. When provided, the schema is passed to "
-                    "the CLI agent via --json-schema flag. The schema must be JSON-serializable (dict, list, "
-                    "str, int, float, bool, None). Schema validation is performed by the CLI agent; invalid "
-                    "schemas will cause the CLI to return an error. Only supported by Claude CLI."
+                    "Optional JSON schema for structured output. Accepts:\n"
+                    "  - object: JSON schema dict (existing behavior)\n"
+                    "  - string: File path to .json schema file (absolute or relative to cwd), "
+                    "or an inline JSON string\n\n"
+                    "The resolved schema is passed to the CLI agent via --json-schema flag. "
+                    "Schema validation is performed by the CLI agent. Only supported by Claude CLI."
                 ),
             },
             "model": {
@@ -326,6 +334,8 @@ class CLinkTool(SimpleTool):
             logger.exception("Failed to prepare clink prompt")
             self._raise_tool_error(f"Failed to prepare prompt: {exc}")
 
+        resolved_schema = self._resolve_json_schema(request.json_schema, request.cwd)
+
         agent = create_agent(client_config)
         try:
             result = await agent.run(
@@ -334,7 +344,7 @@ class CLinkTool(SimpleTool):
                 system_prompt=system_prompt_text if system_prompt_text.strip() else None,
                 files=absolute_file_paths,
                 images=images,
-                json_schema=request.json_schema,
+                json_schema=resolved_schema,
                 model=request.model,
                 cwd=request.cwd,
             )
@@ -353,7 +363,7 @@ class CLinkTool(SimpleTool):
             result.parsed.content,
             metadata,
             cwd=request.cwd,
-            is_json=request.json_schema is not None,
+            is_json=resolved_schema is not None,
             session_id=result.parsed.metadata.get("session_id"),
         )
 
@@ -377,11 +387,14 @@ class CLinkTool(SimpleTool):
                 model_info,
             )
             tool_output.metadata = self._merge_metadata(tool_output.metadata, metadata)
+            if resolved_schema is not None:
+                tool_output.content_type = "json"
         else:
+            content_type = "json" if resolved_schema is not None else "text"
             tool_output = ToolOutput(
                 status="success",
                 content=content,
-                content_type="text",
+                content_type=content_type,
                 metadata=metadata,
             )
 
@@ -535,16 +548,41 @@ class CLinkTool(SimpleTool):
         *,
         reason: str,
     ) -> dict[str, Any]:
+        """Remove heavy debugging fields from metadata before returning to MCP client.
+
+        Drops: events, raw, raw_events, raw_output_file, command.
+        Preserves: cli_name, role, model_used, duration_seconds, session_id,
+        return_code, usage, and all offload/error fields.
+        """
         cleaned = dict(metadata)
-        events = cleaned.pop("events", None)
-        if events is not None:
-            cleaned[f"events_removed_for_{reason}"] = True
-            logger.debug(
-                "Clink dropped %s events metadata for %s response (%s)",
-                client.name,
-                reason,
-                type(events).__name__,
-            )
+        heavy_fields = ("events", "raw", "raw_events", "raw_output_file", "command")
+        removed = []
+
+        for field in heavy_fields:
+            value = cleaned.pop(field, None)
+            if value is not None:
+                removed.append(field)
+                if logger.isEnabledFor(logging.DEBUG):
+                    if isinstance(value, (dict, list)):
+                        logger.debug(
+                            "Pruned '%s' from %s metadata (%s): %d items",
+                            field,
+                            client.name,
+                            reason,
+                            len(value),
+                        )
+                    else:
+                        logger.debug(
+                            "Pruned '%s' from %s metadata (%s): %d chars",
+                            field,
+                            client.name,
+                            reason,
+                            len(str(value)),
+                        )
+
+        if removed:
+            cleaned[f"pruned_for_{reason}"] = removed
+
         return cleaned
 
     def _build_error_metadata(self, client: ResolvedCLIClient, exc: CLIAgentError) -> dict[str, Any]:
@@ -586,6 +624,43 @@ class CLinkTool(SimpleTool):
             except OSError:
                 references.append(f"- {file_path} (unavailable)")
         return "\n".join(references)
+
+    def _resolve_json_schema(self, schema_input: dict | str | None, cwd: str) -> dict | None:
+        """Resolve json_schema parameter to a dict.
+
+        Accepts dict (pass-through), file path, or inline JSON string.
+        File paths are resolved relative to cwd.
+        """
+        if schema_input is None:
+            return None
+
+        if isinstance(schema_input, dict):
+            return schema_input
+
+        schema_str = schema_input.strip()
+
+        potential_path = Path(schema_str)
+        if not potential_path.is_absolute():
+            potential_path = Path(cwd) / potential_path
+
+        if potential_path.is_file():
+            try:
+                content = potential_path.read_text(encoding="utf-8")
+                schema_dict = json.loads(content)
+            except json.JSONDecodeError as exc:
+                self._raise_tool_error(f"json_schema file '{potential_path}' contains invalid JSON: {exc}")
+            except Exception as exc:
+                self._raise_tool_error(f"Failed to read json_schema file '{potential_path}': {exc}")
+        else:
+            try:
+                schema_dict = json.loads(schema_str)
+            except json.JSONDecodeError as exc:
+                self._raise_tool_error(f"json_schema is neither a valid file path nor valid JSON: {exc}")
+
+        if not isinstance(schema_dict, dict):
+            self._raise_tool_error(f"json_schema must resolve to a JSON object, got {type(schema_dict).__name__}")
+
+        return schema_dict
 
     def _resolve_agent_role(self, role: str | None, project_dir: Path | None = None) -> AgentDefinition | None:
         """Resolve agent role to agent definition.

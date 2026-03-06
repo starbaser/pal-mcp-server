@@ -7,7 +7,70 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from utils.media_utils import DEFAULT_MAX_IMAGE_SIZE_MB, validate_image
+from utils.media_utils import DEFAULT_MAX_IMAGE_SIZE_MB, is_audio_file, validate_image, validate_media
+
+
+class TestIsAudioFile:
+    """Unit tests for the is_audio_file() predicate."""
+
+    def test_audio_extension_mp3(self) -> None:
+        assert is_audio_file("/path/to/file.mp3") is True
+
+    def test_audio_extension_wav(self) -> None:
+        assert is_audio_file("/path/to/file.wav") is True
+
+    def test_audio_extension_flac(self) -> None:
+        assert is_audio_file("/path/to/file.flac") is True
+
+    def test_audio_extension_ogg(self) -> None:
+        assert is_audio_file("/path/to/file.ogg") is True
+
+    def test_audio_extension_aac(self) -> None:
+        assert is_audio_file("/path/to/file.aac") is True
+
+    def test_audio_extension_opus(self) -> None:
+        assert is_audio_file("/path/to/file.opus") is True
+
+    def test_audio_extension_m4a(self) -> None:
+        assert is_audio_file("/path/to/file.m4a") is True
+
+    def test_audio_data_url(self) -> None:
+        assert is_audio_file("data:audio/mpeg;base64,SGVsbG8=") is True
+
+    def test_audio_data_url_wav(self) -> None:
+        assert is_audio_file("data:audio/wav;base64,SGVsbG8=") is True
+
+    def test_not_audio_image(self) -> None:
+        assert is_audio_file("/path/to/file.jpg") is False
+
+    def test_not_audio_video(self) -> None:
+        assert is_audio_file("/path/to/file.mp4") is False
+
+    def test_not_audio_text(self) -> None:
+        assert is_audio_file("/path/to/file.txt") is False
+
+    def test_not_audio_image_data_url(self) -> None:
+        assert is_audio_file("data:image/png;base64,SGVsbG8=") is False
+
+    def test_not_audio_video_data_url(self) -> None:
+        assert is_audio_file("data:video/mp4;base64,SGVsbG8=") is False
+
+    def test_malformed_data_url_returns_false(self) -> None:
+        """Malformed data URL that cannot be parsed must return False, not raise."""
+        assert is_audio_file("data:") is False
+
+    def test_audio_file_passes_validate_media(self) -> None:
+        """A real .mp3 file on disk must pass validate_media() without raising."""
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+            tmp.write(b"\xff\xfb" + b"\x00" * 128)  # Minimal MP3-like header bytes
+            tmp_path = tmp.name
+
+        try:
+            media_bytes, mime_type = validate_media(tmp_path)
+            assert len(media_bytes) > 0
+            assert mime_type == "audio/mpeg"
+        finally:
+            os.unlink(tmp_path)
 
 
 class TestImageValidation:

@@ -1448,6 +1448,14 @@ When recommending searches, be specific about what information you need and why 
             logger.warning(f"Temperature validation failed for {model_context.model_name}: {e}")
             return temperature, [f"Temperature validation failed: {e}"]
 
+    def _pre_execute_validate(self) -> Optional[dict]:
+        """Hook for subclasses to validate capabilities before execution begins.
+
+        Called after model context is resolved but before prompt preparation.
+        Return an error dict to abort execution, or None to continue.
+        """
+        return None
+
     def _validate_media_limits(
         self, images: Optional[list[str]], model_context: Optional[Any] = None, continuation_id: Optional[str] = None
     ) -> Optional[dict]:
@@ -1473,11 +1481,12 @@ When recommending searches, be specific about what information you need and why 
         import base64
         from pathlib import Path
 
-        from utils.media_utils import is_video_file
+        from utils.media_utils import is_audio_file, is_video_file
 
-        # Split media into videos and images so each category is validated independently
+        # Split media into videos, audio, and images so each category is validated independently
         video_items = [item for item in images if is_video_file(item)]
-        image_items = [item for item in images if not is_video_file(item)]
+        audio_items = [item for item in images if is_audio_file(item)]
+        image_items = [item for item in images if not is_video_file(item) and not is_audio_file(item)]
 
         if not model_context:
             # Get from tool's stored context as fallback
@@ -1523,10 +1532,31 @@ When recommending searches, be specific about what information you need and why 
                 },
             }
 
-        # If there are only videos, skip image-specific validation entirely.
-        # Provider APIs enforce their own video size and count limits.
+        # Validate audio support if any audio files are present
+        if audio_items and not capabilities.supports_audio:
+            return {
+                "status": "error",
+                "content": (
+                    f"Audio support not available: Model '{model_name}' does not support audio processing. "
+                    f"Audio input is a Gemini-native feature. Please use a Gemini model such as "
+                    f"'gemini-2.5-flash' or 'gemini-2.5-pro' for audio analysis tasks."
+                ),
+                "content_type": "text",
+                "metadata": {
+                    "error_type": "validation_error",
+                    "model_name": model_name,
+                    "supports_audio": False,
+                    "audio_count": len(audio_items),
+                },
+            }
+
+        # If there are only videos/audio, skip image-specific validation entirely.
+        # Provider APIs enforce their own size and count limits.
         if not image_items:
-            logger.debug(f"Media validation passed: {len(video_items)} video(s), skipping image validation")
+            logger.debug(
+                f"Media validation passed: {len(video_items)} video(s), {len(audio_items)} audio(s), "
+                f"skipping image validation"
+            )
             return None
 
         # Check if model supports images

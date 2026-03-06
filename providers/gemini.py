@@ -13,7 +13,7 @@ from google import genai
 from google.genai import types
 
 from utils.env import get_env
-from utils.media_utils import is_video_file, validate_media
+from utils.media_utils import is_audio_file, is_video_file, validate_media
 
 from .base import ModelProvider
 from .registries.gemini import GeminiModelRegistry
@@ -162,14 +162,23 @@ class GeminiModelProvider(RegistryBackedProviderMixin, ModelProvider):
         if media and capabilities.supports_images:
             for media_path in media:
                 is_video = is_video_file(media_path)
+                is_audio = is_audio_file(media_path)
                 if is_video and not capabilities.supports_video:
                     raise ValueError(
                         f"Model {resolved_model_name} does not support video inputs. "
                         f"Remove video media or use a model with supports_video capability."
                     )
+                if is_audio and not capabilities.supports_audio:
+                    raise ValueError(
+                        f"Model {resolved_model_name} does not support audio inputs. "
+                        f"Remove audio media or use a model with supports_audio capability "
+                        f"(e.g. 'gemini-2.5-flash' or 'gemini-2.5-pro')."
+                    )
                 try:
                     if is_video:
                         media_part = self._process_video(media_path)
+                    elif is_audio:
+                        media_part = self._process_audio(media_path)
                     else:
                         media_part = self._process_image(media_path)
                     if media_part:
@@ -178,7 +187,10 @@ class GeminiModelProvider(RegistryBackedProviderMixin, ModelProvider):
                     logger.warning(f"Failed to process media {media_path}: {e}")
                     continue
         elif media and not capabilities.supports_images:
-            logger.warning(f"Model {resolved_model_name} does not support images, ignoring {len(media)} media item(s)")
+            raise ValueError(
+                f"Model {resolved_model_name} does not support media inputs. "
+                f"Remove all media or use a vision-capable Gemini model."
+            )
 
         # Create contents structure
         contents = [{"parts": parts}]
@@ -477,6 +489,66 @@ class GeminiModelProvider(RegistryBackedProviderMixin, ModelProvider):
             return None
         except Exception as e:
             logger.error(f"Error processing image {image_path}: {e}")
+            return None
+
+    _AUDIO_INLINE_THRESHOLD_MB = 20.0
+
+    def _process_audio(self, audio_path: str) -> Optional[dict]:
+        """Process audio for the Gemini API.
+
+        Files at or below _AUDIO_INLINE_THRESHOLD_MB are sent as inline_data.
+        Larger files are uploaded via the File API and referenced by URI.
+        """
+        try:
+            audio_bytes, mime_type = validate_media(audio_path)
+
+            size_mb = len(audio_bytes) / (1024 * 1024)
+
+            if size_mb <= self._AUDIO_INLINE_THRESHOLD_MB:
+                if audio_path.startswith("data:"):
+                    _, data = audio_path.split(",", 1)
+                else:
+                    data = base64.b64encode(audio_bytes).decode()
+                return {"inline_data": {"mime_type": mime_type, "data": data}}
+
+            # Large audio — upload via File API
+            upload_config = types.UploadFileConfig(mime_type=mime_type)
+
+            if audio_path.startswith("data:"):
+                file_obj = io.BytesIO(audio_bytes)
+            else:
+                file_obj = audio_path
+
+            uploaded = self.client.files.upload(
+                file=file_obj,
+                config=upload_config,
+            )
+            logger.info(f"Uploaded audio {audio_path} -> {uploaded.name} ({uploaded.state})")
+
+            max_wait = 120
+            poll_interval = 2
+            elapsed = 0
+            while uploaded.state == "PROCESSING" and elapsed < max_wait:
+                time.sleep(poll_interval)
+                elapsed += poll_interval
+                uploaded = self.client.files.get(name=uploaded.name)
+
+            if uploaded.state != "ACTIVE":
+                logger.error(f"Audio upload failed: {uploaded.name} state={uploaded.state}")
+                return None
+
+            return {
+                "file_data": {
+                    "mime_type": uploaded.mime_type,
+                    "file_uri": uploaded.uri,
+                }
+            }
+
+        except ValueError as e:
+            logger.warning(str(e))
+            return None
+        except Exception as e:
+            logger.error(f"Error processing audio {audio_path}: {e}")
             return None
 
     def _process_video(self, video_path: str) -> Optional[dict]:

@@ -5,6 +5,7 @@ import binascii
 import os
 
 from utils.file_types import (
+    AUDIO_EXTENSIONS,
     MEDIA_EXTENSIONS,
     MEDIA_MIME_TYPES,
     VIDEO_EXTENSIONS,
@@ -14,6 +15,7 @@ DEFAULT_MAX_IMAGE_SIZE_MB = 2048.0
 
 __all__ = [
     "DEFAULT_MAX_IMAGE_SIZE_MB",
+    "is_audio_file",
     "is_video_file",
     "validate_image",
     "validate_media",
@@ -71,6 +73,20 @@ def is_video_file(path_or_data_url: str) -> bool:
 
     ext = os.path.splitext(path_or_data_url)[1].lower()
     return ext in VIDEO_EXTENSIONS
+
+
+def is_audio_file(path_or_data_url: str) -> bool:
+    """Return True if the input is an audio file or audio data URL."""
+    if path_or_data_url.startswith("data:"):
+        try:
+            header, _ = path_or_data_url.split(",", 1)
+            mime_type = header.split(";")[0].split(":")[1]
+        except (ValueError, IndexError):
+            return False
+        return mime_type.startswith("audio/")
+
+    ext = os.path.splitext(path_or_data_url)[1].lower()
+    return ext in AUDIO_EXTENSIONS
 
 
 def _validate_data_url(media_data_url: str, max_size_mb: float) -> tuple[bytes, str]:

@@ -274,8 +274,11 @@ def get_image_mime_type(extension: str) -> str:
 # Video file extensions
 VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".avi", ".mkv", ".flv", ".wmv", ".m4v"}
 
-# Union of image and video extensions
-MEDIA_EXTENSIONS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
+# Audio file extensions — Gemini supports MP3, WAV, FLAC, AAC, OGG, OPUS
+AUDIO_EXTENSIONS = {".mp3", ".wav", ".flac", ".aac", ".ogg", ".opus", ".m4a"}
+
+# Union of image, video, and audio extensions
+MEDIA_EXTENSIONS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS | AUDIO_EXTENSIONS
 
 # MIME type mappings for video files
 VIDEO_MIME_TYPES = {
@@ -289,5 +292,16 @@ VIDEO_MIME_TYPES = {
     ".m4v": "video/x-m4v",
 }
 
-# Merged image and video MIME type mappings
-MEDIA_MIME_TYPES = {**IMAGE_MIME_TYPES, **VIDEO_MIME_TYPES}
+# MIME type mappings for audio files
+AUDIO_MIME_TYPES = {
+    ".mp3": "audio/mpeg",
+    ".wav": "audio/wav",
+    ".flac": "audio/flac",
+    ".aac": "audio/aac",
+    ".ogg": "audio/ogg",
+    ".opus": "audio/opus",
+    ".m4a": "audio/mp4",
+}
+
+# Merged image, video, and audio MIME type mappings
+MEDIA_MIME_TYPES = {**IMAGE_MIME_TYPES, **VIDEO_MIME_TYPES, **AUDIO_MIME_TYPES}

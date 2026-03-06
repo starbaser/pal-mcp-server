@@ -325,6 +325,19 @@ class SimpleTool(BaseTool):
                 self._model_context = ModelContext(model_name)
                 logger.debug(f"{self.get_name()}: Created model context for {model_name}")
 
+            # Allow subclasses to validate capabilities before execution
+            pre_validate_error = self._pre_execute_validate()
+            if pre_validate_error:
+                error_output = ToolOutput(
+                    status=pre_validate_error.get("status", "error"),
+                    content=pre_validate_error.get("content"),
+                    content_type=pre_validate_error.get("content_type", "text"),
+                    metadata=pre_validate_error.get("metadata"),
+                )
+                payload = error_output.model_dump_json()
+                logger.error("Pre-execution validation failed for %s: %s", self.get_name(), payload)
+                raise ToolExecutionError(payload)
+
             # Get media if present
             images = self.get_request_media(request)
             continuation_id = self.get_request_continuation_id(request)

@@ -25,6 +25,7 @@ def _make_model_context(
     *,
     supports_images: bool = True,
     supports_video: bool = True,
+    supports_audio: bool = False,
     max_image_size_mb: float = 20.0,
     provider: ProviderType = ProviderType.GOOGLE,
     model_name: str = "test-model",
@@ -33,6 +34,7 @@ def _make_model_context(
     caps = MagicMock(spec=ModelCapabilities)
     caps.supports_images = supports_images
     caps.supports_video = supports_video
+    caps.supports_audio = supports_audio
     caps.max_image_size_mb = max_image_size_mb
     caps.provider = provider
 
@@ -131,6 +133,70 @@ class TestValidateMediaLimitsVideoAwareness:
             for p in image_paths:
                 if os.path.exists(p):
                     os.unlink(p)
+
+    def test_audio_requires_supports_audio(self, tool: ChatTool) -> None:
+        """Audio items must fail validation when the model lacks supports_audio."""
+        ctx = _make_model_context(supports_audio=False, supports_images=True, supports_video=True)
+
+        result = tool._validate_media_limits(["recording.mp3"], model_context=ctx)
+
+        assert result is not None
+        assert result["status"] == "error"
+        assert "Audio support not available" in result["content"]
+        assert result["metadata"]["supports_audio"] is False
+        assert result["metadata"]["audio_count"] == 1
+
+    def test_audio_passes_with_supports_audio(self, tool: ChatTool) -> None:
+        """Audio items must pass validation when the model declares supports_audio."""
+        ctx = _make_model_context(supports_audio=True, supports_images=True, supports_video=True)
+
+        result = tool._validate_media_limits(["recording.mp3"], model_context=ctx)
+
+        assert result is None
+
+    def test_audio_bypasses_image_count_limit(self, tool: ChatTool) -> None:
+        """Audio items must not be counted against the image count limit."""
+        # 2 images (well within limit) + 4 audio files
+        image_paths = []
+        try:
+            for _ in range(2):
+                image_paths.append(_make_temp_file(".png", 256 * 1024))
+
+            audio_paths = [f"clip{i}.mp3" for i in range(4)]
+            media = image_paths + audio_paths
+            ctx = _make_model_context(
+                supports_audio=True, supports_images=True, supports_video=True, max_image_size_mb=20.0
+            )
+
+            result = tool._validate_media_limits(media, model_context=ctx)
+
+            assert result is None, f"Expected None but got: {result}"
+        finally:
+            for p in image_paths:
+                if os.path.exists(p):
+                    os.unlink(p)
+
+    def test_audio_error_reports_count(self, tool: ChatTool) -> None:
+        """Error metadata for audio validation must reflect the actual audio file count."""
+        ctx = _make_model_context(supports_audio=False)
+        audio_paths = ["a.mp3", "b.wav", "c.flac"]
+
+        result = tool._validate_media_limits(audio_paths, model_context=ctx)
+
+        assert result is not None
+        assert result["metadata"]["audio_count"] == 3
+
+    def test_audio_error_precedes_video_error(self, tool: ChatTool) -> None:
+        """When both audio and video are unsupported, the audio error must be returned (audio checked first after video)."""
+        # supports_video=False and supports_audio=False — video check fires first
+        ctx = _make_model_context(supports_video=False, supports_audio=False)
+
+        result = tool._validate_media_limits(["clip.mp4", "song.mp3"], model_context=ctx)
+
+        assert result is not None
+        assert result["status"] == "error"
+        # Video check runs before audio check
+        assert "Video support not available" in result["content"]
 
 
 # ---------------------------------------------------------------------------

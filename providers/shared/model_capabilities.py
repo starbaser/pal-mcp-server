@@ -51,6 +51,7 @@ class ModelCapabilities:
     supports_function_calling: bool = False
     supports_images: bool = False
     supports_video: bool = False
+    supports_audio: bool = False
     supports_image_generation: bool = False
     supports_json_mode: bool = False
     supports_temperature: bool = True

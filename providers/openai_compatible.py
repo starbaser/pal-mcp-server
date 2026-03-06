@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 from openai import OpenAI
 
 from utils.env import get_env, suppress_env_vars
-from utils.media_utils import is_video_file, validate_media
+from utils.media_utils import is_audio_file, is_video_file, validate_media
 
 from .base import ModelProvider
 from .shared import (
@@ -559,12 +559,25 @@ class OpenAICompatibleProvider(ModelProvider):
         user_content.append({"type": "text", "text": prompt})
 
         # Add media if provided and model supports vision
-        if media and capabilities and capabilities.supports_images:
+        if media:
+            if not capabilities or not capabilities.supports_images:
+                raise ValueError(
+                    f"Model {resolved_model} does not support image or media inputs. "
+                    f"Media was provided but this model cannot process it. "
+                    f"Use a vision-capable model or remove the media parameter."
+                )
             for media_path in media:
+                if is_audio_file(media_path):
+                    raise ValueError(
+                        f"Audio input is not supported by model {resolved_model}. "
+                        f"Audio is a Gemini-native feature. Use a Gemini model "
+                        f"(e.g. 'gemini-2.5-flash') for audio processing."
+                    )
                 if is_video_file(media_path):
                     raise ValueError(
-                        f"Model {resolved_model} does not support video inputs. "
-                        f"Remove video media or use a model with video support."
+                        f"Video input is not supported by model {resolved_model}. "
+                        f"Video is a Gemini-native feature requiring the Gemini File API. "
+                        f"Use a Gemini model (e.g. 'gemini-2.5-flash') for video processing."
                     )
                 try:
                     media_content = self._process_image(media_path)
@@ -573,8 +586,6 @@ class OpenAICompatibleProvider(ModelProvider):
                 except Exception as e:
                     logging.warning(f"Failed to process media {media_path}: {e}")
                     continue
-        elif media and (not capabilities or not capabilities.supports_images):
-            logging.warning(f"Model {resolved_model} does not support images, ignoring {len(media)} media item(s)")
 
         # Add user message
         if len(user_content) == 1:

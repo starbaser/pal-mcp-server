@@ -79,6 +79,33 @@ class ImageGenTool(SimpleTool):
     def get_required_fields(self) -> list[str]:
         return ["prompt"]
 
+    def _pre_execute_validate(self) -> Optional[dict]:
+        """Verify the resolved model supports image generation."""
+        ctx = getattr(self, "_model_context", None)
+        if ctx is None:
+            return None
+        caps = getattr(ctx, "capabilities", None)
+        if caps is None:
+            return None
+        if not caps.supports_image_generation:
+            model_name = getattr(ctx, "model_name", "unknown")
+            return {
+                "status": "error",
+                "content": (
+                    f"Image generation requires a Gemini model with native image generation support "
+                    f"(e.g. 'gemini-3-pro-image-preview', 'gemini-3.1-flash-image-preview', or 'gemini-2.0-flash'). "
+                    f"Model '{model_name}' does not support image generation. "
+                    f"Specify a capable model explicitly using the model parameter."
+                ),
+                "content_type": "text",
+                "metadata": {
+                    "error_type": "capability_error",
+                    "model_name": model_name,
+                    "supports_image_generation": False,
+                },
+            }
+        return None
+
     async def prepare_prompt(self, request) -> str:
         return self.get_request_prompt(request)
 

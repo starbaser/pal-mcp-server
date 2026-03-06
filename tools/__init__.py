@@ -13,6 +13,7 @@ from .consensus import ConsensusTool
 from .debug import DebugIssueTool
 from .docgen import DocgenTool
 from .listmodels import ListModelsTool
+from .perceive import PerceiveTool
 from .planner import PlannerTool
 from .precommit import PrecommitTool
 from .refactor import RefactorTool
@@ -42,4 +43,5 @@ __all__ = [
     "TracerTool",
     "VersionTool",
     "ImageGenTool",
+    "PerceiveTool",
 ]

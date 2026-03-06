@@ -181,6 +181,7 @@ CONVERSATION_STORAGE_BACKEND = get_env("CONVERSATION_STORAGE_BACKEND", "file") o
 # Subdirectories for specific storage types
 CONVERSATION_STORAGE_DIR = os.path.join(PAL_STORAGE_DIR, "threads")
 IMAGE_STORAGE_DIR = os.path.join(PAL_STORAGE_DIR, "images")
+CONTENT_STORAGE_DIR = os.path.join(PAL_STORAGE_DIR, "content")
 
 # CONVERSATION_TIMEOUT_HOURS: How long threads are retained before expiration
 CONVERSATION_TIMEOUT_HOURS = int(get_env("CONVERSATION_TIMEOUT_HOURS") or 6)

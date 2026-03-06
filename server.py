@@ -58,6 +58,7 @@ from tools import (  # noqa: E402
     DocgenTool,
     ImageGenTool,
     ListModelsTool,
+    PerceiveTool,
     LookupTool,
     PlannerTool,
     PrecommitTool,
@@ -279,6 +280,7 @@ TOOLS = {
     "listmodels": ListModelsTool(),  # List all available AI models by provider
     "version": VersionTool(),  # Display server version and system information
     "imagegen": ImageGenTool(),  # Native AI image generation and editing
+    "perceive": PerceiveTool(),  # Structured media intelligence extraction (image, video, audio)
 }
 TOOLS = filter_disabled_tools(TOOLS)
 
@@ -709,6 +711,32 @@ async def handle_list_tools() -> list[Tool]:
     return tools
 
 
+def _save_response_content(tool_name: str, result: list) -> None:
+    """Persist the AI response content as a markdown file for easy viewing."""
+    import json
+    from datetime import datetime
+
+    from config import CONTENT_STORAGE_DIR
+
+    try:
+        if not result or not hasattr(result[0], "text"):
+            return
+        parsed = json.loads(result[0].text)
+        content = parsed.get("content", "")
+        status = parsed.get("status", "")
+        if not content or status == "error":
+            return
+
+        content_dir = Path(CONTENT_STORAGE_DIR)
+        content_dir.mkdir(parents=True, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{timestamp}_{tool_name}.md"
+        (content_dir / filename).write_text(content, encoding="utf-8")
+    except Exception:
+        logger.debug(f"Failed to save response content for {tool_name}", exc_info=True)
+
+
 @server.call_tool()
 async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
     """
@@ -884,6 +912,8 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
         # Execute tool with pre-resolved model context
         result = await tool.execute(arguments)
         logger.info(f"Tool '{name}' execution completed")
+
+        _save_response_content(name, result)
 
         # Log completion to activity file
         try:

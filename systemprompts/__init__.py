@@ -16,6 +16,7 @@ from .secaudit_prompt import SECAUDIT_PROMPT
 from .testgen_prompt import TESTGEN_PROMPT
 from .thinkdeep_prompt import THINKDEEP_PROMPT
 from .imagegen_prompt import IMAGEGEN_PROMPT
+from .perceive_prompt import PERCEIVE_PROMPT
 from .tracer_prompt import TRACER_PROMPT
 
 __all__ = [
@@ -33,5 +34,6 @@ __all__ = [
     "SECAUDIT_PROMPT",
     "TESTGEN_PROMPT",
     "IMAGEGEN_PROMPT",
+    "PERCEIVE_PROMPT",
     "TRACER_PROMPT",
 ]

@@ -74,10 +74,10 @@ class TestImageValidation:
         encoded_data = base64.b64encode(large_data).decode()
         data_url = f"data:image/png;base64,{encoded_data}"
 
-        # Should fail with default 20MB limit
+        # Should fail with explicit 20MB limit
         with pytest.raises(ValueError) as excinfo:
-            validate_image(data_url)
-        assert f"Media too large: 21.0MB (max: {DEFAULT_MAX_IMAGE_SIZE_MB:.1f}MB)" in str(excinfo.value)
+            validate_image(data_url, max_size_mb=20.0)
+        assert "Media too large: 21.0MB (max: 20.0MB)" in str(excinfo.value)
 
         # Should succeed with higher limit
         image_bytes, mime_type = validate_image(data_url, max_size_mb=25.0)

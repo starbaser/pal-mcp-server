@@ -27,9 +27,14 @@ class TestListModelsTool:
     @pytest.mark.asyncio
     async def test_execute_with_no_providers(self, tool):
         """Test listing models with no providers configured"""
+        from providers.registry import ModelProviderRegistry
+
         with patch.dict(os.environ, {}, clear=True):
             # Set auto mode
             os.environ["DEFAULT_MODEL"] = "auto"
+
+            # Reset singleton so env-var changes are picked up
+            ModelProviderRegistry._instance = None
 
             result = await tool.execute({})
 
@@ -55,9 +60,17 @@ class TestListModelsTool:
     @pytest.mark.asyncio
     async def test_execute_with_gemini_configured(self, tool):
         """Test listing models with Gemini configured"""
+        from providers.gemini import GeminiModelProvider
+        from providers.registry import ModelProviderRegistry
+        from providers.shared import ProviderType
+
         env_vars = {"GEMINI_API_KEY": "test-key", "DEFAULT_MODEL": "auto"}
 
         with patch.dict(os.environ, env_vars, clear=True):
+            # Reset singleton and re-register only Gemini so only it is available
+            ModelProviderRegistry._instance = None
+            ModelProviderRegistry.register_provider(ProviderType.GOOGLE, GeminiModelProvider)
+
             result = await tool.execute({})
 
             response = json.loads(result[0].text)

@@ -21,7 +21,8 @@
       "default_reasoning_effort": "Default reasoning effort level for models that support it (e.g., 'low', 'medium', 'high'). Omit if not applicable.",
       "description": "Human-readable description of the model",
       "intelligence_score": "1-20 human rating used as the primary signal for auto-mode model ordering",
-      "allow_code_generation": "Whether this model can generate and suggest fully working code - complete with functions, files, and detailed implementation instructions - for your AI tool to use right away. Only set this to 'true' for a model more capable than the AI model / CLI you're currently using."
+      "allow_code_generation": "Whether this model can generate and suggest fully working code - complete with functions, files, and detailed implementation instructions - for your AI tool to use right away. Only set this to 'true' for a model more capable than the AI model / CLI you're currently using.",
+      "supports_image_generation": "Whether the model can generate images in its response (Gemini native image generation via response_modalities)"
     }
   },
   "models": [
@@ -90,6 +91,29 @@
       "supports_json_mode": true,
       "supports_images": true,
       "supports_video": true,
+      "supports_image_generation": true,
+      "supports_temperature": true,
+      "max_image_size_mb": 20.0
+    },
+    {
+      "model_name": "gemini-3.1-flash-image-preview",
+      "friendly_name": "Gemini Flash Image Preview",
+      "aliases": [
+        "imagen",
+        "image-gen"
+      ],
+      "intelligence_score": 8,
+      "description": "Gemini 3.1 Flash Image Preview - Native image generation and editing with text",
+      "context_window": 1048576,
+      "max_output_tokens": 65536,
+      "supports_extended_thinking": false,
+      "supports_system_prompts": true,
+      "supports_streaming": true,
+      "supports_function_calling": false,
+      "supports_json_mode": false,
+      "supports_images": true,
+      "supports_video": false,
+      "supports_image_generation": true,
       "supports_temperature": true,
       "max_image_size_mb": 20.0
     },

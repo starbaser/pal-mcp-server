@@ -283,6 +283,7 @@ class SimpleTool(BaseTool):
         try:
             # Store arguments for access by helper methods
             self._current_arguments = arguments
+            _final_model_response = None
 
             logger.info(f"🔧 {self.get_name()} tool called with arguments: {list(arguments.keys())}")
 
@@ -451,9 +452,10 @@ class SimpleTool(BaseTool):
             )
 
             logger.info(f"Received response from {provider.get_provider_type().value} API for {self.get_name()}")
+            _final_model_response = model_response
 
             # Process the model's response
-            if model_response.content:
+            if model_response.content or getattr(model_response, "generated_images", None):
                 raw_text = model_response.content
 
                 # Create model info for conversation tracking
@@ -510,6 +512,7 @@ class SimpleTool(BaseTool):
                             if retry_response.content:
                                 # Successful retry - use the retry response
                                 logger.info(f"Retry successful for {self.get_name()}")
+                                _final_model_response = retry_response
                                 raw_text = retry_response.content
 
                                 # Update model info for the successful retry
@@ -568,7 +571,26 @@ class SimpleTool(BaseTool):
             if tool_output.status == "error":
                 logger.error("%s reported error status - raising ToolExecutionError", self.get_name())
                 raise ToolExecutionError(payload)
-            return [TextContent(type="text", text=payload)]
+
+            result = [TextContent(type="text", text=payload)]
+
+            # Append generated images as MCP ImageContent if present
+            if _final_model_response and getattr(_final_model_response, "generated_images", None):
+                from mcp.types import ImageContent
+
+                for img in _final_model_response.generated_images:
+                    result.append(
+                        ImageContent(
+                            type="image",
+                            data=img["data"],
+                            mimeType=img.get("mime_type", "image/png"),
+                        )
+                    )
+
+                # Persist generated images alongside thread storage
+                self._save_generated_images(_final_model_response.generated_images)
+
+            return result
 
         except ToolExecutionError:
             raise
@@ -586,6 +608,30 @@ class SimpleTool(BaseTool):
                 content_type="text",
             )
             raise ToolExecutionError(error_output.model_dump_json()) from e
+
+    def _save_generated_images(self, generated_images: list[dict]) -> None:
+        """Save generated images to disk in PAL storage."""
+        import base64
+        import logging
+        from datetime import datetime
+        from pathlib import Path
+
+        from config import IMAGE_STORAGE_DIR
+
+        logger = logging.getLogger(__name__)
+        images_dir = Path(IMAGE_STORAGE_DIR)
+        try:
+            images_dir.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            for i, img in enumerate(generated_images):
+                mime = img.get("mime_type", "image/png")
+                ext = "jpg" if "jpeg" in mime or "jpg" in mime else "png"
+                filename = f"{timestamp}_{self.get_name()}_{i}.{ext}"
+                filepath = images_dir / filename
+                filepath.write_bytes(base64.b64decode(img["data"]))
+                logger.info("Saved generated image to %s", filepath)
+        except Exception as exc:
+            logger.warning("Failed to save generated images: %s", exc)
 
     def _parse_response(self, raw_text: str, request, model_info: Optional[dict] = None):
         """

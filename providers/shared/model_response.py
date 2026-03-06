@@ -18,6 +18,7 @@ class ModelResponse:
     friendly_name: str = ""
     provider: ProviderType = ProviderType.GOOGLE
     metadata: dict[str, Any] = field(default_factory=dict)
+    generated_images: list[dict[str, str]] = field(default_factory=list)
 
     @property
     def total_tokens(self) -> int:

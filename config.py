@@ -157,21 +157,30 @@ MAX_MCP_OUTPUT_TOKENS = int(get_env("MAX_MCP_OUTPUT_TOKENS") or 25_000)
 # Leave empty for default language (English)
 LOCALE = get_env("LOCALE", "") or ""
 
-# Threading configuration
-# Simple in-memory conversation threading for stateless MCP environment
-# Conversations persist only during the Claude session
+# PAL storage configuration
+# Base directory for all PAL persistent data (threads, images, etc.)
+# Prefers project-level .claude/pal/ if .claude/ exists in CWD,
+# otherwise falls back to CLAUDE_CONFIG_DIR (default ~/.claude) + /pal
+def _resolve_pal_storage_dir() -> str:
+    explicit = os.environ.get("PAL_STORAGE_DIR")
+    if explicit:
+        return explicit
+    project_claude = os.path.join(os.getcwd(), ".claude")
+    if os.path.isdir(project_claude):
+        return os.path.join(project_claude, "pal")
+    config_dir = os.environ.get("CLAUDE_CONFIG_DIR", os.path.expanduser("~/.claude"))
+    return os.path.join(config_dir, "pal")
+
+PAL_STORAGE_DIR = _resolve_pal_storage_dir()
 
 # Conversation storage backend selection
 # "memory" - in-memory only (lost on server restart)
 # "file"   - file-backed with memory cache (persists across restarts)
 CONVERSATION_STORAGE_BACKEND = get_env("CONVERSATION_STORAGE_BACKEND", "file") or "file"
 
-# Directory for file-backed conversation storage
-# Used by the file storage backend to persist thread contexts across restarts
-CONVERSATION_STORAGE_DIR = os.environ.get(
-    "CONVERSATION_STORAGE_DIR",
-    os.path.expanduser("~/.claude/pal/threads"),
-)
+# Subdirectories for specific storage types
+CONVERSATION_STORAGE_DIR = os.path.join(PAL_STORAGE_DIR, "threads")
+IMAGE_STORAGE_DIR = os.path.join(PAL_STORAGE_DIR, "images")
 
 # CONVERSATION_TIMEOUT_HOURS: How long threads are retained before expiration
 CONVERSATION_TIMEOUT_HOURS = int(get_env("CONVERSATION_TIMEOUT_HOURS") or 6)

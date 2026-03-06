@@ -1,7 +1,9 @@
 """Gemini model provider implementation."""
 
 import base64
+import io
 import logging
+import time
 from typing import TYPE_CHECKING, ClassVar, Optional
 
 if TYPE_CHECKING:
@@ -159,13 +161,17 @@ class GeminiModelProvider(RegistryBackedProviderMixin, ModelProvider):
         # Add media if provided and model supports vision/video
         if media and capabilities.supports_images:
             for media_path in media:
-                if is_video_file(media_path) and not capabilities.supports_video:
+                is_video = is_video_file(media_path)
+                if is_video and not capabilities.supports_video:
                     raise ValueError(
                         f"Model {resolved_model_name} does not support video inputs. "
                         f"Remove video media or use a model with supports_video capability."
                     )
                 try:
-                    media_part = self._process_image(media_path)
+                    if is_video:
+                        media_part = self._process_video(media_path)
+                    else:
+                        media_part = self._process_image(media_path)
                     if media_part:
                         parts.append(media_part)
                 except Exception as e:
@@ -188,6 +194,11 @@ class GeminiModelProvider(RegistryBackedProviderMixin, ModelProvider):
         # Add max output tokens if specified
         if max_output_tokens:
             generation_config.max_output_tokens = max_output_tokens
+
+        # Enable image generation for capable models
+        model_config = capability_map.get(resolved_model_name)
+        if model_config and model_config.supports_image_generation:
+            generation_config.response_modalities = ["TEXT", "IMAGE"]
 
         # Add thinking configuration for models that support it
         if capabilities.supports_extended_thinking and effective_thinking_mode in self.THINKING_BUDGETS:
@@ -278,8 +289,29 @@ class GeminiModelProvider(RegistryBackedProviderMixin, ModelProvider):
                 except (AttributeError, TypeError):
                     pass
 
+            # Extract content — walk parts when image generation is active
+            response_text = ""
+            generated_images = []
+
+            model_config = capability_map.get(resolved_model_name)
+            has_image_gen = model_config and model_config.supports_image_generation
+
+            if has_image_gen and response.candidates:
+                candidate = response.candidates[0]
+                if candidate.content and candidate.content.parts:
+                    for part in candidate.content.parts:
+                        if hasattr(part, "text") and part.text:
+                            response_text += part.text
+                        elif hasattr(part, "inline_data") and part.inline_data:
+                            generated_images.append({
+                                "data": base64.b64encode(part.inline_data.data).decode("utf-8"),
+                                "mime_type": part.inline_data.mime_type or "image/png",
+                            })
+            else:
+                response_text = response.text
+
             return ModelResponse(
-                content=response.text,
+                content=response_text,
                 usage=usage,
                 model_name=resolved_model_name,
                 friendly_name="Gemini",
@@ -290,6 +322,7 @@ class GeminiModelProvider(RegistryBackedProviderMixin, ModelProvider):
                     "is_blocked_by_safety": is_blocked_by_safety,
                     "safety_feedback": safety_feedback_details,
                 },
+                generated_images=generated_images,
             )
 
         try:
@@ -428,18 +461,14 @@ class GeminiModelProvider(RegistryBackedProviderMixin, ModelProvider):
         return any(indicator in error_str for indicator in retryable_indicators)
 
     def _process_image(self, image_path: str) -> Optional[dict]:
-        """Process an image or video for Gemini API."""
+        """Process an image for Gemini API via inline_data."""
         try:
-            # Use base class validation
             image_bytes, mime_type = validate_media(image_path)
 
-            # For data URLs, extract the base64 data directly
             if image_path.startswith("data:"):
-                # Extract base64 data from data URL
                 _, data = image_path.split(",", 1)
                 return {"inline_data": {"mime_type": mime_type, "data": data}}
             else:
-                # For file paths, encode the bytes
                 image_data = base64.b64encode(image_bytes).decode()
                 return {"inline_data": {"mime_type": mime_type, "data": image_data}}
 
@@ -448,6 +477,55 @@ class GeminiModelProvider(RegistryBackedProviderMixin, ModelProvider):
             return None
         except Exception as e:
             logger.error(f"Error processing image {image_path}: {e}")
+            return None
+
+    def _process_video(self, video_path: str) -> Optional[dict]:
+        """Upload video via Gemini File API and return a file_data part.
+
+        Gemini does not support video through inline_data — videos must be
+        uploaded first, then referenced by URI.
+        """
+        try:
+            video_bytes, mime_type = validate_media(video_path)
+
+            upload_config = types.UploadFileConfig(mime_type=mime_type)
+
+            if video_path.startswith("data:"):
+                file_obj = io.BytesIO(video_bytes)
+            else:
+                file_obj = video_path
+
+            uploaded = self.client.files.upload(
+                file=file_obj,
+                config=upload_config,
+            )
+            logger.info(f"Uploaded video {video_path} -> {uploaded.name} ({uploaded.state})")
+
+            # Poll until processing completes
+            max_wait = 120
+            poll_interval = 2
+            elapsed = 0
+            while uploaded.state == "PROCESSING" and elapsed < max_wait:
+                time.sleep(poll_interval)
+                elapsed += poll_interval
+                uploaded = self.client.files.get(name=uploaded.name)
+
+            if uploaded.state != "ACTIVE":
+                logger.error(f"Video upload failed: {uploaded.name} state={uploaded.state}")
+                return None
+
+            return {
+                "file_data": {
+                    "mime_type": uploaded.mime_type,
+                    "file_uri": uploaded.uri,
+                }
+            }
+
+        except ValueError as e:
+            logger.warning(str(e))
+            return None
+        except Exception as e:
+            logger.error(f"Error processing video {video_path}: {e}")
             return None
 
     def get_preferred_model(self, category: "ToolModelCategory", allowed_models: list[str]) -> Optional[str]:
@@ -494,6 +572,19 @@ class GeminiModelProvider(RegistryBackedProviderMixin, ModelProvider):
             pro_models = [m for m in allowed_models if "pro" in m]
             if pro_models:
                 return find_best(pro_models)
+
+        elif category == ToolModelCategory.IMAGE_GENERATION:
+            # Prefer dedicated image generation models, then any image-capable model
+            image_gen_models = [
+                m for m in allowed_models
+                if m in capability_map and capability_map[m].supports_image_generation
+            ]
+            if image_gen_models:
+                # Prefer the dedicated image preview model over general-purpose flash
+                dedicated = [m for m in image_gen_models if "image" in m or "imagen" in m]
+                if dedicated:
+                    return find_best(dedicated)
+                return find_best(image_gen_models)
 
         elif category == ToolModelCategory.FAST_RESPONSE:
             # Prefer Flash models for speed

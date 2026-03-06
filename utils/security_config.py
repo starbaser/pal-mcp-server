@@ -136,7 +136,11 @@ def is_dangerous_path(path: Path) -> bool:
         if resolved.parent == resolved:
             return True
 
-        # Check 2: System paths - block exact match AND all subdirectories
+        # Check 2: System paths - block exact match AND all subdirectories.
+        # Both the raw (unresolved) path and its resolved form are checked so that
+        # symlinks into dangerous directories are caught on any OS.  On NixOS for
+        # example, /etc/hosts resolves to /nix/store/... which is outside /etc, so
+        # checking only the resolved path would miss it.
         for dangerous in DANGEROUS_SYSTEM_PATHS:
             # Skip root "/" - already handled above
             if dangerous == "/":
@@ -147,6 +151,11 @@ def is_dangerous_path(path: Path) -> bool:
                 # Resolving the dangerous base path also handles platform symlinks
                 # (e.g., macOS /etc -> /private/etc, /var -> /private/var).
                 if resolved == dangerous_path or resolved.is_relative_to(dangerous_path):
+                    return True
+                # Also check the raw (pre-resolution) path so that symlinks whose
+                # target escapes the dangerous directory are still caught by the
+                # original path prefix (e.g. /etc/hosts on NixOS).
+                if path == dangerous_path or path.is_relative_to(dangerous_path):
                     return True
 
         # Check 3: Home containers - block ONLY exact match

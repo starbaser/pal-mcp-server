@@ -3,6 +3,7 @@ Tool implementations for PAL MCP Server
 """
 
 from .analyze import AnalyzeTool
+from .imagegen import ImageGenTool
 from .apilookup import LookupTool
 from .challenge import ChallengeTool
 from .chat import ChatTool
@@ -40,4 +41,5 @@ __all__ = [
     "TestGenTool",
     "TracerTool",
     "VersionTool",
+    "ImageGenTool",
 ]

@@ -56,6 +56,7 @@ from tools import (  # noqa: E402
     ConsensusTool,
     DebugIssueTool,
     DocgenTool,
+    ImageGenTool,
     ListModelsTool,
     LookupTool,
     PlannerTool,
@@ -277,6 +278,7 @@ TOOLS = {
     "apilookup": LookupTool(),  # Quick web/API lookup instructions
     "listmodels": ListModelsTool(),  # List all available AI models by provider
     "version": VersionTool(),  # Display server version and system information
+    "imagegen": ImageGenTool(),  # Native AI image generation and editing
 }
 TOOLS = filter_disabled_tools(TOOLS)
 

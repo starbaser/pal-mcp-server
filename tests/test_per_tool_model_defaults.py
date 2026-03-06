@@ -202,7 +202,7 @@ class TestFlexibleModelSelection:
                 "env": {"GEMINI_API_KEY": "test-key"},
                 "provider_type": ProviderType.GOOGLE,
                 "category": ToolModelCategory.FAST_RESPONSE,
-                "expected": "gemini-2.5-flash",
+                "expected": "gemini-3.1-flash-lite-preview",
             },
             # Case 3: OpenAI provider for fast response
             {

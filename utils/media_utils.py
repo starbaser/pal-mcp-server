@@ -10,7 +10,7 @@ from utils.file_types import (
     VIDEO_EXTENSIONS,
 )
 
-DEFAULT_MAX_IMAGE_SIZE_MB = 20.0
+DEFAULT_MAX_IMAGE_SIZE_MB = 2048.0
 
 __all__ = [
     "DEFAULT_MAX_IMAGE_SIZE_MB",

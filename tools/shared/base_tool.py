@@ -1452,14 +1452,14 @@ When recommending searches, be specific about what information you need and why 
         self, images: Optional[list[str]], model_context: Optional[Any] = None, continuation_id: Optional[str] = None
     ) -> Optional[dict]:
         """
-        Validate image size and count against model capabilities.
+        Validate image and video inputs against model capabilities.
 
-        This performs strict validation to ensure we don't exceed model-specific
-        image limits. Uses capability-based validation with actual model
-        configuration rather than hard-coded limits.
+        Images are subject to count and size limits. Videos bypass count/size
+        validation — provider APIs enforce their own limits — but still require
+        the model to declare `supports_video`.
 
         Args:
-            images: List of image paths/data URLs to validate
+            images: List of image/video paths or data URLs to validate
             model_context: Model context object containing model name, provider, and capabilities
             continuation_id: Optional continuation ID for conversation context
 
@@ -1472,6 +1472,12 @@ When recommending searches, be specific about what information you need and why 
         # Import here to avoid circular imports
         import base64
         from pathlib import Path
+
+        from utils.media_utils import is_video_file
+
+        # Split media into videos and images so each category is validated independently
+        video_items = [item for item in images if is_video_file(item)]
+        image_items = [item for item in images if not is_video_file(item)]
 
         if not model_context:
             # Get from tool's stored context as fallback
@@ -1500,6 +1506,29 @@ When recommending searches, be specific about what information you need and why 
                 },
             }
 
+        # Validate video support if any videos are present
+        if video_items and not capabilities.supports_video:
+            return {
+                "status": "error",
+                "content": (
+                    f"Video support not available: Model '{model_name}' does not support video processing. "
+                    f"Please use a video-capable model such as 'gemini-2.5-flash' or 'gemini-2.5-pro'."
+                ),
+                "content_type": "text",
+                "metadata": {
+                    "error_type": "validation_error",
+                    "model_name": model_name,
+                    "supports_video": False,
+                    "video_count": len(video_items),
+                },
+            }
+
+        # If there are only videos, skip image-specific validation entirely.
+        # Provider APIs enforce their own video size and count limits.
+        if not image_items:
+            logger.debug(f"Media validation passed: {len(video_items)} video(s), skipping image validation")
+            return None
+
         # Check if model supports images
         if not capabilities.supports_images:
             return {
@@ -1514,7 +1543,7 @@ When recommending searches, be specific about what information you need and why 
                     "error_type": "validation_error",
                     "model_name": model_name,
                     "supports_images": False,
-                    "image_count": len(images),
+                    "image_count": len(image_items),
                 },
             }
 
@@ -1522,26 +1551,26 @@ When recommending searches, be specific about what information you need and why 
         max_images = 5  # Default max number of images
         max_size_mb = capabilities.max_image_size_mb
 
-        # Check image count
-        if len(images) > max_images:
+        # Check image count (videos are excluded — they have no cap here)
+        if len(image_items) > max_images:
             return {
                 "status": "error",
                 "content": (
                     f"Too many images: Model '{model_name}' supports a maximum of {max_images} images, "
-                    f"but {len(images)} were provided. Please reduce the number of images."
+                    f"but {len(image_items)} were provided. Please reduce the number of images."
                 ),
                 "content_type": "text",
                 "metadata": {
                     "error_type": "validation_error",
                     "model_name": model_name,
-                    "image_count": len(images),
+                    "image_count": len(image_items),
                     "max_images": max_images,
                 },
             }
 
-        # Calculate total size of all images
+        # Calculate total size of all images (videos excluded — provider enforces their limits)
         total_size_mb = 0.0
-        for image_path in images:
+        for image_path in image_items:
             try:
                 if image_path.startswith("data:image/"):
                     # Handle data URL: data:image/png;base64,iVBORw0...
@@ -1590,13 +1619,16 @@ When recommending searches, be specific about what information you need and why 
                     "model_name": model_name,
                     "total_size_mb": round(total_size_mb, 2),
                     "limit_mb": round(effective_limit_mb, 2),
-                    "image_count": len(images),
+                    "image_count": len(image_items),
                     "supports_images": True,
                 },
             }
 
         # All validations passed
-        logger.debug(f"Image validation passed: {len(images)} images, {total_size_mb:.1f}MB total")
+        logger.debug(
+            f"Media validation passed: {len(image_items)} image(s), {total_size_mb:.1f}MB total"
+            + (f", {len(video_items)} video(s)" if video_items else "")
+        )
         return None
 
     def _parse_response(self, raw_text: str, request, model_info: Optional[dict] = None):

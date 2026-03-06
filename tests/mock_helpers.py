@@ -35,6 +35,7 @@ def create_mock_provider(model_name="gemini-2.5-flash", context_window=1_048_576
     mock_response.friendly_name = "Gemini"
     mock_response.provider = ProviderType.GOOGLE
     mock_response.metadata = {"finish_reason": "STOP"}
+    mock_response.generated_images = []
 
     mock_provider.generate_content.return_value = mock_response
 

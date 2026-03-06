@@ -179,8 +179,7 @@ class TestModelSelection:
             ModelProviderRegistry.register_provider(ProviderType.GOOGLE, GeminiModelProvider)
 
             model = ModelProviderRegistry.get_preferred_fallback_model()
-            # Should pick flash-lite for balanced use (lowest intelligence score)
-            assert model == "gemini-3.1-flash-lite-preview"
+            assert model == "gemini-2.5-flash"
 
 
 class TestFlexibleModelSelection:
@@ -202,7 +201,7 @@ class TestFlexibleModelSelection:
                 "env": {"GEMINI_API_KEY": "test-key"},
                 "provider_type": ProviderType.GOOGLE,
                 "category": ToolModelCategory.FAST_RESPONSE,
-                "expected": "gemini-3.1-flash-lite-preview",
+                "expected": "gemini-2.5-flash",
             },
             # Case 3: OpenAI provider for fast response
             {

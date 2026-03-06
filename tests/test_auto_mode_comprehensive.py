@@ -81,8 +81,8 @@ class TestAutoModeComprehensive:
                 },
                 {
                     "EXTENDED_REASONING": "gemini-3.1-pro-preview",  # Gemini 3.1 Pro Preview for deep thinking
-                    "FAST_RESPONSE": "gemini-3.1-flash-lite-preview",  # Flash lite for speed (lowest score)
-                    "BALANCED": "gemini-3.1-flash-lite-preview",  # Flash lite also selected for balanced (score 8)
+                    "FAST_RESPONSE": "gemini-2.5-flash",  # Flash lite for speed (lowest score)
+                    "BALANCED": "gemini-2.5-flash",  # Flash lite also selected for balanced (score 8)
                 },
             ),
             # Only OpenAI API available
@@ -123,8 +123,8 @@ class TestAutoModeComprehensive:
                 },
                 {
                     "EXTENDED_REASONING": "gemini-3.1-pro-preview",  # Gemini 3.1 Pro Preview comes first in priority
-                    "FAST_RESPONSE": "gemini-3.1-flash-lite-preview",  # Flash lite selected (lowest score)
-                    "BALANCED": "gemini-3.1-flash-lite-preview",  # Flash lite also selected for balanced (score 8)
+                    "FAST_RESPONSE": "gemini-2.5-flash",  # Flash lite selected (lowest score)
+                    "BALANCED": "gemini-2.5-flash",  # Flash lite also selected for balanced (score 8)
                 },
             ),
             # All native APIs available - Google still comes first
@@ -137,8 +137,8 @@ class TestAutoModeComprehensive:
                 },
                 {
                     "EXTENDED_REASONING": "gemini-3.1-pro-preview",  # Gemini 3.1 Pro Preview comes first in priority
-                    "FAST_RESPONSE": "gemini-3.1-flash-lite-preview",  # Flash lite selected (lowest score)
-                    "BALANCED": "gemini-3.1-flash-lite-preview",  # Flash lite also selected for balanced (score 8)
+                    "FAST_RESPONSE": "gemini-2.5-flash",  # Flash lite selected (lowest score)
+                    "BALANCED": "gemini-2.5-flash",  # Flash lite also selected for balanced (score 8)
                 },
             ),
         ],

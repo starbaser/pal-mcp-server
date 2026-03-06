@@ -60,8 +60,8 @@ class TestAutoModeProviderSelection:
 
             # Should select appropriate Gemini models
             assert extended_reasoning in ["gemini-3.1-pro-preview", "gemini-2.5-pro", "pro"]
-            assert fast_response in ["gemini-3.1-flash-lite-preview", "gemini-2.5-flash", "flash"]
-            assert balanced in ["gemini-3.1-flash-lite-preview", "gemini-2.5-flash", "flash"]
+            assert fast_response in ["gemini-2.5-flash", "gemini-2.5-flash", "flash"]
+            assert balanced in ["gemini-2.5-flash", "gemini-2.5-flash", "flash"]
 
         finally:
             # Restore original environment
@@ -142,7 +142,7 @@ class TestAutoModeProviderSelection:
             assert extended_reasoning == "gemini-3.1-pro-preview"  # Gemini 3.1 Pro Preview has higher priority now
 
             # Should prefer Gemini for fast response
-            assert fast_response == "gemini-3.1-flash-lite-preview"  # Flash lite has lowest score, selected for fast
+            assert fast_response == "gemini-2.5-flash"  # Flash lite has lowest score, selected for fast
 
         finally:
             # Restore original environment

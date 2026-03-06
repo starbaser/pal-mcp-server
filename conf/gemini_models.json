@@ -96,6 +96,29 @@
       "max_image_size_mb": 20.0
     },
     {
+      "model_name": "gemini-3-pro-image-preview",
+      "friendly_name": "Gemini Pro Image Preview",
+      "aliases": [
+        "pro-image",
+        "nano-banana-pro"
+      ],
+      "intelligence_score": 14,
+      "description": "Gemini 3 Pro Image Preview - Studio-quality native image generation with thinking support",
+      "context_window": 65536,
+      "max_output_tokens": 32768,
+      "max_thinking_tokens": 32768,
+      "supports_extended_thinking": true,
+      "supports_system_prompts": true,
+      "supports_streaming": true,
+      "supports_function_calling": false,
+      "supports_json_mode": false,
+      "supports_images": true,
+      "supports_video": false,
+      "supports_image_generation": true,
+      "supports_temperature": true,
+      "max_image_size_mb": 20.0
+    },
+    {
       "model_name": "gemini-3.1-flash-image-preview",
       "friendly_name": "Gemini Flash Image Preview",
       "aliases": [
@@ -106,7 +129,8 @@
       "description": "Gemini 3.1 Flash Image Preview - Native image generation and editing with text",
       "context_window": 1048576,
       "max_output_tokens": 65536,
-      "supports_extended_thinking": false,
+      "max_thinking_tokens": 24576,
+      "supports_extended_thinking": true,
       "supports_system_prompts": true,
       "supports_streaming": true,
       "supports_function_calling": false,

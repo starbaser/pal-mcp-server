@@ -77,7 +77,7 @@ TRACER_WORKFLOW_FIELD_DESCRIPTIONS = {
     "target_description": (
         "Description of what to trace and WHY. Include context about what you're trying to understand or analyze."
     ),
-    "images": ("Optional paths to architecture diagrams or flow charts that help understand the tracing context."),
+    "media": ("Optional paths to architecture diagrams or flow charts that help understand the tracing context."),
 }
 
 
@@ -110,7 +110,7 @@ class TracerRequest(WorkflowRequest):
     target_description: Optional[str] = Field(
         None, description=TRACER_WORKFLOW_FIELD_DESCRIPTIONS["target_description"]
     )
-    images: Optional[list[str]] = Field(default=None, description=TRACER_WORKFLOW_FIELD_DESCRIPTIONS["images"])
+    media: Optional[list[str]] = Field(default=None, description=TRACER_WORKFLOW_FIELD_DESCRIPTIONS["media"])
 
     # Exclude fields not relevant to tracing workflow
     issues_found: list[dict] = Field(default_factory=list, exclude=True, description="Tracing doesn't track issues")
@@ -201,10 +201,10 @@ class TracerTool(WorkflowTool):
                 "type": "string",
                 "description": TRACER_WORKFLOW_FIELD_DESCRIPTIONS["target_description"],
             },
-            "images": {
+            "media": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": TRACER_WORKFLOW_FIELD_DESCRIPTIONS["images"],
+                "description": TRACER_WORKFLOW_FIELD_DESCRIPTIONS["media"],
             },
         }
 
@@ -319,7 +319,7 @@ class TracerTool(WorkflowTool):
             "issues_found": [],  # Tracer doesn't track issues
             "confidence": request.confidence or "exploring",
             "hypothesis": None,  # Tracer doesn't use hypothesis
-            "images": request.images or [],
+            "media": request.media or [],
             # Tracer-specific fields
             "trace_mode": request.trace_mode,
             "target_description": request.target_description,
@@ -344,7 +344,7 @@ class TracerTool(WorkflowTool):
                 "relevant_files": len(self.consolidated_findings.relevant_files),
                 "relevant_context": len(self.consolidated_findings.relevant_context),
                 "issues_found": len(self.consolidated_findings.issues_found),
-                "images_collected": len(self.consolidated_findings.images),
+                "media_collected": len(self.consolidated_findings.media),
                 "current_confidence": self.get_request_confidence(request),
                 "step_history_length": current_step_count,
             },

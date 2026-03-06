@@ -28,7 +28,7 @@ COMMON_FIELD_DESCRIPTIONS = {
         "ALWAYS reuse the last continuation_id you were given—this preserves full conversation context, "
         "files, and findings so the agent can resume seamlessly."
     ),
-    "images": "Optional absolute image paths or base64 blobs for visual context.",
+    "media": "Optional absolute media file paths or base64 blobs for visual context.",
     "absolute_file_paths": "Full paths to relevant code",
 }
 
@@ -75,7 +75,7 @@ class ToolRequest(BaseModel):
     continuation_id: Optional[str] = Field(None, description=COMMON_FIELD_DESCRIPTIONS["continuation_id"])
 
     # Visual context
-    images: Optional[list[str]] = Field(None, description=COMMON_FIELD_DESCRIPTIONS["images"])
+    media: Optional[list[str]] = Field(None, description=COMMON_FIELD_DESCRIPTIONS["media"])
 
 
 class BaseWorkflowRequest(ToolRequest):
@@ -153,7 +153,7 @@ class ConsolidatedFindings(BaseModel):
     findings: list[str] = Field(default_factory=list, description="Chronological findings from each work step")
     hypotheses: list[dict] = Field(default_factory=list, description="Evolution of hypotheses across steps")
     issues_found: list[dict] = Field(default_factory=list, description="All issues with severity levels")
-    images: list[str] = Field(default_factory=list, description="Images collected during work")
+    media: list[str] = Field(default_factory=list, description="Media files collected during work")
     confidence: str = Field("low", description="Latest confidence level from steps")
 
 

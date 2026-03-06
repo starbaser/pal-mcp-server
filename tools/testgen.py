@@ -51,7 +51,7 @@ TESTGEN_WORKFLOW_FIELD_DESCRIPTIONS = {
         "Do NOT use 'certain' unless the test generation analysis is comprehensively complete, use 'very_high' or 'almost_certain' instead if not 100% sure. "
         "Using 'certain' means you have complete confidence locally and prevents external model validation."
     ),
-    "images": "Optional absolute paths to diagrams or visuals that clarify the system under test.",
+    "media": "Optional absolute paths to diagrams or visuals that clarify the system under test.",
 }
 
 
@@ -77,8 +77,8 @@ class TestGenRequest(WorkflowRequest):
     )
     confidence: Optional[str] = Field("low", description=TESTGEN_WORKFLOW_FIELD_DESCRIPTIONS["confidence"])
 
-    # Optional images for visual context
-    images: Optional[list[str]] = Field(default=None, description=TESTGEN_WORKFLOW_FIELD_DESCRIPTIONS["images"])
+    # Optional media for visual context
+    media: Optional[list[str]] = Field(default=None, description=TESTGEN_WORKFLOW_FIELD_DESCRIPTIONS["media"])
 
     # Override inherited fields to exclude them from schema (except model which needs to be available)
     temperature: Optional[float] = Field(default=None, exclude=True)
@@ -177,10 +177,10 @@ class TestGenTool(WorkflowTool):
                 "enum": ["exploring", "low", "medium", "high", "very_high", "almost_certain", "certain"],
                 "description": TESTGEN_WORKFLOW_FIELD_DESCRIPTIONS["confidence"],
             },
-            "images": {
+            "media": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": TESTGEN_WORKFLOW_FIELD_DESCRIPTIONS["images"],
+                "description": TESTGEN_WORKFLOW_FIELD_DESCRIPTIONS["media"],
             },
         }
 
@@ -266,10 +266,10 @@ class TestGenTool(WorkflowTool):
             methods_text = "\n".join(f"- {method}" for method in consolidated_findings.relevant_context)
             context_parts.append(f"\n=== CODE ELEMENTS TO TEST ===\n{methods_text}\n=== END CODE ELEMENTS ===")
 
-        # Add images if available
-        if consolidated_findings.images:
-            images_text = "\n".join(f"- {img}" for img in consolidated_findings.images)
-            context_parts.append(f"\n=== VISUAL DOCUMENTATION ===\n{images_text}\n=== END VISUAL DOCUMENTATION ===")
+        # Add media if available
+        if consolidated_findings.media:
+            media_text = "\n".join(f"- {img}" for img in consolidated_findings.media)
+            context_parts.append(f"\n=== VISUAL DOCUMENTATION ===\n{media_text}\n=== END VISUAL DOCUMENTATION ===")
 
         return "\n".join(context_parts)
 
@@ -325,7 +325,7 @@ class TestGenTool(WorkflowTool):
             "relevant_files": request.relevant_files,
             "relevant_context": request.relevant_context,
             "confidence": request.confidence,
-            "images": request.images or [],
+            "media": request.media or [],
         }
         return step_data
 

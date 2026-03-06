@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 from openai import OpenAI
 
 from utils.env import get_env, suppress_env_vars
-from utils.image_utils import validate_image
+from utils.media_utils import is_video_file, validate_media
 
 from .base import ModelProvider
 from .shared import (
@@ -503,7 +503,7 @@ class OpenAICompatibleProvider(ModelProvider):
         system_prompt: Optional[str] = None,
         temperature: float = 0.3,
         max_output_tokens: Optional[int] = None,
-        images: Optional[list[str]] = None,
+        media: Optional[list[str]] = None,
         **kwargs,
     ) -> ModelResponse:
         """Generate content using the OpenAI-compatible API.
@@ -514,7 +514,7 @@ class OpenAICompatibleProvider(ModelProvider):
             system_prompt: Optional system prompt for model behavior
             temperature: Sampling temperature
             max_output_tokens: Maximum tokens to generate
-            images: Optional list of image paths or data URLs to include with the prompt (for vision models)
+            media: Optional list of image paths or data URLs to include with the prompt (for vision models)
             **kwargs: Additional provider-specific parameters
 
         Returns:
@@ -558,19 +558,23 @@ class OpenAICompatibleProvider(ModelProvider):
         user_content = []
         user_content.append({"type": "text", "text": prompt})
 
-        # Add images if provided and model supports vision
-        if images and capabilities and capabilities.supports_images:
-            for image_path in images:
+        # Add media if provided and model supports vision
+        if media and capabilities and capabilities.supports_images:
+            for media_path in media:
+                if is_video_file(media_path):
+                    raise ValueError(
+                        f"Model {resolved_model} does not support video inputs. "
+                        f"Remove video media or use a model with video support."
+                    )
                 try:
-                    image_content = self._process_image(image_path)
-                    if image_content:
-                        user_content.append(image_content)
+                    media_content = self._process_image(media_path)
+                    if media_content:
+                        user_content.append(media_content)
                 except Exception as e:
-                    logging.warning(f"Failed to process image {image_path}: {e}")
-                    # Continue with other images and text
+                    logging.warning(f"Failed to process media {media_path}: {e}")
                     continue
-        elif images and (not capabilities or not capabilities.supports_images):
-            logging.warning(f"Model {resolved_model} does not support images, ignoring {len(images)} image(s)")
+        elif media and (not capabilities or not capabilities.supports_images):
+            logging.warning(f"Model {resolved_model} does not support images, ignoring {len(media)} media item(s)")
 
         # Add user message
         if len(user_content) == 1:
@@ -835,12 +839,12 @@ class OpenAICompatibleProvider(ModelProvider):
         try:
             if image_path.startswith("data:"):
                 # Validate the data URL
-                validate_image(image_path)
+                validate_media(image_path)
                 # Handle data URL: data:image/png;base64,iVBORw0...
                 return {"type": "image_url", "image_url": {"url": image_path}}
             else:
                 # Use base class validation
-                image_bytes, mime_type = validate_image(image_path)
+                image_bytes, mime_type = validate_media(image_path)
 
                 # Read and encode the image
                 import base64

@@ -98,7 +98,7 @@ class TestPrecommitWorkflowTool:
             relevant_files=["/file1.py"],
             relevant_context=["function_name", "class_name"],
             issues_found=[{"severity": "medium", "description": "Test issue"}],
-            images=["/screenshot.png"],
+            media=["/screenshot.png"],
         )
 
         assert request.precommit_type == "external"
@@ -106,7 +106,7 @@ class TestPrecommitWorkflowTool:
         assert len(request.relevant_files) == 1
         assert len(request.relevant_context) == 2
         assert len(request.issues_found) == 1
-        assert len(request.images) == 1
+        assert len(request.media) == 1
 
     def test_precommit_specific_fields(self):
         """Test precommit-specific configuration fields"""

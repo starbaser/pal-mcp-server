@@ -160,7 +160,7 @@ class ConversationTurn(BaseModel):
         content: The actual message content/response
         timestamp: ISO timestamp when this turn was created
         files: List of file paths referenced in this specific turn
-        images: List of image paths referenced in this specific turn
+        media: List of media paths referenced in this specific turn
         tool_name: Which tool generated this turn (for cross-tool tracking)
         model_provider: Provider used (e.g., "google", "openai")
         model_name: Specific model used (e.g., "gemini-2.5-flash", "o3-mini")
@@ -171,7 +171,7 @@ class ConversationTurn(BaseModel):
     content: str
     timestamp: str
     files: Optional[list[str]] = None  # Files referenced in this turn
-    images: Optional[list[str]] = None  # Images referenced in this turn
+    media: Optional[list[str]] = None  # Media referenced in this turn
     tool_name: Optional[str] = None  # Tool used for this turn
     model_provider: Optional[str] = None  # Model provider (google, openai, etc)
     model_name: Optional[str] = None  # Specific model used
@@ -207,10 +207,10 @@ class ThreadContext(BaseModel):
 
 def get_storage():
     """
-    Get in-memory storage backend for conversation persistence.
+    Get the configured storage backend for conversation persistence.
 
     Returns:
-        InMemoryStorage: Thread-safe in-memory storage backend
+        Storage backend instance (InMemoryStorage or FileStorage)
     """
     from .storage_backend import get_storage_backend
 
@@ -310,7 +310,7 @@ def add_turn(
     role: str,
     content: str,
     files: Optional[list[str]] = None,
-    images: Optional[list[str]] = None,
+    media: Optional[list[str]] = None,
     tool_name: Optional[str] = None,
     model_provider: Optional[str] = None,
     model_name: Optional[str] = None,
@@ -328,7 +328,7 @@ def add_turn(
         role: "user" (Agent request) or "assistant" (model response)
         content: The actual message/response content
         files: Optional list of files referenced in this turn
-        images: Optional list of images referenced in this turn
+        media: Optional list of media referenced in this turn
         tool_name: Name of the tool adding this turn (for attribution)
         model_provider: Provider used (e.g., "google", "openai")
         model_name: Specific model used (e.g., "gemini-2.5-flash", "o3-mini")
@@ -346,7 +346,7 @@ def add_turn(
         - Refreshes thread TTL to configured timeout on successful update
         - Turn limits prevent runaway conversations
         - File references are preserved for cross-tool access with atomic ordering
-        - Image references are preserved for cross-tool visual context
+        - Media references are preserved for cross-tool visual context
         - Model information enables cross-provider conversations
     """
     logger.debug(f"[FLOW] Adding {role} turn to {thread_id} ({tool_name})")
@@ -367,7 +367,7 @@ def add_turn(
         content=content,
         timestamp=datetime.now(timezone.utc).isoformat(),
         files=files,  # Preserved for cross-tool file context
-        images=images,  # Preserved for cross-tool visual context
+        media=media,  # Preserved for cross-tool visual context
         tool_name=tool_name,  # Track which tool generated this turn
         model_provider=model_provider,  # Track model provider
         model_name=model_name,  # Track specific model
@@ -502,31 +502,31 @@ def get_conversation_file_list(context: ThreadContext) -> list[str]:
     return file_list
 
 
-def get_conversation_image_list(context: ThreadContext) -> list[str]:
+def get_conversation_media_list(context: ThreadContext) -> list[str]:
     """
-    Extract all unique images from conversation turns with newest-first prioritization.
+    Extract all unique media from conversation turns with newest-first prioritization.
 
     This function implements the identical prioritization logic as get_conversation_file_list()
-    to ensure consistency in how images are handled across conversation turns. It walks
-    backwards through conversation turns (from newest to oldest) and collects unique image
-    references, ensuring that when the same image appears in multiple turns, the reference
+    to ensure consistency in how media is handled across conversation turns. It walks
+    backwards through conversation turns (from newest to oldest) and collects unique media
+    references, ensuring that when the same media item appears in multiple turns, the reference
     from the NEWEST turn takes precedence.
 
     PRIORITIZATION ALGORITHM:
     1. Iterate through turns in REVERSE order (index len-1 down to 0)
-    2. For each turn, process images in the order they appear in turn.images
-    3. Add image to result list only if not already seen (newest reference wins)
-    4. Skip duplicate images that were already added from newer turns
+    2. For each turn, process media in the order they appear in turn.media
+    3. Add media to result list only if not already seen (newest reference wins)
+    4. Skip duplicate media that were already added from newer turns
 
     This ensures that:
-    - Images from newer conversation turns appear first in the result
-    - When the same image is referenced multiple times, only the newest reference is kept
+    - Media from newer conversation turns appear first in the result
+    - When the same media item is referenced multiple times, only the newest reference is kept
     - The order reflects the most recent conversation context
 
     Example:
-        Turn 1: images = ["diagram.png", "flow.jpg"]
-        Turn 2: images = ["error.png"]
-        Turn 3: images = ["diagram.png", "updated.png"]  # diagram.png appears again
+        Turn 1: media = ["diagram.png", "flow.jpg"]
+        Turn 2: media = ["error.png"]
+        Turn 3: media = ["diagram.png", "updated.png"]  # diagram.png appears again
 
         Result: ["diagram.png", "updated.png", "error.png", "flow.jpg"]
         (diagram.png from Turn 3 takes precedence over Turn 1)
@@ -535,43 +535,43 @@ def get_conversation_image_list(context: ThreadContext) -> list[str]:
         context: ThreadContext containing all conversation turns to process
 
     Returns:
-        list[str]: Unique image paths ordered by newest reference first.
-                   Empty list if no turns exist or no images are referenced.
+        list[str]: Unique media paths ordered by newest reference first.
+                   Empty list if no turns exist or no media is referenced.
 
     Performance:
-        - Time Complexity: O(n*m) where n=turns, m=avg images per turn
-        - Space Complexity: O(i) where i=total unique images
+        - Time Complexity: O(n*m) where n=turns, m=avg media per turn
+        - Space Complexity: O(i) where i=total unique media items
         - Uses set for O(1) duplicate detection
     """
     if not context.turns:
-        logger.debug("[IMAGES] No turns found, returning empty image list")
+        logger.debug("[MEDIA] No turns found, returning empty media list")
         return []
 
-    # Collect images by walking backwards (newest to oldest turns)
-    seen_images = set()
-    image_list = []
+    # Collect media by walking backwards (newest to oldest turns)
+    seen_media = set()
+    media_list = []
 
-    logger.debug(f"[IMAGES] Collecting images from {len(context.turns)} turns (newest first)")
+    logger.debug(f"[MEDIA] Collecting media from {len(context.turns)} turns (newest first)")
 
     # Process turns in reverse order (newest first) - this is the CORE of newest-first prioritization
     # By iterating from len-1 down to 0, we encounter newer turns before older turns
-    # When we find a duplicate image, we skip it because the newer version is already in our list
+    # When we find a duplicate media item, we skip it because the newer version is already in our list
     for i in range(len(context.turns) - 1, -1, -1):  # REVERSE: newest turn first
         turn = context.turns[i]
-        if turn.images:
-            logger.debug(f"[IMAGES] Turn {i + 1} has {len(turn.images)} images: {turn.images}")
-            for image_path in turn.images:
-                if image_path not in seen_images:
-                    # First time seeing this image - add it (this is the NEWEST reference)
-                    seen_images.add(image_path)
-                    image_list.append(image_path)
-                    logger.debug(f"[IMAGES] Added new image: {image_path} (from turn {i + 1})")
+        if turn.media:
+            logger.debug(f"[MEDIA] Turn {i + 1} has {len(turn.media)} media items: {turn.media}")
+            for media_path in turn.media:
+                if media_path not in seen_media:
+                    # First time seeing this media - add it (this is the NEWEST reference)
+                    seen_media.add(media_path)
+                    media_list.append(media_path)
+                    logger.debug(f"[MEDIA] Added new media: {media_path} (from turn {i + 1})")
                 else:
-                    # Image already seen from a NEWER turn - skip this older reference
-                    logger.debug(f"[IMAGES] Skipping duplicate image: {image_path} (newer version already included)")
+                    # Media already seen from a NEWER turn - skip this older reference
+                    logger.debug(f"[MEDIA] Skipping duplicate media: {media_path} (newer version already included)")
 
-    logger.debug(f"[IMAGES] Final image list ({len(image_list)}): {image_list}")
-    return image_list
+    logger.debug(f"[MEDIA] Final media list ({len(media_list)}): {media_list}")
+    return media_list
 
 
 def _plan_file_inclusion_by_size(all_files: list[str], max_file_tokens: int) -> tuple[list[str], list[str], int]:

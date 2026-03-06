@@ -205,7 +205,7 @@ class DocgenTool(WorkflowTool):
             "model",  # Documentation doesn't need external model selection
             "temperature",  # Documentation doesn't need temperature control
             "thinking_mode",  # Documentation doesn't need thinking mode
-            "images",  # Documentation doesn't use images
+            "media",  # Documentation doesn't use media
         ]
 
         return WorkflowSchemaBuilder.build_schema(
@@ -419,7 +419,7 @@ class DocgenTool(WorkflowTool):
             "issues_found": [],  # Docgen uses this for documentation gaps
             "confidence": "medium",  # Default confidence for docgen
             "hypothesis": "systematic_documentation_needed",  # Default hypothesis
-            "images": [],  # Docgen doesn't typically use images
+            "media": [],  # Docgen doesn't typically use media
             # CRITICAL: Include documentation configuration parameters so the model can see them
             "document_complexity": request.document_complexity,
             "document_flow": request.document_flow,

@@ -47,7 +47,7 @@ class TestChatTool:
         properties = schema["properties"]
         assert "prompt" in properties
         assert "absolute_file_paths" in properties
-        assert "images" in properties
+        assert "media" in properties
         assert "working_directory_absolute_path" in properties
 
     def test_request_model_validation(self):
@@ -56,7 +56,7 @@ class TestChatTool:
         request_data = {
             "prompt": "Test prompt",
             "absolute_file_paths": ["test.txt"],
-            "images": ["test.png"],
+            "media": ["test.png"],
             "model": "anthropic/claude-opus-4.1",
             "temperature": 0.7,
             "working_directory_absolute_path": "/tmp",  # Dummy absolute path
@@ -65,7 +65,7 @@ class TestChatTool:
         request = ChatRequest(**request_data)
         assert request.prompt == "Test prompt"
         assert request.absolute_file_paths == ["test.txt"]
-        assert request.images == ["test.png"]
+        assert request.media == ["test.png"]
         assert request.model == "anthropic/claude-opus-4.1"
         assert request.temperature == 0.7
         assert request.working_directory_absolute_path == "/tmp"
@@ -250,7 +250,7 @@ class TestChatTool:
         tool_fields = self.tool.get_tool_fields()
         assert "prompt" in tool_fields
         assert "absolute_file_paths" in tool_fields
-        assert "images" in tool_fields
+        assert "media" in tool_fields
 
         required_fields = self.tool.get_required_fields()
         assert "prompt" in required_fields
@@ -269,7 +269,7 @@ class TestChatRequestModel:
         assert "context" in CHAT_FIELD_DESCRIPTIONS["prompt"]
         files_desc = CHAT_FIELD_DESCRIPTIONS["absolute_file_paths"].lower()
         assert "absolute" in files_desc
-        assert "visual context" in CHAT_FIELD_DESCRIPTIONS["images"]
+        assert "visual context" in CHAT_FIELD_DESCRIPTIONS["media"]
         assert "directory" in CHAT_FIELD_DESCRIPTIONS["working_directory_absolute_path"].lower()
 
     def test_working_directory_absolute_path_description_matches_behavior(self):
@@ -290,7 +290,7 @@ class TestChatRequestModel:
                 {
                     "prompt": "test",
                     "absolute_file_paths": [],
-                    "images": [],
+                    "media": [],
                     "working_directory_absolute_path": str(missing_dir),
                 }
             )
@@ -305,7 +305,7 @@ class TestChatRequestModel:
 
         assert request.prompt == "Test"
         assert request.absolute_file_paths == []  # Should default to empty list
-        assert request.images == []  # Should default to empty list
+        assert request.media == []  # Should default to empty list
 
     def test_inheritance(self):
         """Test that ChatRequest properly inherits from ToolRequest"""
@@ -319,7 +319,7 @@ class TestChatRequestModel:
         assert hasattr(request, "temperature")
         assert hasattr(request, "thinking_mode")
         assert hasattr(request, "continuation_id")
-        assert hasattr(request, "images")  # From base model too
+        assert hasattr(request, "media")  # From base model too
 
 
 if __name__ == "__main__":

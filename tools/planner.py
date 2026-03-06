@@ -88,7 +88,7 @@ class PlannerRequest(WorkflowRequest):
     temperature: float | None = Field(default=None, exclude=True)
     thinking_mode: str | None = Field(default=None, exclude=True)
     use_assistant_model: bool | None = Field(default=False, exclude=True, description="Planning is self-contained")
-    images: list | None = Field(default=None, exclude=True, description="Planning doesn't use images")
+    media: list | None = Field(default=None, exclude=True, description="Planning doesn't use media")
 
     @field_validator("step_number")
     @classmethod
@@ -215,7 +215,7 @@ class PlannerTool(WorkflowTool):
         excluded_common_fields = [
             "temperature",  # Planning doesn't need temperature control
             "thinking_mode",  # Planning doesn't need thinking mode
-            "images",  # Planning doesn't use images
+            "media",  # Planning doesn't use media
             "absolute_file_paths",  # Planning doesn't use file attachments
         ]
 
@@ -301,7 +301,7 @@ class PlannerTool(WorkflowTool):
             "issues_found": [],  # Planner doesn't track issues
             "confidence": "planning",  # Planning confidence is different from investigation
             "hypothesis": None,  # Planner doesn't use hypothesis
-            "images": [],  # Planner doesn't use images
+            "media": [],  # Planner doesn't use media
             # Planner-specific fields
             "is_step_revision": request.is_step_revision or False,
             "revises_step_number": request.revises_step_number,
@@ -331,7 +331,7 @@ class PlannerTool(WorkflowTool):
                 "relevant_files": len(self.consolidated_findings.relevant_files),
                 "relevant_context": len(self.consolidated_findings.relevant_context),
                 "issues_found": len(self.consolidated_findings.issues_found),
-                "images_collected": len(self.consolidated_findings.images),
+                "media_collected": len(self.consolidated_findings.media),
                 "current_confidence": self.get_request_confidence(request),
                 "step_history_length": current_step_count,  # Use work_history + current step
             },

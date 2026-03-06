@@ -11,7 +11,7 @@ from google import genai
 from google.genai import types
 
 from utils.env import get_env
-from utils.image_utils import validate_image
+from utils.media_utils import is_video_file, validate_media
 
 from .base import ModelProvider
 from .registries.gemini import GeminiModelRegistry
@@ -119,7 +119,7 @@ class GeminiModelProvider(RegistryBackedProviderMixin, ModelProvider):
         temperature: float = 1.0,
         max_output_tokens: Optional[int] = None,
         thinking_mode: str = "medium",
-        images: Optional[list[str]] = None,
+        media: Optional[list[str]] = None,
         **kwargs,
     ) -> ModelResponse:
         """
@@ -132,7 +132,7 @@ class GeminiModelProvider(RegistryBackedProviderMixin, ModelProvider):
             temperature: Controls randomness in generation (0.0=deterministic, 1.0=creative), default 0.3
             max_output_tokens: Optional maximum number of tokens to generate in the response
             thinking_mode: Thinking budget level for models that support it ("minimal", "low", "medium", "high", "max"), default "medium"
-            images: Optional list of image paths or data URLs to include with the prompt (for vision models)
+            media: Optional list of image or video paths or data URLs to include with the prompt (for vision/video models)
             **kwargs: Additional keyword arguments (reserved for future use)
 
         Returns:
@@ -156,31 +156,28 @@ class GeminiModelProvider(RegistryBackedProviderMixin, ModelProvider):
 
         parts.append({"text": full_prompt})
 
-        # Add images if provided and model supports vision
-        if images and capabilities.supports_images:
-            for image_path in images:
+        # Add media if provided and model supports vision/video
+        if media and capabilities.supports_images:
+            for media_path in media:
+                if is_video_file(media_path) and not capabilities.supports_video:
+                    raise ValueError(
+                        f"Model {resolved_model_name} does not support video inputs. "
+                        f"Remove video media or use a model with supports_video capability."
+                    )
                 try:
-                    image_part = self._process_image(image_path)
-                    if image_part:
-                        parts.append(image_part)
+                    media_part = self._process_image(media_path)
+                    if media_part:
+                        parts.append(media_part)
                 except Exception as e:
-                    logger.warning(f"Failed to process image {image_path}: {e}")
-                    # Continue with other images and text
+                    logger.warning(f"Failed to process media {media_path}: {e}")
                     continue
-        elif images and not capabilities.supports_images:
-            logger.warning(f"Model {resolved_model_name} does not support images, ignoring {len(images)} image(s)")
+        elif media and not capabilities.supports_images:
+            logger.warning(f"Model {resolved_model_name} does not support images, ignoring {len(media)} media item(s)")
 
         # Create contents structure
         contents = [{"parts": parts}]
 
-        # Gemini 3 Pro Preview currently rejects medium thinking budgets; bump to high.
         effective_thinking_mode = thinking_mode
-        if resolved_model_name == "gemini-3-pro-preview" and thinking_mode == "medium":
-            logger.debug(
-                "Overriding thinking mode 'medium' with 'high' for %s due to launch limitation",
-                resolved_model_name,
-            )
-            effective_thinking_mode = "high"
 
         # Prepare generation config
         generation_config = types.GenerateContentConfig(
@@ -431,10 +428,10 @@ class GeminiModelProvider(RegistryBackedProviderMixin, ModelProvider):
         return any(indicator in error_str for indicator in retryable_indicators)
 
     def _process_image(self, image_path: str) -> Optional[dict]:
-        """Process an image for Gemini API."""
+        """Process an image or video for Gemini API."""
         try:
             # Use base class validation
-            image_bytes, mime_type = validate_image(image_path)
+            image_bytes, mime_type = validate_media(image_path)
 
             # For data URLs, extract the base64 data directly
             if image_path.startswith("data:"):

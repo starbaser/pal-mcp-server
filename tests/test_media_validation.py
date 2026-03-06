@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from utils.image_utils import DEFAULT_MAX_IMAGE_SIZE_MB, validate_image
+from utils.media_utils import DEFAULT_MAX_IMAGE_SIZE_MB, validate_image
 
 
 class TestImageValidation:
@@ -31,7 +31,7 @@ class TestImageValidation:
         [
             ("data:image/png", "Invalid data URL format"),  # Missing base64 part
             ("data:image/png;base64", "Invalid data URL format"),  # Missing data
-            ("data:text/plain;base64,dGVzdA==", "Unsupported image type"),  # Not an image
+            ("data:text/plain;base64,dGVzdA==", "Unsupported media type"),  # Not an image
         ],
     )
     def test_validate_data_url_invalid_format(self, invalid_url: str, expected_error: str) -> None:
@@ -45,7 +45,7 @@ class TestImageValidation:
         # Test case that's not a data URL at all
         with pytest.raises(ValueError) as excinfo:
             validate_image("image/png;base64,abc123")
-        assert "Image file not found" in str(excinfo.value)  # Treated as file path
+        assert "Media file not found" in str(excinfo.value)  # Treated as file path
 
     def test_validate_data_url_unsupported_type(self) -> None:
         """Test validation of unsupported image type in data URL."""
@@ -53,7 +53,7 @@ class TestImageValidation:
 
         with pytest.raises(ValueError) as excinfo:
             validate_image(data_url)
-        assert "Unsupported image type: image/bmp" in str(excinfo.value)
+        assert "Unsupported media type: image/bmp" in str(excinfo.value)
 
     def test_validate_data_url_invalid_base64(self) -> None:
         """Test validation of data URL with invalid base64."""
@@ -77,7 +77,7 @@ class TestImageValidation:
         # Should fail with default 20MB limit
         with pytest.raises(ValueError) as excinfo:
             validate_image(data_url)
-        assert f"Image too large: 21.0MB (max: {DEFAULT_MAX_IMAGE_SIZE_MB:.1f}MB)" in str(excinfo.value)
+        assert f"Media too large: 21.0MB (max: {DEFAULT_MAX_IMAGE_SIZE_MB:.1f}MB)" in str(excinfo.value)
 
         # Should succeed with higher limit
         image_bytes, mime_type = validate_image(data_url, max_size_mb=25.0)
@@ -107,7 +107,7 @@ class TestImageValidation:
         """Test validation of non-existent file."""
         with pytest.raises(ValueError) as excinfo:
             validate_image("/path/to/nonexistent/image.png")
-        assert "Image file not found" in str(excinfo.value)
+        assert "Media file not found" in str(excinfo.value)
 
     def test_validate_file_path_unsupported_extension(self) -> None:
         """Test validation of file with unsupported extension."""
@@ -118,7 +118,7 @@ class TestImageValidation:
         try:
             with pytest.raises(ValueError) as excinfo:
                 validate_image(tmp_file_path)
-            assert "Unsupported image format: .bmp" in str(excinfo.value)
+            assert "Unsupported media format: .bmp" in str(excinfo.value)
         finally:
             os.unlink(tmp_file_path)
 
@@ -132,7 +132,7 @@ class TestImageValidation:
 
         with pytest.raises(ValueError) as excinfo:
             validate_image(tmp_file_path)
-        assert "Image file not found" in str(excinfo.value)
+        assert "Media file not found" in str(excinfo.value)
 
     def test_validate_image_size_limit(self) -> None:
         """Test validation of image size limits."""
@@ -146,7 +146,7 @@ class TestImageValidation:
         try:
             with pytest.raises(ValueError) as excinfo:
                 validate_image(tmp_file_path, max_size_mb=20.0)
-            assert "Image too large: 21.0MB (max: 20.0MB)" in str(excinfo.value)
+            assert "Media too large: 21.0MB (max: 20.0MB)" in str(excinfo.value)
         finally:
             os.unlink(tmp_file_path)
 
@@ -163,7 +163,7 @@ class TestImageValidation:
             # Should fail with 1MB limit
             with pytest.raises(ValueError) as excinfo:
                 validate_image(tmp_file_path, max_size_mb=1.0)
-            assert "Image too large: 2.0MB (max: 1.0MB)" in str(excinfo.value)
+            assert "Media too large: 2.0MB (max: 1.0MB)" in str(excinfo.value)
 
             # Should succeed with 3MB limit
             image_bytes, mime_type = validate_image(tmp_file_path, max_size_mb=3.0)
@@ -231,7 +231,7 @@ class TestProviderIntegration:
         # Test with non-existent file
         result = provider._process_image("/nonexistent/image.png")
         assert result is None
-        mock_logger.warning.assert_called_with("Image file not found: /nonexistent/image.png")
+        mock_logger.warning.assert_called_with("Media file not found: /nonexistent/image.png")
 
     @patch("providers.openai_compatible.logging")
     def test_openai_compatible_provider_uses_validation(self, mock_logging: Mock) -> None:
@@ -244,7 +244,7 @@ class TestProviderIntegration:
         # Test with non-existent file
         result = provider._process_image("/nonexistent/image.png")
         assert result is None
-        mock_logging.warning.assert_called_with("Image file not found: /nonexistent/image.png")
+        mock_logging.warning.assert_called_with("Media file not found: /nonexistent/image.png")
 
     def test_data_url_preservation(self) -> None:
         """Test that data URLs are properly preserved through validation."""

@@ -50,6 +50,7 @@ class ModelCapabilities:
     supports_streaming: bool = True
     supports_function_calling: bool = False
     supports_images: bool = False
+    supports_video: bool = False
     supports_json_mode: bool = False
     supports_temperature: bool = True
     use_openai_response_api: bool = False

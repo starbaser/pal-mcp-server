@@ -51,7 +51,7 @@ PRECOMMIT_WORKFLOW_FIELD_DESCRIPTIONS = {
     "relevant_context": "Key functions/methods touched by the change (e.g. 'Class.method', 'function_name').",
     "issues_found": "List issues with severity (critical/high/medium/low) plus descriptions (bugs, security, performance, coverage).",
     "precommit_type": "'external' (default, triggers expert model) or 'internal' (local-only validation).",
-    "images": "Optional absolute paths to screenshots or diagrams that aid validation.",
+    "media": "Optional absolute paths to screenshots or diagrams that aid validation.",
     "path": "Absolute path to the repository root. Required in step 1.",
     "compare_to": "Optional git ref (branch/tag/commit) to diff against; falls back to staged/unstaged changes.",
     "include_staged": "Whether to inspect staged changes (ignored when `compare_to` is set).",
@@ -88,8 +88,8 @@ class PrecommitRequest(WorkflowRequest):
         "external", description=PRECOMMIT_WORKFLOW_FIELD_DESCRIPTIONS["precommit_type"]
     )
 
-    # Optional images for visual validation
-    images: Optional[list[str]] = Field(default=None, description=PRECOMMIT_WORKFLOW_FIELD_DESCRIPTIONS["images"])
+    # Optional media for visual validation
+    media: Optional[list[str]] = Field(default=None, description=PRECOMMIT_WORKFLOW_FIELD_DESCRIPTIONS["media"])
 
     # Precommit-specific fields (only used in step 1 to initialize)
     # Required for step 1, validated in model_validator
@@ -206,10 +206,10 @@ class PrecommitTool(WorkflowTool):
                 "items": {"type": "object"},
                 "description": PRECOMMIT_WORKFLOW_FIELD_DESCRIPTIONS["issues_found"],
             },
-            "images": {
+            "media": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": PRECOMMIT_WORKFLOW_FIELD_DESCRIPTIONS["images"],
+                "description": PRECOMMIT_WORKFLOW_FIELD_DESCRIPTIONS["media"],
             },
             # Precommit-specific fields (for step 1)
             "path": {
@@ -408,11 +408,11 @@ class PrecommitTool(WorkflowTool):
             )
             context_parts.append(f"\\n=== ASSESSMENT EVOLUTION ===\\n{assessments_text}\\n=== END ASSESSMENTS ===")
 
-        # Add images if available
-        if consolidated_findings.images:
-            images_text = "\\n".join(f"- {img}" for img in consolidated_findings.images)
+        # Add media if available
+        if consolidated_findings.media:
+            media_text = "\\n".join(f"- {img}" for img in consolidated_findings.media)
             context_parts.append(
-                f"\\n=== VISUAL VALIDATION INFORMATION ===\\n{images_text}\\n=== END VISUAL INFORMATION ==="
+                f"\\n=== VISUAL VALIDATION INFORMATION ===\\n{media_text}\\n=== END VISUAL INFORMATION ==="
             )
 
         return "\\n".join(context_parts)
@@ -471,7 +471,7 @@ class PrecommitTool(WorkflowTool):
             "issues_found": request.issues_found,
             "precommit_type": request.precommit_type,
             "hypothesis": request.findings,  # Map findings to hypothesis for compatibility
-            "images": request.images or [],
+            "media": request.media or [],
             "confidence": "high",  # Dummy value for workflow_mixin compatibility
         }
         return step_data

@@ -55,7 +55,7 @@ CONSENSUS_WORKFLOW_FIELD_DESCRIPTIONS = {
     ),
     "current_model_index": "0-based index of the next model to consult (managed internally).",
     "model_responses": "Internal log of responses gathered so far.",
-    "images": "Optional absolute image paths or base64 references that add helpful visual context.",
+    "media": "Optional absolute image paths or base64 references that add helpful visual context.",
 }
 
 
@@ -89,8 +89,8 @@ class ConsensusRequest(WorkflowRequest):
         description=CONSENSUS_WORKFLOW_FIELD_DESCRIPTIONS["model_responses"],
     )
 
-    # Optional images for visual debugging
-    images: list[str] | None = Field(default=None, description=CONSENSUS_WORKFLOW_FIELD_DESCRIPTIONS["images"])
+    # Optional media for visual context
+    media: list[str] | None = Field(default=None, description=CONSENSUS_WORKFLOW_FIELD_DESCRIPTIONS["media"])
 
     # Override inherited fields to exclude them from schema
     temperature: float | None = Field(default=None, exclude=True)
@@ -250,10 +250,10 @@ of the evidence, even when it strongly points in one direction.""",
                 "items": {"type": "object"},
                 "description": CONSENSUS_WORKFLOW_FIELD_DESCRIPTIONS["model_responses"],
             },
-            "images": {
+            "media": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": CONSENSUS_WORKFLOW_FIELD_DESCRIPTIONS["images"],
+                "description": CONSENSUS_WORKFLOW_FIELD_DESCRIPTIONS["media"],
             },
         }
 
@@ -382,7 +382,7 @@ of the evidence, even when it strongly points in one direction.""",
             "issues_found": [],  # Not used
             "confidence": "exploring",  # Not used, kept for compatibility
             "hypothesis": None,  # Not used
-            "images": request.images or [],  # Now used for visual context
+            "media": request.media or [],  # Now used for visual context
         }
         return step_data
 
@@ -621,7 +621,7 @@ of the evidence, even when it strongly points in one direction.""",
                 system_prompt=system_prompt,
                 temperature=validated_temperature,
                 thinking_mode="medium",
-                images=request.images if request.images else None,
+                media=request.media if request.media else None,
             )
 
             return {

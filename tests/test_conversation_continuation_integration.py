@@ -8,9 +8,11 @@ from utils.storage_backend import get_storage_backend
 def test_first_response_persisted_in_conversation_history(tmp_path):
     """Ensure the assistant's initial reply is stored for newly created threads."""
 
-    # Clear in-memory storage to avoid cross-test contamination
+    # Clear storage to avoid cross-test contamination
     storage = get_storage_backend()
-    storage._store.clear()  # type: ignore[attr-defined]
+    cache = getattr(storage, "_cache", None) or getattr(storage, "_store", None)
+    if cache is not None:
+        cache.clear()
 
     tool = ChatTool()
     request = ChatRequest(
@@ -37,4 +39,6 @@ def test_first_response_persisted_in_conversation_history(tmp_path):
     assert thread.turns[-1].content == response_text
 
     # Cleanup storage for subsequent tests
-    storage._store.clear()  # type: ignore[attr-defined]
+    cache = getattr(storage, "_cache", None) or getattr(storage, "_store", None)
+    if cache is not None:
+        cache.clear()

@@ -48,7 +48,7 @@ def _load_base_prompt() -> str:
 class CLinkRequest(ToolRequest):
     """Request model for clink tool.
 
-    Inherits from ToolRequest for common fields (model, continuation_id, images, etc.)
+    Inherits from ToolRequest for common fields (model, continuation_id, media, etc.)
     and adds clink-specific fields for CLI agent invocation.
     """
 
@@ -82,10 +82,10 @@ class CLinkRequest(ToolRequest):
         default_factory=list,
         description=COMMON_FIELD_DESCRIPTIONS["absolute_file_paths"],
     )
-    # Override images to default to empty list instead of None for CLI compatibility
-    images: list[str] = Field(
+    # Override media to default to empty list instead of None for CLI compatibility
+    media: list[str] = Field(
         default_factory=list,
-        description=COMMON_FIELD_DESCRIPTIONS["images"],
+        description=COMMON_FIELD_DESCRIPTIONS["media"],
     )
     json_schema: dict | str | None = Field(
         default=None,
@@ -208,7 +208,7 @@ class CLinkTool(SimpleTool):
                 "description": role_description,
             },
             "absolute_file_paths": SchemaBuilder.SIMPLE_FIELD_SCHEMAS["absolute_file_paths"],
-            "images": SchemaBuilder.COMMON_FIELD_SCHEMAS["images"],
+            "media": SchemaBuilder.COMMON_FIELD_SCHEMAS["media"],
             "continuation_id": SchemaBuilder.COMMON_FIELD_SCHEMAS["continuation_id"],
             "json_schema": {
                 "anyOf": [
@@ -318,7 +318,7 @@ class CLinkTool(SimpleTool):
             system_prompt_text = role_config.prompt_path.read_text(encoding="utf-8")
 
         absolute_file_paths = self.get_request_files(request)
-        images = self.get_request_images(request)
+        images = self.get_request_media(request)
         continuation_id = self.get_request_continuation_id(request)
 
         self._model_context = arguments.get("_model_context")

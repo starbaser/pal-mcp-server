@@ -132,10 +132,10 @@ class TestConsensusTool:
         assert "temperature" not in schema["properties"]
         assert "thinking_mode" not in schema["properties"]
 
-        # Images should be present now
-        assert "images" in schema["properties"]
-        assert schema["properties"]["images"]["type"] == "array"
-        assert schema["properties"]["images"]["items"]["type"] == "string"
+        # Media should be present now
+        assert "media" in schema["properties"]
+        assert schema["properties"]["media"]["type"] == "array"
+        assert schema["properties"]["media"]["items"]["type"] == "string"
 
         # Verify field types
         assert schema["properties"]["step"]["type"] == "string"

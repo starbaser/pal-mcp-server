@@ -3,7 +3,7 @@ Chat tool - General development chat and collaborative thinking
 
 This tool provides a conversational interface for general development assistance,
 brainstorming, problem-solving, and collaborative thinking. It supports file context,
-images, and conversation continuation for seamless multi-turn interactions.
+media, and conversation continuation for seamless multi-turn interactions.
 """
 
 import logging
@@ -32,7 +32,7 @@ CHAT_FIELD_DESCRIPTIONS = {
         "WARNING: Large inline code must NOT be shared in prompt. Provide full-path to files on disk as separate parameter."
     ),
     "absolute_file_paths": ("Full, absolute file paths to relevant code in order to share with external model"),
-    "images": "Image paths (absolute) or base64 strings for optional visual context.",
+    "media": "Image paths (absolute) or base64 strings for optional visual context.",
     "working_directory_absolute_path": (
         "Absolute path to an existing directory where generated code artifacts can be saved."
     ),
@@ -47,7 +47,7 @@ class ChatRequest(ToolRequest):
         default_factory=list,
         description=CHAT_FIELD_DESCRIPTIONS["absolute_file_paths"],
     )
-    images: Optional[list[str]] = Field(default_factory=list, description=CHAT_FIELD_DESCRIPTIONS["images"])
+    media: Optional[list[str]] = Field(default_factory=list, description=CHAT_FIELD_DESCRIPTIONS["media"])
     working_directory_absolute_path: str = Field(
         ...,
         description=CHAT_FIELD_DESCRIPTIONS["working_directory_absolute_path"],
@@ -126,10 +126,10 @@ class ChatTool(SimpleTool):
                     "items": {"type": "string"},
                     "description": CHAT_FIELD_DESCRIPTIONS["absolute_file_paths"],
                 },
-                "images": {
+                "media": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": CHAT_FIELD_DESCRIPTIONS["images"],
+                    "description": CHAT_FIELD_DESCRIPTIONS["media"],
                 },
                 "working_directory_absolute_path": {
                     "type": "string",
@@ -171,10 +171,10 @@ class ChatTool(SimpleTool):
                 "items": {"type": "string"},
                 "description": CHAT_FIELD_DESCRIPTIONS["absolute_file_paths"],
             },
-            "images": {
+            "media": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": CHAT_FIELD_DESCRIPTIONS["images"],
+                "description": CHAT_FIELD_DESCRIPTIONS["media"],
             },
             "working_directory_absolute_path": {
                 "type": "string",

@@ -269,3 +269,25 @@ def get_image_mime_type(extension: str) -> str:
         extension = "." + extension
     extension = extension.lower()
     return IMAGE_MIME_TYPES.get(extension, "image/jpeg")
+
+
+# Video file extensions
+VIDEO_EXTENSIONS = {".mp4", ".webm", ".mov", ".avi", ".mkv", ".flv", ".wmv", ".m4v"}
+
+# Union of image and video extensions
+MEDIA_EXTENSIONS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
+
+# MIME type mappings for video files
+VIDEO_MIME_TYPES = {
+    ".mp4": "video/mp4",
+    ".webm": "video/webm",
+    ".mov": "video/quicktime",
+    ".avi": "video/x-msvideo",
+    ".mkv": "video/x-matroska",
+    ".flv": "video/x-flv",
+    ".wmv": "video/x-ms-wmv",
+    ".m4v": "video/x-m4v",
+}
+
+# Merged image and video MIME type mappings
+MEDIA_MIME_TYPES = {**IMAGE_MIME_TYPES, **VIDEO_MIME_TYPES}

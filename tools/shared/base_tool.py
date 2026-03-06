@@ -1448,7 +1448,7 @@ When recommending searches, be specific about what information you need and why 
             logger.warning(f"Temperature validation failed for {model_context.model_name}: {e}")
             return temperature, [f"Temperature validation failed: {e}"]
 
-    def _validate_image_limits(
+    def _validate_media_limits(
         self, images: Optional[list[str]], model_context: Optional[Any] = None, continuation_id: Optional[str] = None
     ) -> Optional[dict]:
         """

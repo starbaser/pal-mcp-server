@@ -53,7 +53,7 @@ CODEREVIEW_WORKFLOW_FIELD_DESCRIPTIONS = {
     "relevant_context": "Functions or methods central to findings (e.g. 'Class.method' or 'function_name').",
     "issues_found": "Issues with severity (critical/high/medium/low) and descriptions.",
     "review_validation_type": "Set 'external' (default) for expert follow-up or 'internal' for local-only review.",
-    "images": "Optional diagram or screenshot paths that clarify review context.",
+    "media": "Optional diagram or screenshot paths that clarify review context.",
     "review_type": "Review focus: full, security, performance, or quick.",
     "focus_on": "Optional note on areas to emphasise (e.g. 'threading', 'auth flow').",
     "standards": "Coding standards or style guides to enforce.",
@@ -90,8 +90,8 @@ class CodeReviewRequest(WorkflowRequest):
         "external", description=CODEREVIEW_WORKFLOW_FIELD_DESCRIPTIONS.get("review_validation_type", "")
     )
 
-    # Optional images for visual context
-    images: Optional[list[str]] = Field(default=None, description=CODEREVIEW_WORKFLOW_FIELD_DESCRIPTIONS["images"])
+    # Optional media for visual context
+    media: Optional[list[str]] = Field(default=None, description=CODEREVIEW_WORKFLOW_FIELD_DESCRIPTIONS["media"])
 
     # Code review-specific fields (only used in step 1 to initialize)
     review_type: Optional[Literal["full", "security", "performance", "quick"]] = Field(
@@ -205,10 +205,10 @@ class CodeReviewTool(WorkflowTool):
                 "items": {"type": "object"},
                 "description": CODEREVIEW_WORKFLOW_FIELD_DESCRIPTIONS["issues_found"],
             },
-            "images": {
+            "media": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": CODEREVIEW_WORKFLOW_FIELD_DESCRIPTIONS["images"],
+                "description": CODEREVIEW_WORKFLOW_FIELD_DESCRIPTIONS["media"],
             },
             # Code review-specific fields (for step 1)
             "review_type": {
@@ -364,11 +364,11 @@ class CodeReviewTool(WorkflowTool):
             )
             context_parts.append(f"\\n=== ASSESSMENT EVOLUTION ===\\n{assessments_text}\\n=== END ASSESSMENTS ===")
 
-        # Add images if available
-        if consolidated_findings.images:
-            images_text = "\\n".join(f"- {img}" for img in consolidated_findings.images)
+        # Add media if available
+        if consolidated_findings.media:
+            media_text = "\\n".join(f"- {img}" for img in consolidated_findings.media)
             context_parts.append(
-                f"\\n=== VISUAL REVIEW INFORMATION ===\\n{images_text}\\n=== END VISUAL INFORMATION ==="
+                f"\\n=== VISUAL REVIEW INFORMATION ===\\n{media_text}\\n=== END VISUAL INFORMATION ==="
             )
 
         return "\\n".join(context_parts)
@@ -428,7 +428,7 @@ class CodeReviewTool(WorkflowTool):
             "issues_found": request.issues_found,
             "review_validation_type": self.get_review_validation_type(request),
             "hypothesis": request.findings,  # Map findings to hypothesis for compatibility
-            "images": request.images or [],
+            "media": request.media or [],
             "confidence": "high",  # Dummy value for workflow_mixin compatibility
         }
         return step_data

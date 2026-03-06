@@ -65,7 +65,7 @@ DEBUG_INVESTIGATION_FIELD_DESCRIPTIONS = {
         "WARNING: Do NOT use 'certain' unless the issue can be fully resolved with a fix, use 'very_high' or 'almost_certain' instead when not 100% sure. "
         "Using 'certain' means you have ABSOLUTE confidence locally and PREVENTS external model validation."
     ),
-    "images": "Optional screenshots/visuals clarifying issue (absolute paths).",
+    "media": "Optional screenshots/visuals clarifying issue (absolute paths).",
 }
 
 
@@ -92,8 +92,8 @@ class DebugInvestigationRequest(WorkflowRequest):
     hypothesis: Optional[str] = Field(None, description=DEBUG_INVESTIGATION_FIELD_DESCRIPTIONS["hypothesis"])
     confidence: Optional[str] = Field("low", description=DEBUG_INVESTIGATION_FIELD_DESCRIPTIONS["confidence"])
 
-    # Optional images for visual debugging
-    images: Optional[list[str]] = Field(default=None, description=DEBUG_INVESTIGATION_FIELD_DESCRIPTIONS["images"])
+    # Optional media for visual debugging
+    media: Optional[list[str]] = Field(default=None, description=DEBUG_INVESTIGATION_FIELD_DESCRIPTIONS["media"])
 
     # Override inherited fields to exclude them from schema (except model which needs to be available)
     temperature: Optional[float] = Field(default=None, exclude=True)
@@ -187,10 +187,10 @@ class DebugIssueTool(WorkflowTool):
                 "type": "string",
                 "description": DEBUG_INVESTIGATION_FIELD_DESCRIPTIONS["hypothesis"],
             },
-            "images": {
+            "media": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": DEBUG_INVESTIGATION_FIELD_DESCRIPTIONS["images"],
+                "description": DEBUG_INVESTIGATION_FIELD_DESCRIPTIONS["media"],
             },
         }
 
@@ -305,11 +305,11 @@ class DebugIssueTool(WorkflowTool):
             )
             context_parts.append(f"\n=== HYPOTHESIS EVOLUTION ===\n{hypotheses_text}\n=== END HYPOTHESES ===")
 
-        # Add images if available
-        if consolidated_findings.images:
-            images_text = "\n".join(f"- {img}" for img in consolidated_findings.images)
+        # Add media if available
+        if consolidated_findings.media:
+            media_text = "\n".join(f"- {img}" for img in consolidated_findings.media)
             context_parts.append(
-                f"\n=== VISUAL DEBUGGING INFORMATION ===\n{images_text}\n=== END VISUAL INFORMATION ==="
+                f"\n=== VISUAL DEBUGGING INFORMATION ===\n{media_text}\n=== END VISUAL INFORMATION ==="
             )
 
         # Add file content if we have relevant files
@@ -430,7 +430,7 @@ class DebugIssueTool(WorkflowTool):
             "issues_found": [],  # Debug tool doesn't use issues_found field
             "confidence": request.confidence,
             "hypothesis": request.hypothesis,
-            "images": request.images or [],
+            "media": request.media or [],
         }
         return step_data
 

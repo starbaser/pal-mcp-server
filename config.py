@@ -8,6 +8,8 @@ constants used throughout the application.
 Configuration values can be overridden by environment variables where appropriate.
 """
 
+import os
+
 from utils.env import get_env
 
 # Version and metadata
@@ -158,3 +160,18 @@ LOCALE = get_env("LOCALE", "") or ""
 # Threading configuration
 # Simple in-memory conversation threading for stateless MCP environment
 # Conversations persist only during the Claude session
+
+# Conversation storage backend selection
+# "memory" - in-memory only (lost on server restart)
+# "file"   - file-backed with memory cache (persists across restarts)
+CONVERSATION_STORAGE_BACKEND = get_env("CONVERSATION_STORAGE_BACKEND", "file") or "file"
+
+# Directory for file-backed conversation storage
+# Used by the file storage backend to persist thread contexts across restarts
+CONVERSATION_STORAGE_DIR = os.environ.get(
+    "CONVERSATION_STORAGE_DIR",
+    os.path.expanduser("~/.claude/pal/threads"),
+)
+
+# CONVERSATION_TIMEOUT_HOURS: How long threads are retained before expiration
+CONVERSATION_TIMEOUT_HOURS = int(get_env("CONVERSATION_TIMEOUT_HOURS") or 6)

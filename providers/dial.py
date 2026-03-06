@@ -156,7 +156,7 @@ class DIALModelProvider(RegistryBackedProviderMixin, OpenAICompatibleProvider):
         system_prompt: Optional[str] = None,
         temperature: float = 0.3,
         max_output_tokens: Optional[int] = None,
-        images: Optional[list[str]] = None,
+        media: Optional[list[str]] = None,
         **kwargs,
     ) -> ModelResponse:
         """Generate content using DIAL's deployment-specific endpoint.
@@ -171,7 +171,7 @@ class DIALModelProvider(RegistryBackedProviderMixin, OpenAICompatibleProvider):
             temperature: Sampling temperature for randomness (0.0=deterministic, 1.0=creative), default 0.3
                         Note: O3/O4 models don't support temperature and will ignore this parameter
             max_output_tokens: Optional maximum number of tokens to generate in the response
-            images: Optional list of image paths or data URLs to include with the prompt (for vision-capable models)
+            media: Optional list of image paths or data URLs to include with the prompt (for vision-capable models)
             **kwargs: Additional OpenAI-compatible parameters (top_p, frequency_penalty, presence_penalty, seed, stop)
 
         Returns:
@@ -194,13 +194,13 @@ class DIALModelProvider(RegistryBackedProviderMixin, OpenAICompatibleProvider):
         if prompt:
             user_message_content.append({"type": "text", "text": prompt})
 
-        if images and capabilities.supports_images:
-            for img_path in images:
-                processed_image = self._process_image(img_path)
+        if media and capabilities.supports_images:
+            for media_path in media:
+                processed_image = self._process_image(media_path)
                 if processed_image:
                     user_message_content.append(processed_image)
-        elif images:
-            logger.warning(f"Model {model_name} does not support images, ignoring {len(images)} image(s)")
+        elif media:
+            logger.warning(f"Model {model_name} does not support images, ignoring {len(media)} media item(s)")
 
         # Add user message. If only text, content will be a string, otherwise a list.
         if len(user_message_content) == 1 and user_message_content[0]["type"] == "text":

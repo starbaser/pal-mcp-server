@@ -23,7 +23,7 @@ from utils.conversation_memory import (
     ThreadContext,
     add_turn,
     create_thread,
-    get_conversation_image_list,
+    get_conversation_media_list,
     get_thread,
 )
 from utils.model_context import ModelContext
@@ -40,15 +40,15 @@ class TestImageSupportIntegration:
             content="Please analyze this diagram",
             timestamp="2025-01-01T00:00:00Z",
             files=["code.py"],
-            images=["diagram.png", "flowchart.jpg"],
+            media=["diagram.png", "flowchart.jpg"],
             tool_name="chat",
         )
 
-        assert turn.images == ["diagram.png", "flowchart.jpg"]
+        assert turn.media == ["diagram.png", "flowchart.jpg"]
         assert turn.files == ["code.py"]
         assert turn.content == "Please analyze this diagram"
 
-    def test_get_conversation_image_list_newest_first(self):
+    def test_get_conversation_media_list_newest_first(self):
         """Test that image list prioritizes newest references."""
         # Create thread context with multiple turns
         context = ThreadContext(
@@ -61,22 +61,22 @@ class TestImageSupportIntegration:
                     role="user",
                     content="Turn 1",
                     timestamp="2025-01-01T00:00:00Z",
-                    images=["old_diagram.png", "shared.png"],
+                    media=["old_diagram.png", "shared.png"],
                 ),
                 ConversationTurn(
-                    role="assistant", content="Turn 2", timestamp="2025-01-01T01:00:00Z", images=["middle.png"]
+                    role="assistant", content="Turn 2", timestamp="2025-01-01T01:00:00Z", media=["middle.png"]
                 ),
                 ConversationTurn(
                     role="user",
                     content="Turn 3",
                     timestamp="2025-01-01T02:00:00Z",
-                    images=["shared.png", "new_diagram.png"],  # shared.png appears again
+                    media=["shared.png", "new_diagram.png"],  # shared.png appears again
                 ),
             ],
             initial_context={},
         )
 
-        image_list = get_conversation_image_list(context)
+        image_list = get_conversation_media_list(context)
 
         # Should prioritize newest first, with duplicates removed (newest wins)
         expected = ["shared.png", "new_diagram.png", "middle.png", "old_diagram.png"]
@@ -109,7 +109,7 @@ class TestImageSupportIntegration:
             role="user",
             content="Analyze these screenshots",
             files=["app.py"],
-            images=["screenshot1.png", "screenshot2.png"],
+            media=["screenshot1.png", "screenshot2.png"],
             tool_name="debug",
         )
 
@@ -127,7 +127,7 @@ class TestImageSupportIntegration:
                     content="Analyze these screenshots",
                     timestamp="2025-01-01T00:00:00Z",
                     files=["app.py"],
-                    images=["screenshot1.png", "screenshot2.png"],
+                    media=["screenshot1.png", "screenshot2.png"],
                     tool_name="debug",
                 )
             ],
@@ -141,31 +141,31 @@ class TestImageSupportIntegration:
         assert len(context.turns) == 1
 
         turn = context.turns[0]
-        assert turn.images == ["screenshot1.png", "screenshot2.png"]
+        assert turn.media == ["screenshot1.png", "screenshot2.png"]
         assert turn.files == ["app.py"]
         assert turn.content == "Analyze these screenshots"
 
     def test_chat_tool_schema_includes_images(self):
-        """Test that ChatTool schema includes images field."""
+        """Test that ChatTool schema includes media field."""
         tool = ChatTool()
         schema = tool.get_input_schema()
 
-        assert "images" in schema["properties"]
-        images_field = schema["properties"]["images"]
-        assert images_field["type"] == "array"
-        assert images_field["items"]["type"] == "string"
-        assert "visual context" in images_field["description"].lower()
+        assert "media" in schema["properties"]
+        media_field = schema["properties"]["media"]
+        assert media_field["type"] == "array"
+        assert media_field["items"]["type"] == "string"
+        assert "visual context" in media_field["description"].lower()
 
     def test_debug_tool_schema_includes_images(self):
-        """Test that DebugIssueTool schema includes images field."""
+        """Test that DebugIssueTool schema includes media field."""
         tool = DebugIssueTool()
         schema = tool.get_input_schema()
 
-        assert "images" in schema["properties"]
-        images_field = schema["properties"]["images"]
-        assert images_field["type"] == "array"
-        assert images_field["items"]["type"] == "string"
-        assert "screenshots" in images_field["description"].lower()
+        assert "media" in schema["properties"]
+        media_field = schema["properties"]["media"]
+        assert media_field["type"] == "array"
+        assert media_field["items"]["type"] == "string"
+        assert "screenshots" in media_field["description"].lower()
 
     def test_tool_image_validation_limits(self):
         """Test that tools validate image size limits using real provider resolution."""
@@ -182,17 +182,17 @@ class TestImageSupportIntegration:
         try:
             # Test with an invalid model name that doesn't exist in any provider
             # Use model_context parameter name (not positional)
-            result = tool._validate_image_limits(small_images, model_context=ModelContext("non-existent-model-12345"))
+            result = tool._validate_media_limits(small_images, model_context=ModelContext("non-existent-model-12345"))
             # Should return error because model not available or doesn't support images
             assert result is not None
             assert result["status"] == "error"
             assert "is not available" in result["content"] or "does not support image processing" in result["content"]
 
             # Test that empty/None images always pass regardless of model
-            result = tool._validate_image_limits([], model_context=ModelContext("gemini-2.5-pro"))
+            result = tool._validate_media_limits([], model_context=ModelContext("gemini-2.5-pro"))
             assert result is None
 
-            result = tool._validate_image_limits(None, model_context=ModelContext("gemini-2.5-pro"))
+            result = tool._validate_media_limits(None, model_context=ModelContext("gemini-2.5-pro"))
             assert result is None
 
         finally:
@@ -217,7 +217,7 @@ class TestImageSupportIntegration:
                 small_image_path = temp_file.name
 
             # Test with the default model from test environment (gemini-2.5-flash)
-            result = tool._validate_image_limits([small_image_path], ModelContext("gemini-2.5-flash"))
+            result = tool._validate_media_limits([small_image_path], ModelContext("gemini-2.5-flash"))
             assert result is None  # Should pass for Gemini models
 
             # Create 150MB image (over typical limits)
@@ -225,7 +225,7 @@ class TestImageSupportIntegration:
                 temp_file.write(b"\x00" * (150 * 1024 * 1024))  # 150MB
                 large_image_path = temp_file.name
 
-            result = tool._validate_image_limits([large_image_path], ModelContext("gemini-2.5-flash"))
+            result = tool._validate_media_limits([large_image_path], ModelContext("gemini-2.5-flash"))
             # Large images should fail validation
             assert result is not None
             assert result["status"] == "error"
@@ -281,7 +281,7 @@ class TestImageSupportIntegration:
                     await tool.execute(
                         {
                             "prompt": "What do you see in this image?",
-                            "images": [temp_image_path],
+                            "media": [temp_image_path],
                             "model": "gpt-4o",
                             "working_directory_absolute_path": working_directory,
                         }
@@ -337,12 +337,12 @@ class TestImageSupportIntegration:
         )
         mock_client.get.return_value = initial_context.model_dump_json()
 
-        # Add turn with images from chat tool
+        # Add turn with media from chat tool
         add_turn(
             thread_id=thread_id,
             role="user",
             content="Here's my UI design",
-            images=["design.png", "mockup.jpg"],
+            media=["design.png", "mockup.jpg"],
             tool_name="chat",
         )
 
@@ -350,12 +350,12 @@ class TestImageSupportIntegration:
             thread_id=thread_id, role="assistant", content="I can see your design. It looks good!", tool_name="chat"
         )
 
-        # Add turn with different images from debug tool
+        # Add turn with different media from debug tool
         add_turn(
             thread_id=thread_id,
             role="user",
             content="Now I'm getting this error",
-            images=["error_screen.png"],
+            media=["error_screen.png"],
             files=["error.log"],
             tool_name="debug",
         )
@@ -371,7 +371,7 @@ class TestImageSupportIntegration:
                     role="user",
                     content="Here's my UI design",
                     timestamp="2025-01-01T00:01:00Z",
-                    images=["design.png", "mockup.jpg"],
+                    media=["design.png", "mockup.jpg"],
                     tool_name="chat",
                 ),
                 ConversationTurn(
@@ -384,7 +384,7 @@ class TestImageSupportIntegration:
                     role="user",
                     content="Now I'm getting this error",
                     timestamp="2025-01-01T00:03:00Z",
-                    images=["error_screen.png"],
+                    media=["error_screen.png"],
                     files=["error.log"],
                     tool_name="debug",
                 ),
@@ -393,31 +393,31 @@ class TestImageSupportIntegration:
         )
         mock_client.get.return_value = complete_context.model_dump_json()
 
-        # Retrieve thread and check image preservation
+        # Retrieve thread and check media preservation
         context = get_thread(thread_id)
         assert context is not None
 
-        # Get conversation image list (should prioritize newest first)
-        image_list = get_conversation_image_list(context)
+        # Get conversation media list (should prioritize newest first)
+        image_list = get_conversation_media_list(context)
         expected = ["error_screen.png", "design.png", "mockup.jpg"]
         assert image_list == expected
 
-        # Verify each turn has correct images
-        assert context.turns[0].images == ["design.png", "mockup.jpg"]
-        assert context.turns[1].images is None  # Assistant turn without images
-        assert context.turns[2].images == ["error_screen.png"]
+        # Verify each turn has correct media
+        assert context.turns[0].media == ["design.png", "mockup.jpg"]
+        assert context.turns[1].media is None  # Assistant turn without media
+        assert context.turns[2].media == ["error_screen.png"]
 
     def test_tool_request_base_class_has_images(self):
-        """Test that base ToolRequest class includes images field."""
+        """Test that base ToolRequest class includes media field."""
         from tools.shared.base_models import ToolRequest
 
-        # Create request with images
-        request = ToolRequest(images=["test.png", "test2.jpg"])
-        assert request.images == ["test.png", "test2.jpg"]
+        # Create request with media
+        request = ToolRequest(media=["test.png", "test2.jpg"])
+        assert request.media == ["test.png", "test2.jpg"]
 
         # Test default value
         request_no_images = ToolRequest()
-        assert request_no_images.images is None
+        assert request_no_images.media is None
 
     def test_data_url_image_format_support(self):
         """Test that tools can handle data URL format images."""
@@ -428,14 +428,14 @@ class TestImageSupportIntegration:
         images = [data_url]
 
         # Test with a dummy model that doesn't exist in any provider
-        result = tool._validate_image_limits(images, ModelContext("test-dummy-model-name"))
+        result = tool._validate_media_limits(images, ModelContext("test-dummy-model-name"))
         # Should return error because model not available or doesn't support images
         assert result is not None
         assert result["status"] == "error"
         assert "is not available" in result["content"] or "does not support image processing" in result["content"]
 
         # Test with another non-existent model to check error handling
-        result = tool._validate_image_limits(images, ModelContext("another-dummy-model"))
+        result = tool._validate_media_limits(images, ModelContext("another-dummy-model"))
         # Should return error because model not available
         assert result is not None
         assert result["status"] == "error"
@@ -445,11 +445,11 @@ class TestImageSupportIntegration:
         tool = ChatTool()
 
         # Empty list should not fail validation (no need for provider setup)
-        result = tool._validate_image_limits([], ModelContext("gemini-2.5-pro"))
+        result = tool._validate_media_limits([], ModelContext("gemini-2.5-pro"))
         assert result is None
 
         # None should not fail validation (no need for provider setup)
-        result = tool._validate_image_limits(None, ModelContext("gemini-2.5-pro"))
+        result = tool._validate_media_limits(None, ModelContext("gemini-2.5-pro"))
         assert result is None
 
     @patch("utils.conversation_memory.get_storage")
@@ -477,8 +477,8 @@ class TestImageSupportIntegration:
         add_turn(
             thread_id=parent_thread_id,
             role="user",
-            content="Parent thread with images",
-            images=["parent1.png", "shared.png"],
+            content="Parent thread with media",
+            media=["parent1.png", "shared.png"],
             tool_name="chat",
         )
 
@@ -487,8 +487,8 @@ class TestImageSupportIntegration:
         add_turn(
             thread_id=child_thread_id,
             role="user",
-            content="Child thread with more images",
-            images=["child1.png", "shared.png"],  # shared.png appears again (should prioritize newer)
+            content="Child thread with more media",
+            media=["child1.png", "shared.png"],  # shared.png appears again (should prioritize newer)
             tool_name="chat",
         )
 
@@ -501,9 +501,9 @@ class TestImageSupportIntegration:
             turns=[
                 ConversationTurn(
                     role="user",
-                    content="Child thread with more images",
+                    content="Child thread with more media",
                     timestamp="2025-01-01T00:02:00Z",
-                    images=["child1.png", "shared.png"],
+                    media=["child1.png", "shared.png"],
                     tool_name="debug",
                 )
             ],
@@ -518,5 +518,5 @@ class TestImageSupportIntegration:
         assert child_context.parent_thread_id == parent_thread_id
 
         # Test image collection for child thread only
-        child_images = get_conversation_image_list(child_context)
+        child_images = get_conversation_media_list(child_context)
         assert child_images == ["child1.png", "shared.png"]

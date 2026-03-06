@@ -47,7 +47,7 @@ SECAUDIT_WORKFLOW_FIELD_DESCRIPTIONS = {
     "relevant_context": "Security-critical classes/methods (e.g. 'AuthService.login', 'encryption_helper').",
     "issues_found": "Security issues with severity (critical/high/medium/low) and descriptions (vulns, auth flaws, injection, crypto, config).",
     "confidence": "exploring/low/medium/high/very_high/almost_certain/certain. 'certain' blocks external validation—use only when fully complete.",
-    "images": "Optional absolute paths to diagrams or threat models that inform the audit.",
+    "media": "Optional absolute paths to diagrams or threat models that inform the audit.",
     "security_scope": "Security context (web, mobile, API, cloud, etc.) including stack, user types, data sensitivity, and threat landscape.",
     "threat_level": "Assess the threat level: low (internal/low-risk), medium (customer-facing/business data), high (regulated or sensitive), critical (financial/healthcare/PII).",
     "compliance_requirements": "Applicable compliance frameworks or standards (SOC2, PCI DSS, HIPAA, GDPR, ISO 27001, NIST, etc.).",
@@ -81,8 +81,8 @@ class SecauditRequest(WorkflowRequest):
     )
     confidence: Optional[str] = Field("low", description=SECAUDIT_WORKFLOW_FIELD_DESCRIPTIONS["confidence"])
 
-    # Optional images for visual context
-    images: Optional[list[str]] = Field(default=None, description=SECAUDIT_WORKFLOW_FIELD_DESCRIPTIONS["images"])
+    # Optional media for visual context
+    media: Optional[list[str]] = Field(default=None, description=SECAUDIT_WORKFLOW_FIELD_DESCRIPTIONS["media"])
 
     # Security audit-specific fields
     security_scope: Optional[str] = Field(None, description=SECAUDIT_WORKFLOW_FIELD_DESCRIPTIONS["security_scope"])
@@ -293,11 +293,11 @@ class SecauditTool(WorkflowTool):
             )
             context_parts.append(f"\n=== ASSESSMENT EVOLUTION ===\n{assessments_text}\n=== END ASSESSMENTS ===")
 
-        # Add images if available
-        if consolidated_findings.images:
-            images_text = "\n".join(f"- {img}" for img in consolidated_findings.images)
+        # Add media if available
+        if consolidated_findings.media:
+            media_text = "\n".join(f"- {img}" for img in consolidated_findings.media)
             context_parts.append(
-                f"\n=== VISUAL SECURITY INFORMATION ===\n{images_text}\n=== END VISUAL INFORMATION ==="
+                f"\n=== VISUAL SECURITY INFORMATION ===\n{media_text}\n=== END VISUAL INFORMATION ==="
             )
 
         return "\n".join(context_parts)
@@ -397,10 +397,10 @@ class SecauditTool(WorkflowTool):
                 "items": {"type": "object"},
                 "description": SECAUDIT_WORKFLOW_FIELD_DESCRIPTIONS["issues_found"],
             },
-            "images": {
+            "media": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": SECAUDIT_WORKFLOW_FIELD_DESCRIPTIONS["images"],
+                "description": SECAUDIT_WORKFLOW_FIELD_DESCRIPTIONS["media"],
             },
             # Security audit-specific fields (for step 1)
             "security_scope": {
@@ -454,7 +454,7 @@ class SecauditTool(WorkflowTool):
             "issues_found": request.issues_found,
             "confidence": request.confidence,
             "hypothesis": request.findings,  # Map findings to hypothesis for compatibility
-            "images": request.images or [],
+            "media": request.media or [],
         }
 
         # Store security-specific configuration on first step

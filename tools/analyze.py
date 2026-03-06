@@ -68,7 +68,7 @@ ANALYZE_WORKFLOW_FIELD_DESCRIPTIONS = {
         "List methods/functions central to analysis findings, in 'ClassName.methodName' or 'functionName' format. "
         "Prioritize those demonstrating key patterns, architectural decisions, or improvement opportunities."
     ),
-    "images": (
+    "media": (
         "Optional absolute paths to architecture diagrams or visual references that help with analysis context."
     ),
     "confidence": (
@@ -107,8 +107,8 @@ class AnalyzeWorkflowRequest(WorkflowRequest):
         description="Issues or concerns identified during analysis, each with severity level (critical, high, medium, low)",
     )
 
-    # Optional images for visual context
-    images: Optional[list[str]] = Field(default=None, description=ANALYZE_WORKFLOW_FIELD_DESCRIPTIONS["images"])
+    # Optional media for visual context
+    media: Optional[list[str]] = Field(default=None, description=ANALYZE_WORKFLOW_FIELD_DESCRIPTIONS["media"])
 
     # Analyze-specific fields (only used in step 1 to initialize)
     # Note: Use relevant_files field instead of files for consistency across workflow tools
@@ -217,10 +217,10 @@ class AnalyzeTool(WorkflowTool):
                 "enum": ["exploring", "low", "medium", "high", "very_high", "almost_certain", "certain"],
                 "description": ANALYZE_WORKFLOW_FIELD_DESCRIPTIONS["confidence"],
             },
-            "images": {
+            "media": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": ANALYZE_WORKFLOW_FIELD_DESCRIPTIONS["images"],
+                "description": ANALYZE_WORKFLOW_FIELD_DESCRIPTIONS["media"],
             },
             "issues_found": {
                 "type": "array",
@@ -327,11 +327,11 @@ class AnalyzeTool(WorkflowTool):
             )
             context_parts.append(f"\\n=== ASSESSMENT EVOLUTION ===\\n{assessments_text}\\n=== END ASSESSMENTS ===")
 
-        # Add images if available
-        if consolidated_findings.images:
-            images_text = "\\n".join(f"- {img}" for img in consolidated_findings.images)
+        # Add media if available
+        if consolidated_findings.media:
+            media_text = "\\n".join(f"- {img}" for img in consolidated_findings.media)
             context_parts.append(
-                f"\\n=== VISUAL ANALYSIS INFORMATION ===\\n{images_text}\\n=== END VISUAL INFORMATION ==="
+                f"\\n=== VISUAL ANALYSIS INFORMATION ===\\n{media_text}\\n=== END VISUAL INFORMATION ==="
             )
 
         return "\\n".join(context_parts)
@@ -389,7 +389,7 @@ class AnalyzeTool(WorkflowTool):
             "issues_found": request.issues_found,  # Analyze workflow uses issues_found for structured problem tracking
             "confidence": "medium",  # Fixed value for workflow compatibility
             "hypothesis": request.findings,  # Map findings to hypothesis for compatibility
-            "images": request.images or [],
+            "media": request.media or [],
         }
         return step_data
 

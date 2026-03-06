@@ -78,7 +78,7 @@ REFACTOR_FIELD_DESCRIPTIONS = {
         "WARNING: Use 'complete' ONLY when fully analyzed and can provide recommendations without expert help. "
         "'complete' PREVENTS expert validation. Use 'partial' for large files or uncertain analysis."
     ),
-    "images": (
+    "media": (
         "Optional list of absolute paths to architecture diagrams, UI mockups, design documents, or visual references "
         "that help with refactoring context. Only include if they materially assist understanding or assessment."
     ),
@@ -112,8 +112,8 @@ class RefactorRequest(WorkflowRequest):
         "incomplete", description=REFACTOR_FIELD_DESCRIPTIONS["confidence"]
     )
 
-    # Optional images for visual context
-    images: Optional[list[str]] = Field(default=None, description=REFACTOR_FIELD_DESCRIPTIONS["images"])
+    # Optional media for visual context
+    media: Optional[list[str]] = Field(default=None, description=REFACTOR_FIELD_DESCRIPTIONS["media"])
 
     # Refactor-specific fields (only used in step 1 to initialize)
     refactor_type: Optional[Literal["codesmells", "decompose", "modernize", "organization"]] = Field(
@@ -229,10 +229,10 @@ class RefactorTool(WorkflowTool):
                 "items": {"type": "object"},
                 "description": REFACTOR_FIELD_DESCRIPTIONS["issues_found"],
             },
-            "images": {
+            "media": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": REFACTOR_FIELD_DESCRIPTIONS["images"],
+                "description": REFACTOR_FIELD_DESCRIPTIONS["media"],
             },
             # Refactor-specific fields (for step 1)
             # Note: Use relevant_files field instead of files for consistency
@@ -369,11 +369,11 @@ class RefactorTool(WorkflowTool):
             )
             context_parts.append(f"\\n=== ASSESSMENT EVOLUTION ===\\n{assessments_text}\\n=== END ASSESSMENTS ===")
 
-        # Add images if available
-        if consolidated_findings.images:
-            images_text = "\\n".join(f"- {img}" for img in consolidated_findings.images)
+        # Add media if available
+        if consolidated_findings.media:
+            media_text = "\\n".join(f"- {img}" for img in consolidated_findings.media)
             context_parts.append(
-                f"\\n=== VISUAL REFACTORING INFORMATION ===\\n{images_text}\\n=== END VISUAL INFORMATION ==="
+                f"\\n=== VISUAL REFACTORING INFORMATION ===\\n{media_text}\\n=== END VISUAL INFORMATION ==="
             )
 
         return "\\n".join(context_parts)
@@ -433,7 +433,7 @@ class RefactorTool(WorkflowTool):
             "issues_found": request.issues_found,
             "confidence": request.confidence,
             "hypothesis": request.findings,  # Map findings to hypothesis for compatibility
-            "images": request.images or [],
+            "media": request.media or [],
         }
         return step_data
 

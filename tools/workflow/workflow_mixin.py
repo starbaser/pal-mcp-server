@@ -770,7 +770,7 @@ class BaseWorkflowMixin(ABC):
             "issues_found": self.get_request_issues_found(request),
             "confidence": self.get_request_confidence(request),
             "hypothesis": self.get_request_hypothesis(request),
-            "images": self.get_request_images(request),
+            "media": self.get_request_media(request),
         }
         return step_data
 
@@ -788,7 +788,7 @@ class BaseWorkflowMixin(ABC):
                 "relevant_files": len(self.consolidated_findings.relevant_files),
                 "relevant_context": len(self.consolidated_findings.relevant_context),
                 "issues_found": len(self.consolidated_findings.issues_found),
-                "images_collected": len(self.consolidated_findings.images),
+                "media_collected": len(self.consolidated_findings.media),
                 "current_confidence": self.get_request_confidence(request),
             },
         }
@@ -901,10 +901,10 @@ class BaseWorkflowMixin(ABC):
         except AttributeError:
             return None
 
-    def get_request_images(self, request: Any) -> list[str]:
-        """Get images from request. Override for custom field mapping."""
+    def get_request_media(self, request: Any) -> list[str]:
+        """Get media from request. Override for custom field mapping."""
         try:
-            return request.images or []
+            return request.media or []
         except AttributeError:
             return []
 
@@ -1128,7 +1128,7 @@ class BaseWorkflowMixin(ABC):
             content=clean_content,  # Use cleaned content instead of full response_data
             tool_name=self.get_name(),
             files=self.get_request_relevant_files(request),
-            images=self.get_request_images(request),
+            media=self.get_request_media(request),
             model_metadata=workflow_state,  # Persist the state
         )
 
@@ -1382,8 +1382,8 @@ class BaseWorkflowMixin(ABC):
             )
         if step_data.get("issues_found"):
             self.consolidated_findings.issues_found.extend(step_data["issues_found"])
-        if step_data.get("images"):
-            self.consolidated_findings.images.extend(step_data["images"])
+        if step_data.get("media"):
+            self.consolidated_findings.media.extend(step_data["media"])
         # Update confidence to latest value from this step
         if step_data.get("confidence"):
             self.consolidated_findings.confidence = step_data["confidence"]
@@ -1496,7 +1496,7 @@ class BaseWorkflowMixin(ABC):
                 system_prompt=system_prompt,
                 temperature=validated_temperature,
                 thinking_mode=self.get_request_thinking_mode(request),
-                images=list(set(self.consolidated_findings.images)) if self.consolidated_findings.images else None,
+                media=list(set(self.consolidated_findings.media)) if self.consolidated_findings.media else None,
             )
 
             if model_response.content:

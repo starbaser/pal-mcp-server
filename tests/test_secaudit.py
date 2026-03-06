@@ -223,7 +223,7 @@ class TestSecauditTool:
                     {"step": 2, "confidence": "medium", "hypothesis": "Authentication issues confirmed"},
                     {"step": 3, "confidence": "high", "hypothesis": "Multiple security vulnerabilities identified"},
                 ]
-                self.images = []
+                self.media = []
 
         # Set initial request to provide context
         tool.initial_request = "Perform security audit of e-commerce web application"
@@ -298,7 +298,7 @@ class TestSecauditTool:
             "relevant_context",
             "issues_found",
             "confidence",
-            "images",
+            "media",
             "security_scope",
             "threat_level",
             "compliance_requirements",
@@ -422,7 +422,7 @@ class TestSecauditTool:
         final_findings.findings = ["Comprehensive security audit completed with findings documented"]
         final_findings.issues_found = step6_request.issues_found
         final_findings.relevant_context = []
-        final_findings.images = []
+        final_findings.media = []
         assert tool.should_call_expert_analysis(final_findings)
 
         # Test expert analysis context generation with mock consolidated findings
@@ -443,7 +443,7 @@ class TestSecauditTool:
         complete_findings.issues_found = step6_request.issues_found
         complete_findings.findings = ["Security audit findings from all steps"]
         complete_findings.files_checked = []
-        complete_findings.images = []
+        complete_findings.media = []
 
         context = tool.prepare_expert_analysis_context(complete_findings)
         assert "PCI DSS" in context

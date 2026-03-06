@@ -36,10 +36,10 @@ class SchemaBuilder:
             "type": "string",
             "description": COMMON_FIELD_DESCRIPTIONS["continuation_id"],
         },
-        "images": {
+        "media": {
             "type": "array",
             "items": {"type": "string"},
-            "description": COMMON_FIELD_DESCRIPTIONS["images"],
+            "description": COMMON_FIELD_DESCRIPTIONS["media"],
         },
     }
 

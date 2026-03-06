@@ -59,7 +59,7 @@ class SimpleTool(BaseTool):
 
     # Common field definitions that simple tools can reuse
     FILES_FIELD = SchemaBuilder.SIMPLE_FIELD_SCHEMAS["absolute_file_paths"]
-    IMAGES_FIELD = SchemaBuilder.COMMON_FIELD_SCHEMAS["images"]
+    MEDIA_FIELD = SchemaBuilder.COMMON_FIELD_SCHEMAS["media"]
 
     @abstractmethod
     def get_tool_fields(self) -> dict[str, dict[str, Any]]:
@@ -175,10 +175,10 @@ class SimpleTool(BaseTool):
         except AttributeError:
             return None
 
-    def get_request_images(self, request) -> list:
-        """Get images from request. Override for custom image handling."""
+    def get_request_media(self, request) -> list:
+        """Get media from request. Override for custom media handling."""
         try:
-            return request.images if request.images is not None else []
+            return request.media if request.media is not None else []
         except AttributeError:
             return []
 
@@ -324,8 +324,8 @@ class SimpleTool(BaseTool):
                 self._model_context = ModelContext(model_name)
                 logger.debug(f"{self.get_name()}: Created model context for {model_name}")
 
-            # Get images if present
-            images = self.get_request_images(request)
+            # Get media if present
+            images = self.get_request_media(request)
             continuation_id = self.get_request_continuation_id(request)
 
             # Handle conversation history and prompt preparation
@@ -388,7 +388,7 @@ class SimpleTool(BaseTool):
                     f"Added follow-up instructions for new {self.get_name()} conversation"
                 )  # Validate images if any were provided
             if images:
-                image_validation_error = self._validate_image_limits(
+                image_validation_error = self._validate_media_limits(
                     images, model_context=self._model_context, continuation_id=continuation_id
                 )
                 if image_validation_error:
@@ -447,7 +447,7 @@ class SimpleTool(BaseTool):
                 system_prompt=system_prompt,
                 temperature=temperature,
                 thinking_mode=thinking_mode if supports_thinking else None,
-                images=images if images else None,
+                media=images if images else None,
             )
 
             logger.info(f"Received response from {provider.get_provider_type().value} API for {self.get_name()}")
@@ -504,7 +504,7 @@ class SimpleTool(BaseTool):
                                 system_prompt=system_prompt,
                                 temperature=temperature,
                                 thinking_mode=thinking_mode if supports_thinking else None,
-                                images=images if images else None,
+                                media=images if images else None,
                             )
 
                             if retry_response.content:
@@ -669,11 +669,11 @@ class SimpleTool(BaseTool):
 
                 user_prompt = self.get_request_prompt(request)
                 user_files = self.get_request_files(request)
-                user_images = self.get_request_images(request)
+                user_images = self.get_request_media(request)
 
                 # Add user's initial turn
                 add_turn(
-                    new_thread_id, "user", user_prompt, files=user_files, images=user_images, tool_name=self.get_name()
+                    new_thread_id, "user", user_prompt, files=user_files, media=user_images, tool_name=self.get_name()
                 )
 
                 return {
@@ -768,7 +768,7 @@ class SimpleTool(BaseTool):
             "assistant",
             response_text,
             files=self.get_request_files(request),
-            images=self.get_request_images(request),
+            media=self.get_request_media(request),
             tool_name=self.get_name(),
             model_provider=model_provider,
             model_name=model_name,

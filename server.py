@@ -1540,17 +1540,11 @@ async def main():
     logger.info(f"Available tools: {list(TOOLS.keys())}")
     logger.info("Server ready - waiting for tool requests...")
 
-    # Prepare dynamic instructions for the MCP client based on model mode
-    if IS_AUTO_MODE:
-        handshake_instructions = (
-            "When the user names a specific model (e.g. 'use chat with gpt5'), send that exact model in the tool call. "
-            "When no model is mentioned, first use the `listmodels` tool from PAL to obtain available models to choose the best one from."
-        )
-    else:
-        handshake_instructions = (
-            "When the user names a specific model (e.g. 'use chat with gpt5'), send that exact model in the tool call. "
-            f"When no model is mentioned, default to '{DEFAULT_MODEL}'."
-        )
+    # Prepare dynamic instructions for the MCP client
+    handshake_instructions = (
+        "When the user names a specific model (e.g. 'use chat with gpt5'), send that exact model in the tool call. "
+        "When no model is mentioned, omit the model parameter to use the server's configured default."
+    )
 
     # Run the server using stdio transport (standard input/output)
     # This allows the server to be launched by MCP clients as a subprocess

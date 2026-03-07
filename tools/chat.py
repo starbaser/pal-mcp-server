@@ -111,8 +111,6 @@ class ChatTool(SimpleTool):
         """Generate input schema matching the original Chat tool expectations."""
 
         required_fields = ["prompt", "working_directory_absolute_path"]
-        if self.is_effective_auto_mode():
-            required_fields.append("model")
 
         schema = {
             "type": "object",

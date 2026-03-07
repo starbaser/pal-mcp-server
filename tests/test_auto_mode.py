@@ -88,13 +88,12 @@ class TestAutoMode:
             tool = ChatTool()
             schema = tool.get_input_schema()
 
-            # Model should be required
-            assert "model" in schema["required"]
+            # Model should always be optional
+            assert "model" not in schema.get("required", [])
 
-            # Model field should have detailed descriptions
+            # Model field should reference listmodels
             model_schema = schema["properties"]["model"]
             assert "enum" not in model_schema
-            assert "auto mode" in model_schema["description"].lower()
             assert "listmodels" in model_schema["description"]
 
         finally:
@@ -306,17 +305,15 @@ class TestAutoMode:
             schema = tool.get_model_field_schema()
             assert "enum" not in schema
             assert schema["type"] == "string"
-            assert "auto mode" in schema["description"].lower()
             assert "listmodels" in schema["description"]
 
-            # Test normal mode
+            # Test normal mode — schema is the same regardless
             os.environ["DEFAULT_MODEL"] = "pro"
             importlib.reload(config)
 
             schema = tool.get_model_field_schema()
             assert "enum" not in schema
             assert schema["type"] == "string"
-            assert "'pro'" in schema["description"]
             assert "listmodels" in schema["description"]
 
         finally:

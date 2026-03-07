@@ -443,41 +443,14 @@ class TestRuntimeModelSelection:
 class TestSchemaGeneration:
     """Test schema generation with different configurations."""
 
-    def test_schema_with_explicit_auto_mode(self):
-        """Test schema when DEFAULT_MODEL='auto'."""
-        with patch("config.DEFAULT_MODEL", "auto"):
-            with patch("config.IS_AUTO_MODE", True):
-                tool = ChatTool()
-                schema = tool.get_input_schema()
-
-                # Model should be required
-                assert "model" in schema["required"]
-
-    def test_schema_with_unavailable_default_model(self):
-        """Test schema when DEFAULT_MODEL is set but unavailable."""
-        with patch("config.DEFAULT_MODEL", "o3"):
-            with patch("config.IS_AUTO_MODE", False):
-                with patch.object(ModelProviderRegistry, "get_provider_for_model") as mock_get_provider:
-                    mock_get_provider.return_value = None  # Model not available
-
-                    tool = AnalyzeTool()
+    def test_schema_model_always_optional(self):
+        """Test that model is always optional regardless of DEFAULT_MODEL."""
+        for default, auto in [("auto", True), ("o3", False), ("pro", False)]:
+            with patch("config.DEFAULT_MODEL", default):
+                with patch("config.IS_AUTO_MODE", auto):
+                    tool = ChatTool()
                     schema = tool.get_input_schema()
-
-                    # Model should be required due to unavailable DEFAULT_MODEL
-                    assert "model" in schema["required"]
-
-    def test_schema_with_available_default_model(self):
-        """Test schema when DEFAULT_MODEL is available."""
-        with patch("config.DEFAULT_MODEL", "pro"):
-            with patch("config.IS_AUTO_MODE", False):
-                with patch.object(ModelProviderRegistry, "get_provider_for_model") as mock_get_provider:
-                    mock_get_provider.return_value = MagicMock()  # Model is available
-
-                    tool = ThinkDeepTool()
-                    schema = tool.get_input_schema()
-
-                    # Model should remain optional when DEFAULT_MODEL is available
-                    assert "model" not in schema["required"]
+                    assert "model" not in schema.get("required", [])
 
 
 class TestUnavailableModelFallback:

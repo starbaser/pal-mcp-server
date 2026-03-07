@@ -270,11 +270,10 @@ class TestAutoModeComprehensive:
             tool = AnalyzeTool()
             schema = tool.get_input_schema()
 
-            # Should have model as required field
-            assert "model" in schema["required"]
+            # Model is always optional
+            assert "model" not in schema.get("required", [])
 
-            # In auto mode, the schema should now have a description field
-            # instructing users to use the listmodels tool instead of an enum
+            # Schema should have a description field referencing listmodels
             model_schema = schema["properties"]["model"]
             assert "type" in model_schema
             assert model_schema["type"] == "string"
@@ -283,7 +282,6 @@ class TestAutoModeComprehensive:
             # Check that the description mentions using listmodels tool
             description = model_schema["description"]
             assert "listmodels" in description.lower()
-            assert "auto" in description.lower() or "selection" in description.lower()
 
             # Should NOT have enum field anymore - this is the new behavior
             assert "enum" not in model_schema

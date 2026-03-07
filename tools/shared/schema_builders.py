@@ -67,7 +67,8 @@ class SchemaBuilder:
             tool_specific_fields: Additional fields specific to the tool
             required_fields: List of required field names
             model_field_schema: Schema for the model field
-            auto_mode: Whether the tool is in auto mode (affects model requirement)
+            auto_mode: Unused, kept for API compatibility
+            require_model: Unused, kept for API compatibility
 
         Returns:
             Complete JSON schema for the tool
@@ -90,8 +91,6 @@ class SchemaBuilder:
 
         # Build required fields list
         required = list(required_fields) if required_fields else []
-        if (auto_mode or require_model) and "model" not in required:
-            required.append("model")
 
         # Build the complete schema
         schema = {

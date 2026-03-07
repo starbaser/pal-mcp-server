@@ -138,8 +138,7 @@ class WorkflowSchemaBuilder:
 
         required = standard_required + (required_fields or [])
 
-        if (auto_mode or require_model) and "model" not in required:
-            required.append("model")
+        # model is always optional — server uses DEFAULT_MODEL when omitted
 
         # Build the complete schema
         schema = {

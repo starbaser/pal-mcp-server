@@ -33,7 +33,7 @@ CASSETTE_REPLAY_ID = "chat_codegen/gemini25_pro_calculator/mldev"
 @pytest.mark.asyncio
 @pytest.mark.no_mock_provider
 async def test_chat_codegen_saves_file(monkeypatch, tmp_path):
-    """Ensure Gemini 2.5 Pro responses create pal_generated.code when code is emitted."""
+    """Ensure Gemini 2.5 Pro responses create a .code file in CODE_STORAGE_DIR when code is emitted."""
 
     CASSETTE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
@@ -63,10 +63,11 @@ async def test_chat_codegen_saves_file(monkeypatch, tmp_path):
         ModelProviderRegistry.reset_for_testing()
         ModelProviderRegistry.register_provider(ProviderType.GOOGLE, GeminiModelProvider)
 
+        code_dir = tmp_path / "code_store"
+        m.setattr("config.CODE_STORAGE_DIR", str(code_dir))
+
         working_dir = tmp_path / "codegen"
         working_dir.mkdir()
-        preexisting = working_dir / "pal_generated.code"
-        preexisting.write_text("stale contents", encoding="utf-8")
 
         chat_tool = ChatTool()
         prompt = (
@@ -102,12 +103,13 @@ async def test_chat_codegen_saves_file(monkeypatch, tmp_path):
     payload = json.loads(result[0].text)
     assert payload["status"] in {"success", "continuation_available"}
 
-    artifact_path = working_dir / "pal_generated.code"
-    assert artifact_path.exists()
+    code_dir = tmp_path / "code_store"
+    code_files = list(code_dir.glob("*_chat.code"))
+    assert len(code_files) >= 1, "Expected at least one generated .code file in CODE_STORAGE_DIR"
+    artifact_path = max(code_files, key=lambda p: p.stat().st_mtime)
     saved = artifact_path.read_text()
     assert "<GENERATED-CODE>" in saved
     assert "<NEWFILE:" in saved
     assert "def add" in saved and "def multiply" in saved
-    assert "stale contents" not in saved
 
     artifact_path.unlink()

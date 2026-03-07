@@ -245,14 +245,13 @@ class ChatTool(SimpleTool):
             block, remainder, _ = self._extract_generated_code_block(response)
             if block:
                 sanitized_text = remainder.strip()
-                target_directory = request.working_directory_absolute_path
                 try:
-                    artifact_path = self._persist_generated_code_block(block, target_directory)
+                    artifact_path = self._persist_generated_code_block(block)
                 except Exception as exc:  # pragma: no cover - rare filesystem failures
                     logger.error("Failed to persist generated code block: %s", exc, exc_info=True)
                     warning = (
-                        f"WARNING: Unable to write pal_generated.code inside '{target_directory}'. "
-                        "Check the path permissions and re-run. The generated code block is included below for manual handling."
+                        "WARNING: Unable to write generated code artifact to PAL code store. "
+                        "Check filesystem permissions and re-run. The generated code block is included below for manual handling."
                     )
 
                     history_copy_base = sanitized_text
@@ -264,7 +263,7 @@ class ChatTool(SimpleTool):
                 else:
                     if not sanitized_text:
                         base_message = (
-                            "Generated code saved to pal_generated.code.\n"
+                            "Generated code saved to PAL code store.\n"
                             "\n"
                             "CRITICAL: Contains mixed instructions + partial snippets - NOT complete code to copy as-is!\n"
                             "\n"
@@ -333,18 +332,16 @@ class ChatTool(SimpleTool):
 
         return block, remainder, len(matches)
 
-    def _persist_generated_code_block(self, block: str, working_directory: str) -> Path:
-        expanded = os.path.expanduser(working_directory)
-        target_dir = Path(expanded).resolve()
-        if not target_dir.is_dir():
-            raise FileNotFoundError(f"Absolute working directory path '{working_directory}' does not exist")
+    def _persist_generated_code_block(self, block: str) -> Path:
+        from datetime import datetime
 
-        target_file = target_dir / "pal_generated.code"
-        if target_file.exists():
-            try:
-                target_file.unlink()
-            except OSError as exc:
-                logger.warning("Unable to remove existing pal_generated.code: %s", exc)
+        from config import CODE_STORAGE_DIR
+
+        code_dir = Path(CODE_STORAGE_DIR)
+        code_dir.mkdir(parents=True, exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        target_file = code_dir / f"{timestamp}_chat.code"
 
         content = block if block.endswith("\n") else f"{block}\n"
         target_file.write_text(content, encoding="utf-8")

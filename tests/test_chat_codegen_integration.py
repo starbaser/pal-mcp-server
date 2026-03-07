@@ -104,7 +104,7 @@ async def test_chat_codegen_saves_file(monkeypatch, tmp_path):
     assert payload["status"] in {"success", "continuation_available"}
 
     code_dir = tmp_path / "code_store"
-    code_files = list(code_dir.glob("*_chat.code"))
+    code_files = list(code_dir.glob("*.code"))
     assert len(code_files) >= 1, "Expected at least one generated .code file in CODE_STORAGE_DIR"
     artifact_path = max(code_files, key=lambda p: p.stat().st_mtime)
     saved = artifact_path.read_text()

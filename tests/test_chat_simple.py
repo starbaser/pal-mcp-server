@@ -151,7 +151,7 @@ class TestChatTool:
 
         formatted = tool.format_response(response, request)
 
-        code_files = list(code_dir.glob("*_chat.code"))
+        code_files = list(code_dir.glob("*.code"))
         assert len(code_files) == 1
         saved_content = code_files[0].read_text(encoding="utf-8")
 
@@ -177,7 +177,7 @@ class TestChatTool:
 
         formatted = tool.format_response(response, request)
 
-        code_files = list(code_dir.glob("*_chat.code"))
+        code_files = list(code_dir.glob("*.code"))
         assert len(code_files) == 1
         saved_content = code_files[0].read_text(encoding="utf-8")
 
@@ -200,7 +200,7 @@ class TestChatTool:
 
         formatted = tool.format_response(response, request)
 
-        assert not code_dir.exists() or not list(code_dir.glob("*_chat.code"))
+        assert not code_dir.exists() or not list(code_dir.glob("*.code"))
         assert "print('oops')" in formatted
 
     def test_format_response_ignores_orphaned_closing_tag(self, tmp_path, monkeypatch):
@@ -217,7 +217,7 @@ class TestChatTool:
 
         formatted = tool.format_response(response, request)
 
-        assert not code_dir.exists() or not list(code_dir.glob("*_chat.code"))
+        assert not code_dir.exists() or not list(code_dir.glob("*.code"))
         assert "</GENERATED-CODE> just text" in formatted
 
     def test_format_response_preserves_narrative_after_generated_code(self, tmp_path):

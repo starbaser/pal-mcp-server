@@ -246,7 +246,7 @@ class ChatTool(SimpleTool):
             if block:
                 sanitized_text = remainder.strip()
                 try:
-                    artifact_path = self._persist_generated_code_block(block)
+                    artifact_path = self._persist_generated_code_block(block, request.continuation_id)
                 except Exception as exc:  # pragma: no cover - rare filesystem failures
                     logger.error("Failed to persist generated code block: %s", exc, exc_info=True)
                     warning = (
@@ -332,7 +332,7 @@ class ChatTool(SimpleTool):
 
         return block, remainder, len(matches)
 
-    def _persist_generated_code_block(self, block: str) -> Path:
+    def _persist_generated_code_block(self, block: str, continuation_id: Optional[str] = None) -> Path:
         from datetime import datetime
 
         from config import CODE_STORAGE_DIR
@@ -341,7 +341,8 @@ class ChatTool(SimpleTool):
         code_dir.mkdir(parents=True, exist_ok=True)
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        target_file = code_dir / f"{timestamp}_chat.code"
+        cid = continuation_id[:12] if continuation_id else "new"
+        target_file = code_dir / f"{timestamp}_{cid}.code"
 
         content = block if block.endswith("\n") else f"{block}\n"
         target_file.write_text(content, encoding="utf-8")

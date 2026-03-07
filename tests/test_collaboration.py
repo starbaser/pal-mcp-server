@@ -63,7 +63,7 @@ class TestDynamicContextRequests:
         response_data = json.loads(result[0].text)
         # Workflow tools may handle provider errors differently than simple tools
         # They might return error, expert analysis, or clarification requests
-        assert response_data["status"] in ["calling_expert_analysis", "error", "files_required_to_continue"]
+        assert response_data["status"] in ["analysis_complete", "calling_expert_analysis", "error", "files_required_to_continue"]
 
         # Check that expert analysis was performed and contains the clarification
         if "expert_analysis" in response_data:
@@ -144,7 +144,7 @@ class TestDynamicContextRequests:
         response_data = json.loads(result[0].text)
         # Workflow tools may handle provider errors differently than simple tools
         # They might return error, expert analysis, or clarification requests
-        assert response_data["status"] in ["calling_expert_analysis", "error", "files_required_to_continue"]
+        assert response_data["status"] in ["analysis_complete", "calling_expert_analysis", "error", "files_required_to_continue"]
 
         # The malformed JSON should appear in the expert analysis content
         if "expert_analysis" in response_data:
@@ -324,7 +324,7 @@ class TestDynamicContextRequests:
         response_data = json.loads(result[0].text)
         # Workflow tools may handle provider errors differently than simple tools
         # They might return error, complete analysis, or even clarification requests
-        assert response_data["status"] in ["error", "calling_expert_analysis", "files_required_to_continue"]
+        assert response_data["status"] in ["error", "analysis_complete", "calling_expert_analysis", "files_required_to_continue"]
 
         # If expert analysis was attempted, it may succeed or fail
         if response_data["status"] == "calling_expert_analysis" and "expert_analysis" in response_data:
@@ -518,6 +518,7 @@ class TestCollaborationWorkflow:
         # Accept multiple valid statuses as the workflow can handle the additional context differently
         # Include 'error' status in case API calls fail in test environment
         assert response2["status"] in [
+            "analysis_complete",
             "calling_expert_analysis",
             "files_required_to_continue",
             "pause_for_analysis",
@@ -526,12 +527,10 @@ class TestCollaborationWorkflow:
 
         # Check that the response contains the expected content regardless of status
 
-        # If expert analysis was performed, verify content is there
-        if "expert_analysis" in response2:
-            expert_analysis = response2["expert_analysis"]
-            if "raw_analysis" in expert_analysis:
-                analysis_content = expert_analysis["raw_analysis"]
-                assert (
+        # If expert analysis was performed, verify content is there (promoted to top-level or nested)
+        if "content" in response2:
+            analysis_content = response2["content"]
+            assert (
                     "incorrect host configuration" in analysis_content.lower() or "database" in analysis_content.lower()
                 )
         elif response2["status"] == "files_required_to_continue":

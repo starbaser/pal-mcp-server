@@ -1311,10 +1311,16 @@ class BaseWorkflowMixin(ABC):
                 response_data["content_type"] = "text"
                 del response_data["expert_analysis"]
             else:
-                # Expert analysis was successfully executed - include expert guidance
+                # Expert analysis succeeded — promote LLM output to top-level content
+                response_data["status"] = "analysis_complete"
+                if isinstance(expert_analysis, dict) and expert_analysis.get("raw_analysis"):
+                    response_data["content"] = expert_analysis["raw_analysis"]
+                elif isinstance(expert_analysis, dict):
+                    response_data["content"] = json.dumps(expert_analysis, ensure_ascii=False)
+                del response_data["expert_analysis"]
+
                 response_data["next_steps"] = self.get_completion_next_steps_message(expert_analysis_used=True)
 
-                # Add expert analysis guidance as important considerations
                 expert_guidance = self.get_expert_analysis_guidance()
                 if expert_guidance:
                     response_data["important_considerations"] = expert_guidance

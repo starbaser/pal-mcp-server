@@ -133,8 +133,8 @@ def test_format_workflow_output():
     assert "relevant_files: 3" in text
     assert "issues_found: 0" in text
 
-    # file_context must NOT appear
-    assert "file_context" not in text
+    # file_context should appear in the remaining JSON dump (nothing silently dropped)
+    assert "file_context" in text
 
     # Footer
     assert "continuation_id: wf-uuid" in text

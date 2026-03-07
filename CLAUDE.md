@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Development Commands
 
 ```bash
-# Setup and run server (handles venv, deps, config)
+# Setup and run server (handles venv, deps, MCP registration)
 ./run-server.sh
 
 # View logs
@@ -36,63 +36,73 @@ PAL MCP Server enables AI CLIs (Claude Code, Gemini CLI, Codex CLI) to orchestra
 
 ```
 CLI Client (Claude/Gemini/Codex)
-       ↓ MCP JSON-RPC
+       │ MCP JSON-RPC
+       ▼
    server.py
-       ↓ handle_call_tool()
+       │ handle_call_tool()
+       ▼
    Tool Registry (TOOLS dict)
-       ↓
+       │
+       ▼
    Tool.execute()
-       ↓ reconstruct_thread_context()
+       │ reconstruct_thread_context()
+       ▼
    Conversation Memory (utils/conversation_memory.py)
-       ↓ Provider selection
+       │ Provider selection
+       ▼
    ModelProviderRegistry
-       ↓
+       │
+       ▼
    External Model (Gemini/OpenAI/etc.)
 ```
 
 ### Key Components
 
-**`server.py`** - Entry point and MCP protocol handler
+**`server.py`** — Entry point and MCP protocol handler
 - `TOOLS` dict maps tool names to instances
 - `handle_call_tool()` routes requests, resolves models, reconstructs conversation context
 - `configure_providers()` registers providers based on API keys
+- `parse_model_option()` splits `"model:option"` format (e.g. `"gemini-pro:for"` → model + option)
 
-**`tools/`** - MCP tool implementations
-- Each tool inherits from `BaseTool` (`tools/shared/base_tool.py`)
-- Required methods: `get_name()`, `get_description()`, `get_input_schema()`, `execute()`
-- Tools use `ToolModelCategory` enum to hint preferred model type (FAST, BALANCED, DEEP_THINKING)
+**`tools/`** — MCP tool implementations. Two base classes:
+- `SimpleTool` (`tools/simple/base.py`) — single request/response (chat, clink, imagegen, perceive)
+- `WorkflowTool` (`tools/workflow/base.py`) — multi-step workflows (analyze, codereview, debug, planner, etc.)
 
-**`providers/`** - AI provider abstraction
-- `base.py`: Abstract `ModelProvider` interface
-- `registry.py`: `ModelProviderRegistry` singleton for provider management
-- Provider implementations: `gemini.py`, `openai.py`, `azure_openai.py`, `xai.py`, `openrouter.py`, `custom.py`
-- Priority: Native APIs → Custom endpoints → OpenRouter (catch-all)
+Both inherit from `BaseTool` (`tools/shared/base_tool.py`). Required methods: `get_name()`, `get_description()`, `get_input_schema()`, `get_system_prompt()`, `execute()`.
 
-**`utils/conversation_memory.py`** - Stateless MCP → Stateful conversations
+**`providers/`** — AI provider abstraction
+- `base.py`: Abstract `ModelProvider` interface with `generate_content()`, `get_capabilities()`, retry logic
+- `registry.py`: `ModelProviderRegistry` singleton — lazy-initializes providers, resolves models by priority
+- Priority order: GOOGLE → OPENAI → AZURE → XAI → ZAI → DIAL → CUSTOM → OPENROUTER
+
+**`utils/conversation_memory.py`** — Stateless MCP → Stateful conversations
 - In-memory `ThreadContext` storage with UUID keys
 - `continuation_id` parameter enables multi-turn conversations
-- Cross-tool continuation: context flows between analyze → codereview → debug
-- Dual prioritization: newest-first for token efficiency, chronological for LLM presentation
+- Cross-tool continuation: context flows between any tools (analyze → codereview → debug)
+- Dual prioritization: newest-first for token budgeting, chronological for LLM presentation
+- Configurable backend: `"memory"` (in-process) or `"file"` (survives restarts)
 
-**`systemprompts/`** - AI instruction modules
-- Each tool has corresponding `*_prompt.py` file
-- `clink/` subdirectory for CLI agent prompts
+**`systemprompts/`** — Each tool has a corresponding `*_prompt.py` file (1:1 naming convention)
+
+**`config.py`** — Central configuration: version, model defaults, token limits, storage paths, timeouts
 
 ### Model Resolution
 
 Models are resolved early at the MCP boundary in `handle_call_tool()`:
-1. Parse `model:option` format (e.g., "gemini-pro:for")
-2. Resolve "auto" to specific model via registry
+1. Parse `model:option` format (e.g., `"gemini-pro:for"` → model name + option string)
+2. Resolve `"auto"` → concrete model via `registry.get_preferred_fallback_model(tool_category)`
 3. Create `ModelContext` with capabilities and token allocation
 4. Pass resolved context to tool
 
+Tools declare their preferred model tier via `get_model_category()` → `ToolModelCategory`:
+- `EXTENDED_REASONING` — most tools (codereview, debug, analyze, thinkdeep, etc.)
+- `FAST_RESPONSE` — chat, listmodels, version
+- `BALANCED` — perceive
+- `IMAGE_GENERATION` — imagegen
+
 ### MCP Transport Limits
 
-`MCP_PROMPT_SIZE_LIMIT` in `config.py` limits **user input** crossing MCP transport (~60K chars default). This does NOT limit:
-- System prompts added internally by tools
-- File content embedded by tools
-- Conversation history
-- Prompts sent to external models (managed by model-specific limits)
+`MCP_PROMPT_SIZE_LIMIT` (~60K chars default) limits **user input** crossing MCP transport. It does NOT limit system prompts, file content embedded by tools, conversation history, or prompts sent to external models.
 
 ### clink Tool (CLI-to-CLI Bridge)
 
@@ -100,6 +110,7 @@ Models are resolved early at the MCP boundary in `handle_call_tool()`:
 - Sets `PAL_MCP_CLINK=1` to identify headless sessions
 - Loads agent definitions from `.claude/agents/` directories
 - Returns structured JSON responses with continuation support
+- Output exceeding `MAX_MCP_OUTPUT_TOKENS` is offloaded to `.claude/output/`
 
 ## Tool Implementation Pattern
 
@@ -121,35 +132,67 @@ class MyTool(BaseTool):
         return "AI instructions for this tool"
 
     def get_model_category(self) -> ToolModelCategory:
-        return ToolModelCategory.BALANCED  # FAST, BALANCED, or DEEP_THINKING
+        return ToolModelCategory.BALANCED
 
     async def execute(self, arguments: dict) -> list[TextContent]:
-        # Implementation
         pass
 ```
 
-Register in `server.py`:
-```python
-TOOLS = {
-    "mytool": MyTool(),
-    ...
-}
-```
+Register in `server.py` TOOLS dict. Tools that bypass model resolution override `requires_model() -> False`.
 
 ## Environment Variables
 
 Key variables (see `.env.example` for full list):
-- `GEMINI_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, `OPENROUTER_API_KEY` - Provider credentials
-- `CUSTOM_API_URL` - Local models (Ollama, vLLM)
-- `DEFAULT_MODEL` - Default model ("auto" for intelligent selection)
-- `DISABLED_TOOLS` - Comma-separated list to disable tools
-- `LOG_LEVEL` - DEBUG, INFO, WARNING, ERROR
-- `CONVERSATION_TIMEOUT_HOURS` - Thread expiration (default: 6)
+- `GEMINI_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, `OPENROUTER_API_KEY` — Provider credentials
+- `CUSTOM_API_URL` — Local models (Ollama, vLLM)
+- `DEFAULT_MODEL` — Default model (`"auto"` for intelligent selection)
+- `DISABLED_TOOLS` — Comma-separated list to disable tools
+- `LOG_LEVEL` — DEBUG, INFO, WARNING, ERROR
+- `CONVERSATION_TIMEOUT_HOURS` — Thread expiration (default: 6)
 
 ## Testing Strategy
 
-1. **Unit tests** (`tests/`): Fast, no API calls, test individual functions
-2. **Integration tests** (`@pytest.mark.integration`): Use local Ollama models (free)
-3. **Simulator tests** (`simulator_tests/`): End-to-end with real API keys
+1. **Unit tests** (`tests/`): Fast, no API calls, test individual functions. `asyncio_mode = auto` in pytest.ini.
+2. **Integration tests** (`@pytest.mark.integration`): Use local Ollama models or real API keys.
+3. **Simulator tests** (`simulator_tests/`): End-to-end with real API keys, 30 available tests.
 
-Quick test mode covers: cross-tool continuation, conversation threading, consensus workflow, codereview workflow, planner workflow, token allocation.
+Quick simulator mode covers: cross-tool continuation, conversation threading, consensus workflow, codereview workflow, planner workflow, token allocation.
+
+## Code Style
+
+- Line length: 120 (black, isort, ruff)
+- isort profile: `black`
+- ruff selects: E, W, F, I, B, C4, UP; ignores E501, B008, C901, B904
+
+## Code Navigation (kit-dev-mcp)
+
+This project is indexed for kit-dev-mcp repo tools. At session start, load the tools and open the repo:
+
+```
+# Load tools
+ToolSearch query: "select:mcp__kitstore__open_repository,mcp__kitstore__warm_cache,mcp__kitstore__grep_code,mcp__kitstore__grep_ast,mcp__kitstore__extract_symbols,mcp__kitstore__get_symbol_code,mcp__kitstore__find_symbol_usages,mcp__kitstore__get_file_tree,mcp__kitstore__analyze_dependencies,mcp__kitstore__review_diff"
+
+# Open and warm
+open_repository(path_or_url="/home/eigenmage/dev/opt/pal-mcp-server") → repo_id
+warm_cache(repo_id, warm_file_tree=true, warm_symbols=true)
+```
+
+### Available Tools
+
+| Tool | Purpose | Example |
+|------|---------|---------|
+| `grep_code(repo_id, pattern)` | Fast literal string search | `grep_code(repo_id, "handle_call_tool")` |
+| `grep_ast(repo_id, pattern)` | AST-aware semantic search (tree-sitter) | `grep_ast(repo_id, "class BaseTool")` |
+| `extract_symbols(repo_id, file_path)` | List functions/classes/types in a file | `extract_symbols(repo_id, "server.py")` |
+| `get_symbol_code(repo_id, file_path, symbol)` | Get a symbol's full source | `get_symbol_code(repo_id, "server.py", "handle_call_tool")` |
+| `find_symbol_usages(repo_id, symbol_name)` | Find where a symbol is used across repo | `find_symbol_usages(repo_id, "BaseTool")` |
+| `get_file_tree(repo_id)` | Repository file structure | `get_file_tree(repo_id)` |
+| `analyze_dependencies(path)` | Dependency graph via import parsing | `analyze_dependencies("/home/eigenmage/dev/opt/pal-mcp-server")` |
+| `review_diff(repo_id, diff_spec)` | AI review of git diffs | `review_diff(repo_id, "HEAD~1")` |
+
+### When to Use
+
+- **Symbol navigation**: `extract_symbols` + `get_symbol_code` for lazy loading (token efficient)
+- **Cross-file tracing**: `find_symbol_usages` to trace how classes/functions propagate
+- **Pattern search**: `grep_ast` for structural matches (class defs, function signatures); `grep_code` for literal strings
+- **Pre-commit review**: `review_diff` for AI-assisted diff review

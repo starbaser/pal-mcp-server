@@ -941,9 +941,9 @@ class BaseWorkflowMixin(ABC):
     def get_request_model_name(self, request: Any) -> str:
         """Get model name from request. Override for custom model handling."""
         try:
-            return request.model or "flash"
+            return request.model or ""
         except AttributeError:
-            return "flash"
+            return ""
 
     def get_request_continuation_id(self, request: Any) -> Optional[str]:
         """Get continuation ID from request. Override for custom continuation handling."""
@@ -1175,12 +1175,9 @@ class BaseWorkflowMixin(ABC):
                 request = self.get_workflow_request_model()(**arguments)
                 model_name = self.get_request_model_name(request)
 
-                # Basic metadata without provider info
-                metadata = {
-                    "tool_name": self.get_name(),
-                    "model_used": model_name,
-                    "provider_used": "unknown",
-                }
+                metadata = {"tool_name": self.get_name()}
+                if model_name:
+                    metadata["model_used"] = model_name
 
                 # Preserve existing metadata and add workflow metadata
                 if "metadata" not in response_data:
@@ -1189,7 +1186,7 @@ class BaseWorkflowMixin(ABC):
 
                 logger.debug(
                     f"[WORKFLOW_METADATA] {self.get_name()}: Added fallback metadata - "
-                    f"model: {model_name}, provider: unknown"
+                    f"model: {model_name or '(none)'}"
                 )
 
         except Exception as e:

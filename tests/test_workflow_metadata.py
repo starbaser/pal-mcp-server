@@ -236,11 +236,10 @@ class TestWorkflowMetadata:
             # Verify fallback metadata
             assert "tool_name" in metadata, "Fallback metadata should include tool_name"
             assert "model_used" in metadata, "Fallback metadata should include model_used"
-            assert "provider_used" in metadata, "Fallback metadata should include provider_used"
+            assert "provider_used" not in metadata, "Fallback should not inject fake provider_used"
 
             assert metadata["tool_name"] == "debug", "tool_name should be 'debug'"
             assert metadata["model_used"] == "flash", "model_used should be from request"
-            assert metadata["provider_used"] == "unknown", "provider_used should be 'unknown' in fallback"
 
         finally:
             # Restore original environment

@@ -164,15 +164,13 @@ LOCALE = get_env("LOCALE", "") or ""
 
 # PAL storage configuration
 # Base directory for all PAL persistent data (threads, images, etc.)
-# Prefers project-level .claude/pal/ if .claude/ exists in CWD,
-# otherwise falls back to CLAUDE_CONFIG_DIR (default ~/.claude) + /pal
+# Defaults to ~/.claude/pal/. Overridden by PAL_STORAGE_DIR env var.
+# At runtime, reconfigure_storage_for_root() scopes storage under the
+# MCP client's project root (via roots API) if it has a .claude/ directory.
 def _resolve_pal_storage_dir() -> str:
     explicit = os.environ.get("PAL_STORAGE_DIR")
     if explicit:
         return explicit
-    project_claude = os.path.join(os.getcwd(), ".claude")
-    if os.path.isdir(project_claude):
-        return os.path.join(project_claude, "pal")
     config_dir = os.environ.get("CLAUDE_CONFIG_DIR", os.path.expanduser("~/.claude"))
     return os.path.join(config_dir, "pal")
 
@@ -187,6 +185,23 @@ CONVERSATION_STORAGE_BACKEND = get_env("CONVERSATION_STORAGE_BACKEND", "file") o
 CONVERSATION_STORAGE_DIR = os.path.join(PAL_STORAGE_DIR, "threads")
 IMAGE_STORAGE_DIR = os.path.join(PAL_STORAGE_DIR, "images")
 CONTENT_STORAGE_DIR = os.path.join(PAL_STORAGE_DIR, "content")
+
+
+def reconfigure_storage_for_root(root_path: str) -> None:
+    """Update storage paths to scope under a client project root's .claude/pal/.
+
+    Called after MCP roots are fetched. Must be called before the first tool
+    invocation since the storage backend is lazy-initialized.
+    """
+    global PAL_STORAGE_DIR, CONVERSATION_STORAGE_DIR, IMAGE_STORAGE_DIR, CONTENT_STORAGE_DIR
+    if os.environ.get("PAL_STORAGE_DIR"):
+        return  # explicit override takes precedence
+    project_claude = os.path.join(root_path, ".claude")
+    if os.path.isdir(project_claude):
+        PAL_STORAGE_DIR = os.path.join(project_claude, "pal")
+        CONVERSATION_STORAGE_DIR = os.path.join(PAL_STORAGE_DIR, "threads")
+        IMAGE_STORAGE_DIR = os.path.join(PAL_STORAGE_DIR, "images")
+        CONTENT_STORAGE_DIR = os.path.join(PAL_STORAGE_DIR, "content")
 
 # CONVERSATION_TIMEOUT_HOURS: How long threads are retained before expiration
 CONVERSATION_TIMEOUT_HOURS = int(get_env("CONVERSATION_TIMEOUT_HOURS") or 6)

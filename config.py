@@ -185,4 +185,4 @@ IMAGE_STORAGE_DIR = os.path.join(PAL_STORAGE_DIR, "images")
 CONTENT_STORAGE_DIR = os.path.join(PAL_STORAGE_DIR, "content")
 
 # CONVERSATION_TIMEOUT_HOURS: How long threads are retained before expiration
-CONVERSATION_TIMEOUT_HOURS = int(get_env("CONVERSATION_TIMEOUT_HOURS") or 6)
+CONVERSATION_TIMEOUT_HOURS = int(get_env("CONVERSATION_TIMEOUT_HOURS") or 720)

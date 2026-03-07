@@ -33,7 +33,6 @@ import threading
 import time
 from typing import Optional
 
-from utils.env import get_env
 
 logger = logging.getLogger("mcp_server")
 
@@ -44,8 +43,7 @@ class InMemoryStorage:
     def __init__(self):
         self._store: dict[str, tuple[str, float]] = {}
         self._lock = threading.Lock()
-        # Run cleanup at 1/10th of timeout interval (e.g., 18 mins for 3 hour timeout)
-        timeout_hours = int(get_env("CONVERSATION_TIMEOUT_HOURS", "3") or "3")
+        from config import CONVERSATION_TIMEOUT_HOURS as timeout_hours
         self._cleanup_interval = (timeout_hours * 3600) // 10
         self._cleanup_interval = max(300, self._cleanup_interval)  # Minimum 5 minutes
         self._shutdown = False
@@ -157,14 +155,11 @@ class FileStorage:
         """Return value for key, checking memory cache first then disk"""
         with self._lock:
             if key in self._cache:
-                value, expires_at = self._cache[key]
-                if time.time() < expires_at:
-                    logger.debug(f"FileStorage: cache hit for key {key!r}")
-                    return value
-                # Expired — evict from cache; disk cleanup happens lazily on disk read
-                del self._cache[key]
+                value, _ = self._cache[key]
+                logger.debug(f"FileStorage: cache hit for key {key!r}")
+                return value
 
-        # Cache miss or just evicted — try disk
+        # Cache miss — try disk
         return self._read_from_disk(key)
 
     # ------------------------------------------------------------------
@@ -207,14 +202,6 @@ class FileStorage:
             logger.warning(f"FileStorage: could not read {path!r}: {e}")
             return None
 
-        if time.time() >= expires_at:
-            logger.debug(f"FileStorage: key {key!r} expired on disk; removing")
-            try:
-                os.remove(path)
-            except OSError:
-                pass
-            return None
-
         # Warm the cache on a disk-hit so subsequent reads stay fast
         with self._lock:
             self._cache[key] = (value, expires_at)
@@ -228,7 +215,6 @@ class FileStorage:
             logger.warning(f"FileStorage: could not list storage dir on recovery: {e}")
             return
 
-        now = time.time()
         for filename in entries:
             if not filename.endswith(".json"):
                 continue
@@ -240,13 +226,6 @@ class FileStorage:
                 expires_at: float = record["expires_at"]
             except (OSError, json.JSONDecodeError, KeyError) as e:
                 logger.warning(f"FileStorage: skipping unreadable file {path!r}: {e}")
-                continue
-
-            if now >= expires_at:
-                try:
-                    os.remove(path)
-                except OSError:
-                    pass
                 continue
 
             # Derive key from filename: "thread_<uuid>.json" -> "thread:<uuid>"

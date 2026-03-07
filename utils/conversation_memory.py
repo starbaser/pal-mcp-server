@@ -130,20 +130,7 @@ except ValueError:
     )
     MAX_CONVERSATION_TURNS = 50
 
-# Get conversation timeout from environment (in hours), default to 3 hours
-try:
-    timeout_raw = (get_env("CONVERSATION_TIMEOUT_HOURS", "3") or "3").strip()
-    CONVERSATION_TIMEOUT_HOURS = int(timeout_raw)
-    if CONVERSATION_TIMEOUT_HOURS <= 0:
-        logger.warning(
-            f"Invalid CONVERSATION_TIMEOUT_HOURS value ({CONVERSATION_TIMEOUT_HOURS}), using default of 3 hours"
-        )
-        CONVERSATION_TIMEOUT_HOURS = 3
-except ValueError:
-    logger.warning(
-        f"Invalid CONVERSATION_TIMEOUT_HOURS value ('{get_env('CONVERSATION_TIMEOUT_HOURS')}'), using default of 3 hours"
-    )
-    CONVERSATION_TIMEOUT_HOURS = 3
+from config import CONVERSATION_TIMEOUT_HOURS
 
 CONVERSATION_TIMEOUT_SECONDS = CONVERSATION_TIMEOUT_HOURS * 3600
 

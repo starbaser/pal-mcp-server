@@ -1122,9 +1122,8 @@ async def reconstruct_thread_context(arguments: dict[str, Any]) -> dict[str, Any
 
         # Return error asking CLI to restart conversation with full context
         raise ValueError(
-            f"Conversation thread '{continuation_id}' was not found or has expired. "
-            f"This may happen if the conversation was created more than 3 hours ago or if the "
-            f"server was restarted. "
+            f"Conversation thread '{continuation_id}' was not found. "
+            f"The thread file may be missing from disk. "
             f"Please restart the conversation by providing your full question/prompt without the "
             f"continuation_id parameter. "
             f"This will create a new conversation thread that can continue with follow-up exchanges."

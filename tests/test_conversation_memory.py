@@ -361,7 +361,7 @@ class TestConversationFlow:
             asyncio.run(reconstruct_thread_context(arguments))
 
         error_msg = str(exc_info.value)
-        assert "Conversation thread 'invalid-uuid-12345' was not found or has expired" in error_msg
+        assert "Conversation thread 'invalid-uuid-12345' was not found" in error_msg
         assert (
             "Please restart the conversation by providing your full question/prompt without the continuation_id"
             in error_msg

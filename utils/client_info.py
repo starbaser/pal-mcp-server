@@ -16,9 +16,6 @@ logger = logging.getLogger(__name__)
 # Global cache for client information
 _client_info_cache: Optional[dict[str, Any]] = None
 
-# Global cache for client roots (project directories)
-_client_roots_cache: Optional[list[str]] = None
-
 # Mapping of known client names to friendly names
 # This is case-insensitive and checks if the key is contained in the client name
 CLIENT_NAME_MAPPINGS = {
@@ -70,47 +67,6 @@ def get_friendly_name(client_name: str) -> str:
 
     # If no match found, return the default
     return DEFAULT_FRIENDLY_NAME
-
-
-async def fetch_and_cache_client_roots(server: Any) -> list[str]:
-    """Fetch client roots via MCP roots/list and cache them.
-
-    Returns list of root directory paths (file:// URIs converted to filesystem paths).
-    """
-    global _client_roots_cache
-    if _client_roots_cache is not None:
-        return _client_roots_cache
-    try:
-        request_context = server.request_context
-        if not request_context:
-            _client_roots_cache = []
-            return []
-        session = request_context.session
-        if not session:
-            _client_roots_cache = []
-            return []
-        client_params = session._client_params
-        if not client_params or not client_params.capabilities or not client_params.capabilities.roots:
-            _client_roots_cache = []
-            return []
-        result = await session.list_roots()
-        paths = []
-        for root in result.roots:
-            uri = str(root.uri)
-            if uri.startswith("file://"):
-                paths.append(uri[7:])
-        _client_roots_cache = paths
-        logger.debug(f"Cached client roots: {paths}")
-        return paths
-    except Exception as e:
-        logger.debug(f"Could not fetch client roots: {e}")
-        _client_roots_cache = []
-        return []
-
-
-def get_cached_client_roots() -> list[str]:
-    """Get cached client root paths."""
-    return _client_roots_cache or []
 
 
 def get_cached_client_info() -> Optional[dict[str, Any]]:

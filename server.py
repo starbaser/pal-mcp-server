@@ -688,19 +688,6 @@ async def handle_list_tools() -> list[Tool]:
     except Exception as e:
         logger.debug(f"Could not log client info during list_tools: {e}")
 
-    # Fetch client roots via MCP roots API and scope storage to client project
-    try:
-        from utils.client_info import fetch_and_cache_client_roots
-
-        roots = await fetch_and_cache_client_roots(server)
-        if roots:
-            from config import reconfigure_storage_for_root
-
-            reconfigure_storage_for_root(roots[0])
-            logger.info(f"Storage scoped to client root: {roots[0]}")
-    except Exception as e:
-        logger.debug(f"Could not scope storage to client root: {e}")
-
     tools = []
 
     # Add all registered AI-powered tools from the TOOLS registry

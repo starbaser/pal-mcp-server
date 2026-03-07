@@ -43,10 +43,12 @@ from mcp.types import (  # noqa: E402
     ToolsCapability,
 )
 
+import config  # noqa: E402
 from config import (  # noqa: E402
     DEFAULT_MODEL,
     __version__,
 )
+from utils.response_formatter import format_tool_result  # noqa: E402
 from tools import (  # noqa: E402
     AnalyzeTool,
     ChallengeTool,
@@ -854,8 +856,10 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
         # Skip model resolution for tools that don't require models (e.g., planner)
         if not tool.requires_model():
             logger.debug(f"Tool {name} doesn't require model resolution - skipping model validation")
-            # Execute tool directly without model context
-            return await tool.execute(arguments)
+            result = await tool.execute(arguments)
+            if config.FORMATTED_OUTPUT:
+                result = format_tool_result(result, name)
+            return result
 
         # Handle auto mode at MCP boundary - resolve to specific model
         if model_name.lower() == "auto":
@@ -914,6 +918,9 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
         logger.info(f"Tool '{name}' execution completed")
 
         _save_response_content(name, result)
+
+        if config.FORMATTED_OUTPUT:
+            result = format_tool_result(result, name)
 
         # Log completion to activity file
         try:

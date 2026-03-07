@@ -93,15 +93,9 @@ class TestServerTools:
         assert len(result) == 1
 
         response = result[0].text
-        # Parse the JSON response
-        import json
 
-        data = json.loads(response)
-        assert data["status"] == "success"
-        content = data["content"]
-
-        # Check for expected content in the markdown output
-        assert "# PAL MCP Server Version" in content
-        assert "## Server Information" in content
-        assert "## Configuration" in content
-        assert "Current Version" in content
+        # Check for expected content (formatter unwraps content from JSON)
+        assert "# PAL MCP Server Version" in response
+        assert "## Server Information" in response
+        assert "## Configuration" in response
+        assert "Current Version" in response

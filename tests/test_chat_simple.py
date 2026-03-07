@@ -93,7 +93,12 @@ class TestChatTool:
 
         # Description should route callers to listmodels, regardless of mode
         assert "listmodels" in schema["description"]
-        assert "listmodels" in schema["description"].lower()
+        if self.tool.is_effective_auto_mode():
+            assert "auto mode" in schema["description"].lower()
+        else:
+            import config
+
+            assert f"'{config.DEFAULT_MODEL}'" in schema["description"]
 
     @pytest.mark.asyncio
     async def test_prompt_preparation(self):

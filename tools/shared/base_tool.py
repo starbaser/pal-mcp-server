@@ -525,26 +525,56 @@ class BaseTool(ABC):
 
     def get_model_field_schema(self) -> dict[str, Any]:
         """
-        Generate the model field schema.
+        Generate the model field schema based on auto mode configuration.
 
-        Model is always optional. When omitted, the server uses DEFAULT_MODEL.
-        When provided, it overrides the default.
+        When auto mode is enabled, the model parameter becomes required
+        and includes detailed descriptions of each model's capabilities.
 
         Returns:
             Dict containing the model field JSON schema
         """
+
+        from config import DEFAULT_MODEL
+
+        # Use the centralized effective auto mode check
+        if self.is_effective_auto_mode():
+            description = (
+                "Currently in auto model selection mode. CRITICAL: When the user names a model, you MUST use that exact name unless the server rejects it. "
+                "If no model is provided, you may use the `listmodels` tool to review options and select an appropriate match."
+            )
+            summaries, total, restricted = self._get_ranked_model_summaries()
+            remainder = max(0, total - len(summaries))
+            if summaries:
+                top_line = "; ".join(summaries)
+                if remainder > 0:
+                    label = "Allowed models" if restricted else "Top models"
+                    top_line = f"{label}: {top_line}; +{remainder} more via `listmodels`."
+                else:
+                    label = "Allowed models" if restricted else "Top models"
+                    top_line = f"{label}: {top_line}."
+                description = f"{description} {top_line}"
+
+            restriction_note = self._get_restriction_note()
+            if restriction_note and (remainder > 0 or not summaries):
+                description = f"{description} {restriction_note}."
+            return {
+                "type": "string",
+                "description": description,
+            }
+
         description = (
-            "Override the default model. When the user names a model, send that exact name. "
-            "Use `listmodels` to see available options."
+            f"The default model is '{DEFAULT_MODEL}'. Override only when the user explicitly requests a different model, and use that exact name. "
+            "If the requested model fails validation, surface the server error instead of substituting another model. When unsure, use the `listmodels` tool for details."
         )
         summaries, total, restricted = self._get_ranked_model_summaries()
         remainder = max(0, total - len(summaries))
         if summaries:
             top_line = "; ".join(summaries)
-            label = "Allowed models" if restricted else "Available"
             if remainder > 0:
+                label = "Allowed models" if restricted else "Preferred alternatives"
                 top_line = f"{label}: {top_line}; +{remainder} more via `listmodels`."
             else:
+                label = "Allowed models" if restricted else "Preferred alternatives"
                 top_line = f"{label}: {top_line}."
             description = f"{description} {top_line}"
 

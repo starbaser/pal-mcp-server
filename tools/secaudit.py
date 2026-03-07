@@ -296,9 +296,7 @@ class SecauditTool(WorkflowTool):
         # Add media if available
         if consolidated_findings.media:
             media_text = "\n".join(f"- {img}" for img in consolidated_findings.media)
-            context_parts.append(
-                f"\n=== VISUAL SECURITY INFORMATION ===\n{media_text}\n=== END VISUAL INFORMATION ==="
-            )
+            context_parts.append(f"\n=== VISUAL SECURITY INFORMATION ===\n{media_text}\n=== END VISUAL INFORMATION ===")
 
         return "\n".join(context_parts)
 

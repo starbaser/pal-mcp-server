@@ -242,20 +242,12 @@ def load_agent_definition(
     elif _is_relative_path(definition):
         # Relative file path - resolve against project_dir (cwd)
         if not project_dir:
-            raise AgentDefinitionError(
-                f"Cannot resolve relative agent path '{definition}': no cwd provided"
-            )
+            raise AgentDefinitionError(f"Cannot resolve relative agent path '{definition}': no cwd provided")
         path = (project_dir / path).resolve()
         if not path.exists():
-            raise AgentDefinitionError(
-                f"Agent definition file not found: {definition} "
-                f"(resolved to {path})"
-            )
+            raise AgentDefinitionError(f"Agent definition file not found: {definition} " f"(resolved to {path})")
         if not path.is_file():
-            raise AgentDefinitionError(
-                f"Agent definition path is not a file: {definition} "
-                f"(resolved to {path})"
-            )
+            raise AgentDefinitionError(f"Agent definition path is not a file: {definition} " f"(resolved to {path})")
         logger.debug("Loading agent definition from relative path: %s -> %s", definition, path)
 
     else:

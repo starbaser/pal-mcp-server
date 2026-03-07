@@ -124,18 +124,7 @@ class BaseCLIAgent:
         except FileNotFoundError as exc:
             raise CLIAgentError(f"Executable not found for CLI '{self.client.name}': {exc}") from exc
 
-        try:
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                process.communicate(prompt.encode("utf-8")),
-                timeout=self.client.timeout_seconds,
-            )
-        except asyncio.TimeoutError as exc:
-            process.kill()
-            await process.communicate()
-            raise CLIAgentError(
-                f"CLI '{self.client.name}' timed out after {self.client.timeout_seconds} seconds",
-                returncode=None,
-            ) from exc
+        stdout_bytes, stderr_bytes = await process.communicate(prompt.encode("utf-8"))
 
         duration = time.monotonic() - start_time
         return_code = process.returncode

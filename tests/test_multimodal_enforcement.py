@@ -55,10 +55,12 @@ class TestOpenAICompatibleMediaErrors:
         caps_mock.get_effective_temperature.return_value = 0.3
         caps_mock.use_openai_response_api = False
 
-        with patch.object(provider, "validate_model_name", return_value=True), \
-             patch.object(provider, "get_capabilities", return_value=caps_mock), \
-             patch.object(provider, "_resolve_model_name", return_value="grok-2-vision"), \
-             patch.object(provider, "validate_parameters"):
+        with (
+            patch.object(provider, "validate_model_name", return_value=True),
+            patch.object(provider, "get_capabilities", return_value=caps_mock),
+            patch.object(provider, "_resolve_model_name", return_value="grok-2-vision"),
+            patch.object(provider, "validate_parameters"),
+        ):
 
             with pytest.raises(ValueError, match="[Aa]udio"):
                 provider.generate_content(
@@ -76,10 +78,12 @@ class TestOpenAICompatibleMediaErrors:
         caps_mock.get_effective_temperature.return_value = 0.3
         caps_mock.use_openai_response_api = False
 
-        with patch.object(provider, "validate_model_name", return_value=True), \
-             patch.object(provider, "get_capabilities", return_value=caps_mock), \
-             patch.object(provider, "_resolve_model_name", return_value="grok-2-vision"), \
-             patch.object(provider, "validate_parameters"):
+        with (
+            patch.object(provider, "validate_model_name", return_value=True),
+            patch.object(provider, "get_capabilities", return_value=caps_mock),
+            patch.object(provider, "_resolve_model_name", return_value="grok-2-vision"),
+            patch.object(provider, "validate_parameters"),
+        ):
 
             with pytest.raises(ValueError, match="[Vv]ideo"):
                 provider.generate_content(
@@ -97,10 +101,12 @@ class TestOpenAICompatibleMediaErrors:
         caps_mock.get_effective_temperature.return_value = 0.3
         caps_mock.use_openai_response_api = False
 
-        with patch.object(provider, "validate_model_name", return_value=True), \
-             patch.object(provider, "get_capabilities", return_value=caps_mock), \
-             patch.object(provider, "_resolve_model_name", return_value="grok-text-only"), \
-             patch.object(provider, "validate_parameters"):
+        with (
+            patch.object(provider, "validate_model_name", return_value=True),
+            patch.object(provider, "get_capabilities", return_value=caps_mock),
+            patch.object(provider, "_resolve_model_name", return_value="grok-text-only"),
+            patch.object(provider, "validate_parameters"),
+        ):
 
             with pytest.raises(ValueError):
                 provider.generate_content(
@@ -113,10 +119,12 @@ class TestOpenAICompatibleMediaErrors:
         """When capabilities cannot be resolved and media is provided, ValueError must be raised."""
         provider = self._make_provider()
 
-        with patch.object(provider, "validate_model_name", return_value=True), \
-             patch.object(provider, "get_capabilities", side_effect=Exception("not found")), \
-             patch.object(provider, "_resolve_model_name", return_value="unknown-model"), \
-             patch.object(provider, "validate_parameters"):
+        with (
+            patch.object(provider, "validate_model_name", return_value=True),
+            patch.object(provider, "get_capabilities", side_effect=Exception("not found")),
+            patch.object(provider, "_resolve_model_name", return_value="unknown-model"),
+            patch.object(provider, "validate_parameters"),
+        ):
 
             with pytest.raises(ValueError):
                 provider.generate_content(
@@ -149,11 +157,13 @@ class TestOpenAICompatibleMediaErrors:
 
         provider = self._make_provider()
 
-        with patch.object(provider, "validate_model_name", return_value=True), \
-             patch.object(provider, "get_capabilities", return_value=caps_mock), \
-             patch.object(provider, "_resolve_model_name", return_value="grok-text"), \
-             patch.object(provider, "validate_parameters"), \
-             patch.object(XAIModelProvider, "client", new_callable=lambda: property(lambda self: mock_client)):
+        with (
+            patch.object(provider, "validate_model_name", return_value=True),
+            patch.object(provider, "get_capabilities", return_value=caps_mock),
+            patch.object(provider, "_resolve_model_name", return_value="grok-text"),
+            patch.object(provider, "validate_parameters"),
+            patch.object(XAIModelProvider, "client", new_callable=lambda: property(lambda self: mock_client)),
+        ):
 
             # Should NOT raise — no media provided
             result = provider.generate_content(
@@ -171,10 +181,12 @@ class TestOpenAICompatibleMediaErrors:
         caps_mock.supports_images = True
         caps_mock.get_effective_temperature.return_value = 0.3
 
-        with patch.object(provider, "validate_model_name", return_value=True), \
-             patch.object(provider, "get_capabilities", return_value=caps_mock), \
-             patch.object(provider, "_resolve_model_name", return_value="grok-2-vision"), \
-             patch.object(provider, "validate_parameters"):
+        with (
+            patch.object(provider, "validate_model_name", return_value=True),
+            patch.object(provider, "get_capabilities", return_value=caps_mock),
+            patch.object(provider, "_resolve_model_name", return_value="grok-2-vision"),
+            patch.object(provider, "validate_parameters"),
+        ):
 
             with pytest.raises(ValueError) as exc_info:
                 provider.generate_content(
@@ -193,10 +205,12 @@ class TestOpenAICompatibleMediaErrors:
         caps_mock.supports_images = True
         caps_mock.get_effective_temperature.return_value = 0.3
 
-        with patch.object(provider, "validate_model_name", return_value=True), \
-             patch.object(provider, "get_capabilities", return_value=caps_mock), \
-             patch.object(provider, "_resolve_model_name", return_value="grok-2-vision"), \
-             patch.object(provider, "validate_parameters"):
+        with (
+            patch.object(provider, "validate_model_name", return_value=True),
+            patch.object(provider, "get_capabilities", return_value=caps_mock),
+            patch.object(provider, "_resolve_model_name", return_value="grok-2-vision"),
+            patch.object(provider, "validate_parameters"),
+        ):
 
             with pytest.raises(ValueError) as exc_info:
                 provider.generate_content(
@@ -325,10 +339,12 @@ class TestGeminiMediaEnforcement:
         caps_mock.supports_image_generation = False
         caps_mock.get_effective_temperature.return_value = 1.0
 
-        with patch.object(provider, "validate_parameters"), \
-             patch.object(provider, "get_capabilities", return_value=caps_mock), \
-             patch.object(provider, "get_all_model_capabilities", return_value={}), \
-             patch.object(provider, "_resolve_model_name", return_value="gemini-flash-lite"):
+        with (
+            patch.object(provider, "validate_parameters"),
+            patch.object(provider, "get_capabilities", return_value=caps_mock),
+            patch.object(provider, "get_all_model_capabilities", return_value={}),
+            patch.object(provider, "_resolve_model_name", return_value="gemini-flash-lite"),
+        ):
 
             with pytest.raises(ValueError, match="[Aa]udio"):
                 provider.generate_content(
@@ -348,10 +364,12 @@ class TestGeminiMediaEnforcement:
         caps_mock.supports_image_generation = False
         caps_mock.get_effective_temperature.return_value = 1.0
 
-        with patch.object(provider, "validate_parameters"), \
-             patch.object(provider, "get_capabilities", return_value=caps_mock), \
-             patch.object(provider, "get_all_model_capabilities", return_value={}), \
-             patch.object(provider, "_resolve_model_name", return_value="gemini-no-video"):
+        with (
+            patch.object(provider, "validate_parameters"),
+            patch.object(provider, "get_capabilities", return_value=caps_mock),
+            patch.object(provider, "get_all_model_capabilities", return_value={}),
+            patch.object(provider, "_resolve_model_name", return_value="gemini-no-video"),
+        ):
 
             with pytest.raises(ValueError, match="[Vv]ideo"):
                 provider.generate_content(
@@ -371,10 +389,12 @@ class TestGeminiMediaEnforcement:
         caps_mock.supports_image_generation = False
         caps_mock.get_effective_temperature.return_value = 1.0
 
-        with patch.object(provider, "validate_parameters"), \
-             patch.object(provider, "get_capabilities", return_value=caps_mock), \
-             patch.object(provider, "get_all_model_capabilities", return_value={}), \
-             patch.object(provider, "_resolve_model_name", return_value="gemini-text-only"):
+        with (
+            patch.object(provider, "validate_parameters"),
+            patch.object(provider, "get_capabilities", return_value=caps_mock),
+            patch.object(provider, "get_all_model_capabilities", return_value={}),
+            patch.object(provider, "_resolve_model_name", return_value="gemini-text-only"),
+        ):
 
             with pytest.raises(ValueError):
                 provider.generate_content(
@@ -409,12 +429,14 @@ class TestGeminiMediaEnforcement:
 
         provider = self._make_provider()
 
-        with patch.object(provider, "validate_parameters"), \
-             patch.object(provider, "get_capabilities", return_value=caps_mock), \
-             patch.object(provider, "get_all_model_capabilities", return_value={}), \
-             patch.object(provider, "_resolve_model_name", return_value="gemini-2.5-flash"), \
-             patch.object(provider, "_process_audio", return_value=mock_audio_part), \
-             patch.object(GeminiModelProvider, "client", new_callable=lambda: property(lambda self: mock_client)):
+        with (
+            patch.object(provider, "validate_parameters"),
+            patch.object(provider, "get_capabilities", return_value=caps_mock),
+            patch.object(provider, "get_all_model_capabilities", return_value={}),
+            patch.object(provider, "_resolve_model_name", return_value="gemini-2.5-flash"),
+            patch.object(provider, "_process_audio", return_value=mock_audio_part),
+            patch.object(GeminiModelProvider, "client", new_callable=lambda: property(lambda self: mock_client)),
+        ):
 
             # Must not raise
             result = provider.generate_content(
@@ -448,11 +470,13 @@ class TestGeminiMediaEnforcement:
 
         provider = self._make_provider()
 
-        with patch.object(provider, "validate_parameters"), \
-             patch.object(provider, "get_capabilities", return_value=caps_mock), \
-             patch.object(provider, "get_all_model_capabilities", return_value={}), \
-             patch.object(provider, "_resolve_model_name", return_value="gemini-text"), \
-             patch.object(GeminiModelProvider, "client", new_callable=lambda: property(lambda self: mock_client)):
+        with (
+            patch.object(provider, "validate_parameters"),
+            patch.object(provider, "get_capabilities", return_value=caps_mock),
+            patch.object(provider, "get_all_model_capabilities", return_value={}),
+            patch.object(provider, "_resolve_model_name", return_value="gemini-text"),
+            patch.object(GeminiModelProvider, "client", new_callable=lambda: property(lambda self: mock_client)),
+        ):
 
             # Should NOT raise — no media at all
             result = provider.generate_content(

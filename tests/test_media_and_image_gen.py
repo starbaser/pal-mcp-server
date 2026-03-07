@@ -20,6 +20,7 @@ from tools.chat import ChatTool
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_model_context(
     *,
     supports_images: bool = True,
@@ -113,13 +114,13 @@ class TestValidateMediaLimitsVideoAwareness:
                 if os.path.exists(p):
                     os.unlink(p)
 
-    def test_pure_images_unchanged(self, tool: ChatTool) -> None:
-        """Pure image lists must still be subject to count and size limits."""
-        # Exceed the count limit (5) without videos present
+    def test_pure_images_size_limit(self, tool: ChatTool) -> None:
+        """Pure image lists must still be subject to size limits."""
         image_paths = []
         try:
-            for _ in range(6):
-                image_paths.append(_make_temp_file(".png", 512 * 1024))
+            # Create images that exceed the 20MB size limit
+            for _ in range(3):
+                image_paths.append(_make_temp_file(".png", 8 * 1024 * 1024))  # 8MB each = 24MB total
 
             ctx = _make_model_context(supports_video=True, supports_images=True, max_image_size_mb=20.0)
 
@@ -127,7 +128,7 @@ class TestValidateMediaLimitsVideoAwareness:
 
             assert result is not None
             assert result["status"] == "error"
-            assert "Too many images" in result["content"]
+            assert "Image size limit exceeded" in result["content"]
         finally:
             for p in image_paths:
                 if os.path.exists(p):

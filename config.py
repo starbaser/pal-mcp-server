@@ -75,14 +75,6 @@ TEMPERATURE_CREATIVE = 1.0  # For architecture, deep thinking
 # Higher modes use more computational budget but provide deeper analysis
 DEFAULT_THINKING_MODE_THINKDEEP = get_env("DEFAULT_THINKING_MODE_THINKDEEP", "high") or "high"
 
-# Consensus Tool Defaults
-# Consensus timeout and rate limiting settings
-DEFAULT_CONSENSUS_TIMEOUT = 120.0  # 2 minutes per model
-DEFAULT_CONSENSUS_MAX_INSTANCES_PER_COMBINATION = 2
-
-# NOTE: Consensus tool now uses sequential processing for MCP compatibility
-# Concurrent processing was removed to avoid async pattern violations
-
 # MCP Protocol Transport Limits
 #
 # IMPORTANT: This limit ONLY applies to the Claude CLI ↔ MCP Server transport boundary.
@@ -162,6 +154,7 @@ MAX_MCP_OUTPUT_TOKENS = int(get_env("MAX_MCP_OUTPUT_TOKENS") or 25_000)
 # Leave empty for default language (English)
 LOCALE = get_env("LOCALE", "") or ""
 
+
 # PAL storage configuration
 # Base directory for all PAL persistent data (threads, images, etc.)
 # Defaults to ~/.claude/pal/. Override with PAL_STORAGE_DIR env var.
@@ -171,6 +164,7 @@ def _resolve_pal_storage_dir() -> str:
         return explicit
     config_dir = os.environ.get("CLAUDE_CONFIG_DIR", os.path.expanduser("~/.claude"))
     return os.path.join(config_dir, "pal")
+
 
 PAL_STORAGE_DIR = _resolve_pal_storage_dir()
 

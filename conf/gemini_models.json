@@ -14,7 +14,7 @@
       "supports_json_mode": "Whether the model can guarantee valid JSON output",
       "supports_function_calling": "Whether the model supports function/tool calling",
       "supports_images": "Whether the model can process images/visual input",
-      "max_image_size_mb": "Maximum total size in MB for all images combined (capped at 40MB max for custom models)",
+      "max_image_size_mb": "Maximum total size in MB for all images combined (0.0 means no limit)",
       "supports_temperature": "Whether the model accepts temperature parameter in API calls (set to false for O3/O4 reasoning models)",
       "temperature_constraint": "Type of temperature constraint: 'fixed' (fixed value), 'range' (continuous range), 'discrete' (specific values), or omit for default range",
       "use_openai_response_api": "Set to true when the model must use the /responses endpoint (reasoning models like GPT-5.2 Pro). Leave false/omit for standard chat completions.",
@@ -49,7 +49,7 @@
       "supports_audio": true,
       "supports_temperature": true,
       "allow_code_generation": true,
-      "max_image_size_mb": 32.0
+      "max_image_size_mb": 0.0
     },
     {
       "model_name": "gemini-2.5-pro",
@@ -72,7 +72,7 @@
       "supports_audio": true,
       "supports_temperature": true,
       "allow_code_generation": true,
-      "max_image_size_mb": 32.0
+      "max_image_size_mb": 0.0
     },
     {
       "model_name": "gemini-2.0-flash",
@@ -96,7 +96,7 @@
       "supports_audio": true,
       "supports_image_generation": true,
       "supports_temperature": true,
-      "max_image_size_mb": 20.0
+      "max_image_size_mb": 0.0
     },
     {
       "model_name": "gemini-3-pro-image-preview",
@@ -119,7 +119,7 @@
       "supports_video": false,
       "supports_image_generation": true,
       "supports_temperature": true,
-      "max_image_size_mb": 20.0
+      "max_image_size_mb": 0.0
     },
     {
       "model_name": "gemini-3.1-flash-image-preview",
@@ -142,7 +142,7 @@
       "supports_video": false,
       "supports_image_generation": true,
       "supports_temperature": true,
-      "max_image_size_mb": 20.0
+      "max_image_size_mb": 0.0
     },
     {
       "model_name": "gemini-3.1-flash-lite-preview",
@@ -185,7 +185,7 @@
       "supports_video": true,
       "supports_audio": true,
       "supports_temperature": true,
-      "max_image_size_mb": 20.0
+      "max_image_size_mb": 0.0
     }
   ]
 }

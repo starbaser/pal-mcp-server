@@ -10,37 +10,37 @@ import functools
 @functools.lru_cache(maxsize=1)
 def _get_encoding():
     import tiktoken
+
     return tiktoken.get_encoding("cl100k_base")
 
 
 def count_tokens(text: str) -> int:
-    """Count tokens using the cl100k_base tiktoken encoding."""
+    """Count tokens using the cl100k_base tiktoken encoding.
+
+    For texts over 100K chars, falls back to a character heuristic
+    since tiktoken can be slow on certain inputs at scale.
+    """
     if not text:
         return 0
+    if len(text) > 100_000:
+        return len(text) // 4
     return len(_get_encoding().encode(text))
+
 
 # Default fallback for token limit (conservative estimate)
 DEFAULT_CONTEXT_WINDOW = 200_000  # Conservative fallback for unknown models
 
 
 def estimate_tokens(text: str) -> int:
-    """
-    Estimate token count using a character-based approximation.
-
-    This uses a rough heuristic where 1 token ≈ 4 characters, which is
-    a reasonable approximation for English text. The actual token count
-    may vary based on:
-    - Language (non-English text may have different ratios)
-    - Code vs prose (code often has more tokens per character)
-    - Special characters and formatting
+    """Count tokens using the cl100k_base tiktoken encoding.
 
     Args:
-        text: The text to estimate tokens for
+        text: The text to count tokens for
 
     Returns:
-        int: Estimated number of tokens
+        int: Token count
     """
-    return len(text) // 4
+    return count_tokens(text)
 
 
 def check_token_limit(text: str, context_window: int = DEFAULT_CONTEXT_WINDOW) -> tuple[bool, int]:

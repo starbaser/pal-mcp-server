@@ -163,15 +163,10 @@ class ModelContext:
         return allocation
 
     def estimate_tokens(self, text: str) -> int:
-        """
-        Estimate token count for text using model-specific tokenizer.
+        """Count tokens using the cl100k_base tiktoken encoding."""
+        from utils.token_utils import count_tokens
 
-        For now, uses simple estimation. Can be enhanced with model-specific
-        tokenizers (tiktoken for OpenAI, etc.) in the future.
-        """
-        # TODO: Integrate model-specific tokenizers
-        # For now, use conservative estimation
-        return len(text) // 3  # Conservative estimate
+        return count_tokens(text)
 
     @classmethod
     def from_arguments(cls, arguments: dict[str, Any]) -> "ModelContext":

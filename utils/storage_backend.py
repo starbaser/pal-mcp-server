@@ -18,11 +18,10 @@ variable ("memory" or "file", default "file").
 
 Key Features:
 - Thread-safe operations using locks
-- TTL support with automatic expiration
 - Singleton pattern for consistent state within a single process
 - Drop-in replacement for Redis storage (for single-process scenarios)
 - FileStorage: atomic writes via temp file + os.rename to prevent corruption
-- FileStorage: startup recovery loads all non-expired threads into memory cache
+- FileStorage: startup recovery loads existing threads into memory cache
 """
 
 import json
@@ -63,12 +62,12 @@ class FileStorage:
     Disk-backed storage with memory hot cache for conversation threads.
 
     Each thread is stored as {storage_dir}/{thread_id}.json with format:
-        {"value": "<serialized ThreadContext JSON>", "expires_at": <unix timestamp>}
+        {"value": "<serialized ThreadContext JSON>"}
 
     Writes are atomic: content is written to a temp file then renamed into place,
     preventing corrupt reads if the process crashes mid-write.
 
-    On startup, all non-expired files are loaded into the memory cache so that
+    On startup, all files are loaded into the memory cache so that
     existing threads survive server restarts without a round-trip to disk on
     the first access.
     """
@@ -84,10 +83,7 @@ class FileStorage:
             logger.error(f"FileStorage: could not create storage dir {storage_dir!r}: {e}")
 
         self._recover_from_disk()
-        logger.info(
-            f"File storage initialized at {storage_dir!r} "
-            f"({len(self._cache)} threads recovered)"
-        )
+        logger.info(f"File storage initialized at {storage_dir!r} " f"({len(self._cache)} threads recovered)")
 
     # ------------------------------------------------------------------
     # Public interface (matches InMemoryStorage)
@@ -125,9 +121,7 @@ class FileStorage:
         payload = json.dumps({"value": value})
         try:
             dir_ = os.path.dirname(path)
-            with tempfile.NamedTemporaryFile(
-                mode="w", dir=dir_, delete=False, suffix=".tmp"
-            ) as tmp:
+            with tempfile.NamedTemporaryFile(mode="w", dir=dir_, delete=False, suffix=".tmp") as tmp:
                 tmp.write(payload)
                 tmp_path = tmp.name
             os.rename(tmp_path, path)
@@ -213,9 +207,7 @@ def _create_backend() -> InMemoryStorage | FileStorage:
             logger.info(f"Conversation storage: file backend at {CONVERSATION_STORAGE_DIR!r}")
             return instance
         except Exception as e:
-            logger.error(
-                f"FileStorage init failed ({e}); falling back to in-memory storage"
-            )
+            logger.error(f"FileStorage init failed ({e}); falling back to in-memory storage")
             return InMemoryStorage()
 
     instance = InMemoryStorage()

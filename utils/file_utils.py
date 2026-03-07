@@ -778,31 +778,6 @@ def is_text_file(file_path: str) -> bool:
     return check_text_type(file_path)
 
 
-def read_file_safely(file_path: str, max_size: int = 10 * 1024 * 1024) -> Optional[str]:
-    """
-    Read a file with size limits and encoding handling.
-
-    Args:
-        file_path: Path to the file
-        max_size: Maximum file size in bytes (default 10MB)
-
-    Returns:
-        File content as string, or None if file too large or unreadable
-    """
-    try:
-        if not os.path.exists(file_path) or not os.path.isfile(file_path):
-            return None
-
-        file_size = os.path.getsize(file_path)
-        if file_size > max_size:
-            return None
-
-        with open(file_path, encoding="utf-8", errors="ignore") as f:
-            return f.read()
-    except OSError:
-        return None
-
-
 def check_total_file_size(files: list[str], model_name: str) -> Optional[dict]:
     """
     Check if total file sizes would exceed token threshold before embedding.

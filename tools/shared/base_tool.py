@@ -1577,26 +1577,8 @@ When recommending searches, be specific about what information you need and why 
                 },
             }
 
-        # Get model image limits from capabilities
-        max_images = 5  # Default max number of images
+        # Get model image size limit from capabilities
         max_size_mb = capabilities.max_image_size_mb
-
-        # Check image count (videos are excluded — they have no cap here)
-        if len(image_items) > max_images:
-            return {
-                "status": "error",
-                "content": (
-                    f"Too many images: Model '{model_name}' supports a maximum of {max_images} images, "
-                    f"but {len(image_items)} were provided. Please reduce the number of images."
-                ),
-                "content_type": "text",
-                "metadata": {
-                    "error_type": "validation_error",
-                    "model_name": model_name,
-                    "image_count": len(image_items),
-                    "max_images": max_images,
-                },
-            }
 
         # Calculate total size of all images (videos excluded — provider enforces their limits)
         total_size_mb = 0.0
@@ -1623,23 +1605,12 @@ When recommending searches, be specific about what information you need and why 
                 # Assume a reasonable size for problematic files
                 total_size_mb += 1.0  # 1MB assumption
 
-        # Apply 40MB cap for custom models if needed
-        effective_limit_mb = max_size_mb
-        try:
-            from providers.shared import ProviderType
-
-            # ModelCapabilities dataclass has provider field defined
-            if capabilities.provider == ProviderType.CUSTOM:
-                effective_limit_mb = min(max_size_mb, 40.0)
-        except Exception:
-            pass
-
-        # Validate against size limit
-        if total_size_mb > effective_limit_mb:
+        # Validate against size limit (0.0 means no limit)
+        if max_size_mb > 0 and total_size_mb > max_size_mb:
             return {
                 "status": "error",
                 "content": (
-                    f"Image size limit exceeded: Model '{model_name}' supports maximum {effective_limit_mb:.1f}MB "
+                    f"Image size limit exceeded: Model '{model_name}' supports maximum {max_size_mb:.1f}MB "
                     f"for all images combined, but {total_size_mb:.1f}MB was provided. "
                     f"Please reduce image sizes or count and try again."
                 ),
@@ -1648,7 +1619,7 @@ When recommending searches, be specific about what information you need and why 
                     "error_type": "validation_error",
                     "model_name": model_name,
                     "total_size_mb": round(total_size_mb, 2),
-                    "limit_mb": round(effective_limit_mb, 2),
+                    "limit_mb": round(max_size_mb, 2),
                     "image_count": len(image_items),
                     "supports_images": True,
                 },

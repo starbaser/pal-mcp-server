@@ -822,16 +822,20 @@ async def run_batch(config: Config) -> None:
             output_data = parse_output(stdout, client.parser)
             result_text = extract_result_text(output_data)
 
-        results.append({
-            "prompt": prompt,
-            "output": result_text,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        })
+        results.append(
+            {
+                "prompt": prompt,
+                "output": result_text,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
+        )
 
         if config.chain:
             if conversation is None:
                 conversation = ConversationState.create_new()
-            conversation.turns.append(ConversationTurn(role="user", content=prompt, files=[str(f) for f in files], cli_name=config.cli_name))
+            conversation.turns.append(
+                ConversationTurn(role="user", content=prompt, files=[str(f) for f in files], cli_name=config.cli_name)
+            )
             conversation.turns.append(ConversationTurn(role="assistant", content=result_text, cli_name=config.cli_name))
 
     output_file = config.output_file or config.batch.with_suffix(".results.json")

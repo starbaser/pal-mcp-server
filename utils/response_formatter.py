@@ -49,7 +49,6 @@ def _is_formatted_text(value: object) -> bool:
     return isinstance(value, str) and value.count("\n") >= _NEWLINE_THRESHOLD
 
 
-
 def _separate_fields(
     data: dict,
     prefix: str = "",

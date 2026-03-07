@@ -203,21 +203,22 @@ class TestTokenUtils:
     """Test token counting utilities"""
 
     def test_estimate_tokens(self):
-        """Test token estimation"""
-        # Rough estimate: 1 token ≈ 4 characters
-        text = "a" * 400  # 400 characters
-        assert estimate_tokens(text) == 100
+        """Test token estimation uses tiktoken"""
+        text = "a" * 400
+        result = estimate_tokens(text)
+        assert isinstance(result, int)
+        assert result > 0
 
     def test_check_token_limit_within(self):
         """Test token limit check - within limit"""
-        text = "a" * 4000  # 1000 tokens
+        text = "a" * 4000
         within_limit, tokens = check_token_limit(text)
         assert within_limit is True
-        assert tokens == 1000
+        assert tokens > 0
 
     def test_check_token_limit_exceeded(self):
         """Test token limit check - exceeded"""
-        text = "a" * 5_000_000  # 1.25M tokens
-        within_limit, tokens = check_token_limit(text)
+        text = "hello world"
+        within_limit, tokens = check_token_limit(text, context_window=1)
         assert within_limit is False
-        assert tokens == 1_250_000
+        assert tokens > 1

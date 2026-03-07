@@ -315,10 +315,12 @@ class GeminiModelProvider(RegistryBackedProviderMixin, ModelProvider):
                         if hasattr(part, "text") and part.text:
                             response_text += part.text
                         elif hasattr(part, "inline_data") and part.inline_data:
-                            generated_images.append({
-                                "data": base64.b64encode(part.inline_data.data).decode("utf-8"),
-                                "mime_type": part.inline_data.mime_type or "image/png",
-                            })
+                            generated_images.append(
+                                {
+                                    "data": base64.b64encode(part.inline_data.data).decode("utf-8"),
+                                    "mime_type": part.inline_data.mime_type or "image/png",
+                                }
+                            )
             else:
                 response_text = response.text
 
@@ -491,58 +493,16 @@ class GeminiModelProvider(RegistryBackedProviderMixin, ModelProvider):
             logger.error(f"Error processing image {image_path}: {e}")
             return None
 
-    _AUDIO_INLINE_THRESHOLD_MB = 20.0
-
     def _process_audio(self, audio_path: str) -> Optional[dict]:
-        """Process audio for the Gemini API.
-
-        Files at or below _AUDIO_INLINE_THRESHOLD_MB are sent as inline_data.
-        Larger files are uploaded via the File API and referenced by URI.
-        """
+        """Process audio for the Gemini API. Audio is sent as inline_data."""
         try:
             audio_bytes, mime_type = validate_media(audio_path)
 
-            size_mb = len(audio_bytes) / (1024 * 1024)
-
-            if size_mb <= self._AUDIO_INLINE_THRESHOLD_MB:
-                if audio_path.startswith("data:"):
-                    _, data = audio_path.split(",", 1)
-                else:
-                    data = base64.b64encode(audio_bytes).decode()
-                return {"inline_data": {"mime_type": mime_type, "data": data}}
-
-            # Large audio — upload via File API
-            upload_config = types.UploadFileConfig(mime_type=mime_type)
-
             if audio_path.startswith("data:"):
-                file_obj = io.BytesIO(audio_bytes)
+                _, data = audio_path.split(",", 1)
             else:
-                file_obj = audio_path
-
-            uploaded = self.client.files.upload(
-                file=file_obj,
-                config=upload_config,
-            )
-            logger.info(f"Uploaded audio {audio_path} -> {uploaded.name} ({uploaded.state})")
-
-            max_wait = 120
-            poll_interval = 2
-            elapsed = 0
-            while uploaded.state == "PROCESSING" and elapsed < max_wait:
-                time.sleep(poll_interval)
-                elapsed += poll_interval
-                uploaded = self.client.files.get(name=uploaded.name)
-
-            if uploaded.state != "ACTIVE":
-                logger.error(f"Audio upload failed: {uploaded.name} state={uploaded.state}")
-                return None
-
-            return {
-                "file_data": {
-                    "mime_type": uploaded.mime_type,
-                    "file_uri": uploaded.uri,
-                }
-            }
+                data = base64.b64encode(audio_bytes).decode()
+            return {"inline_data": {"mime_type": mime_type, "data": data}}
 
         except ValueError as e:
             logger.warning(str(e))
@@ -574,13 +534,12 @@ class GeminiModelProvider(RegistryBackedProviderMixin, ModelProvider):
             logger.info(f"Uploaded video {video_path} -> {uploaded.name} ({uploaded.state})")
 
             # Poll until processing completes
-            max_wait = 120
             poll_interval = 2
-            elapsed = 0
-            while uploaded.state == "PROCESSING" and elapsed < max_wait:
+            while uploaded.state == "PROCESSING":
                 time.sleep(poll_interval)
-                elapsed += poll_interval
                 uploaded = self.client.files.get(name=uploaded.name)
+                if uploaded.state in ("FAILED", "ERROR"):
+                    break
 
             if uploaded.state != "ACTIVE":
                 logger.error(f"Video upload failed: {uploaded.name} state={uploaded.state}")
@@ -653,8 +612,7 @@ class GeminiModelProvider(RegistryBackedProviderMixin, ModelProvider):
         elif category == ToolModelCategory.IMAGE_GENERATION:
             # Prefer dedicated image generation models, then any image-capable model
             image_gen_models = [
-                m for m in allowed_models
-                if m in capability_map and capability_map[m].supports_image_generation
+                m for m in allowed_models if m in capability_map and capability_map[m].supports_image_generation
             ]
             if image_gen_models:
                 # Prefer the dedicated image preview model over general-purpose flash

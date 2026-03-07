@@ -47,9 +47,9 @@ Key Features:
 - NEWEST-FIRST FILE PRIORITIZATION - when the same file appears in multiple turns,
   references from newer turns take precedence over older ones. This ensures the
   most recent file context is preserved when token limits require exclusions.
-- Automatic turn limiting (20 turns max) to prevent runaway conversations
+- Automatic turn limiting (50 turns max) to prevent runaway conversations
 - Context reconstruction for stateless request continuity
-- In-memory persistence with automatic expiration (3 hour TTL)
+- Persistent storage (in-memory or file-backed)
 - Thread-safe operations for concurrent access
 - Graceful degradation when storage is unavailable
 
@@ -117,7 +117,7 @@ from utils.env import get_env
 logger = logging.getLogger(__name__)
 
 # Configuration constants
-# Get max conversation turns from environment, default to 20 turns (10 exchanges)
+# Get max conversation turns from environment, default to 50 turns (25 exchanges)
 try:
     max_turns_raw = (get_env("MAX_CONVERSATION_TURNS", "50") or "50").strip()
     MAX_CONVERSATION_TURNS = int(max_turns_raw)
@@ -217,7 +217,6 @@ def create_thread(tool_name: str, initial_request: dict[str, Any], parent_thread
         str: UUID thread identifier that can be used for continuation
 
     Note:
-        - Thread expires after the configured timeout (default: 3 hours)
         - Non-serializable parameters are filtered out automatically
         - Thread can be continued by any tool using the returned UUID
         - Parent thread creates a chain for conversation history traversal
@@ -242,7 +241,6 @@ def create_thread(tool_name: str, initial_request: dict[str, Any], parent_thread
         initial_context=filtered_context,
     )
 
-    # Store in memory with configurable TTL to prevent indefinite accumulation
     storage = get_storage()
     key = f"thread:{thread_id}"
     storage.set(key, context.model_dump_json())
@@ -326,7 +324,6 @@ def add_turn(
         - Storage connection failure
 
     Note:
-        - Refreshes thread TTL to configured timeout on successful update
         - Turn limits prevent runaway conversations
         - File references are preserved for cross-tool access with atomic ordering
         - Media references are preserved for cross-tool visual context
@@ -360,11 +357,11 @@ def add_turn(
     context.turns.append(turn)
     context.last_updated_at = datetime.now(timezone.utc).isoformat()
 
-    # Save back to storage and refresh TTL
+    # Save updated thread back to storage
     try:
         storage = get_storage()
         key = f"thread:{thread_id}"
-        storage.set(key, context.model_dump_json())  # Refresh TTL to configured timeout
+        storage.set(key, context.model_dump_json())
         return True
     except Exception as e:
         logger.debug(f"[FLOW] Failed to save turn to storage: {type(e).__name__}")
@@ -712,7 +709,7 @@ def build_conversation_history(context: ThreadContext, model_context=None, read_
     Performance Characteristics:
         - O(n) file collection with newest-first prioritization
         - Intelligent token budgeting prevents context window overflow
-        - In-memory persistence with automatic TTL management
+        - Persistent storage (in-memory or file-backed)
         - Graceful degradation when files are inaccessible or too large
     """
     # Get the complete thread chain

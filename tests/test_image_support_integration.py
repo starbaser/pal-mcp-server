@@ -220,13 +220,15 @@ class TestImageSupportIntegration:
             result = tool._validate_media_limits([small_image_path], ModelContext("gemini-2.5-flash"))
             assert result is None  # Should pass for Gemini models
 
-            # Create 150MB image (over typical limits)
+            # Gemini models have max_image_size_mb=0.0 (no limit), so large images pass
+            # Test with a mock model context that has a 20MB limit (like non-Gemini models)
             with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as temp_file:
-                temp_file.write(b"\x00" * (150 * 1024 * 1024))  # 150MB
+                temp_file.write(b"\x00" * (25 * 1024 * 1024))  # 25MB
                 large_image_path = temp_file.name
 
-            result = tool._validate_media_limits([large_image_path], ModelContext("gemini-2.5-flash"))
-            # Large images should fail validation
+            mock_caps = Mock(supports_images=True, max_image_size_mb=20.0)
+            mock_ctx = Mock(capabilities=mock_caps, model_name="test-model-20mb-limit")
+            result = tool._validate_media_limits([large_image_path], mock_ctx)
             assert result is not None
             assert result["status"] == "error"
             assert "Image size limit exceeded" in result["content"]

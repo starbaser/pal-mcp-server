@@ -63,7 +63,12 @@ class TestDynamicContextRequests:
         response_data = json.loads(result[0].text)
         # Workflow tools may handle provider errors differently than simple tools
         # They might return error, expert analysis, or clarification requests
-        assert response_data["status"] in ["analysis_complete", "calling_expert_analysis", "error", "files_required_to_continue"]
+        assert response_data["status"] in [
+            "analysis_complete",
+            "calling_expert_analysis",
+            "error",
+            "files_required_to_continue",
+        ]
 
         # Check that expert analysis was performed and contains the clarification
         if "expert_analysis" in response_data:
@@ -144,7 +149,12 @@ class TestDynamicContextRequests:
         response_data = json.loads(result[0].text)
         # Workflow tools may handle provider errors differently than simple tools
         # They might return error, expert analysis, or clarification requests
-        assert response_data["status"] in ["analysis_complete", "calling_expert_analysis", "error", "files_required_to_continue"]
+        assert response_data["status"] in [
+            "analysis_complete",
+            "calling_expert_analysis",
+            "error",
+            "files_required_to_continue",
+        ]
 
         # The malformed JSON should appear in the expert analysis content
         if "expert_analysis" in response_data:
@@ -324,7 +334,12 @@ class TestDynamicContextRequests:
         response_data = json.loads(result[0].text)
         # Workflow tools may handle provider errors differently than simple tools
         # They might return error, complete analysis, or even clarification requests
-        assert response_data["status"] in ["error", "analysis_complete", "calling_expert_analysis", "files_required_to_continue"]
+        assert response_data["status"] in [
+            "error",
+            "analysis_complete",
+            "calling_expert_analysis",
+            "files_required_to_continue",
+        ]
 
         # If expert analysis was attempted, it may succeed or fail
         if response_data["status"] == "calling_expert_analysis" and "expert_analysis" in response_data:
@@ -530,9 +545,7 @@ class TestCollaborationWorkflow:
         # If expert analysis was performed, verify content is there (promoted to top-level or nested)
         if "content" in response2:
             analysis_content = response2["content"]
-            assert (
-                    "incorrect host configuration" in analysis_content.lower() or "database" in analysis_content.lower()
-                )
+            assert "incorrect host configuration" in analysis_content.lower() or "database" in analysis_content.lower()
         elif response2["status"] == "files_required_to_continue":
             # If clarification is still being requested, ensure it's reasonable
             # Since we provided config.py and error.log, workflow tool might still need more context

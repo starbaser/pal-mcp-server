@@ -189,14 +189,17 @@ class ModelProvider(ABC):
     def count_tokens(self, text: str, model_name: str) -> int:
         """Estimate token usage for a piece of text."""
 
-        resolved_model = self._resolve_model_name(model_name)
-
         if not text:
             return 0
 
-        estimated = max(1, len(text) // 4)
-        logger.debug("Estimating %s tokens for model %s via character heuristic", estimated, resolved_model)
-        return estimated
+        try:
+            from utils.token_utils import count_tokens as _count_tokens
+
+            return _count_tokens(text)
+        except Exception:
+            estimated = max(1, len(text) // 4)
+            logger.debug("Falling back to character heuristic: %s tokens", estimated)
+            return estimated
 
     def close(self) -> None:
         """Clean up any resources held by the provider."""

@@ -68,9 +68,7 @@ ANALYZE_WORKFLOW_FIELD_DESCRIPTIONS = {
         "List methods/functions central to analysis findings, in 'ClassName.methodName' or 'functionName' format. "
         "Prioritize those demonstrating key patterns, architectural decisions, or improvement opportunities."
     ),
-    "media": (
-        "Optional absolute paths to architecture diagrams or visual references that help with analysis context."
-    ),
+    "media": ("Optional absolute paths to architecture diagrams or visual references that help with analysis context."),
     "confidence": (
         "Your confidence in the analysis: exploring, low, medium, high, very_high, almost_certain, or certain. "
         "'certain' indicates the analysis is complete and ready for validation."

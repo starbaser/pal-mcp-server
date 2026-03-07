@@ -1,12 +1,10 @@
 """Unit tests for PerceiveTool — capability validation, schema, and prompt logic."""
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from tools.perceive import PerceiveTool
-
 
 # ---------------------------------------------------------------------------
 # Helpers

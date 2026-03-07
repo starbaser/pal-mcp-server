@@ -3,11 +3,9 @@ import logging
 
 from mcp.types import TextContent
 
-
 logger = logging.getLogger("pal_mcp")
 
-_FOOTER_WIDTH = 40
-_FOOTER_SEP = "━" * _FOOTER_WIDTH
+_NEWLINE_THRESHOLD = 2
 
 
 def format_tool_result(result: list, tool_name: str) -> list:
@@ -29,12 +27,12 @@ def format_tool_result(result: list, tool_name: str) -> list:
                 formatted.append(item)
                 continue
 
-            if "step_number" in data and "total_steps" in data:
-                text = _format_workflow_output(data, tool_name)
-            elif "status" in data and "content" in data and isinstance(data.get("content"), str):
-                text = _format_simple_tool_output(data, tool_name)
-            elif isinstance(data.get("content"), str):
-                text = _format_simple_tool_output(data, tool_name)
+            if (
+                ("step_number" in data and "total_steps" in data)
+                or ("status" in data and isinstance(data.get("content"), str))
+                or isinstance(data.get("content"), str)
+            ):
+                text = _format_tool_output(data, tool_name)
             else:
                 text = json.dumps(data, indent=2)
 
@@ -46,21 +44,95 @@ def format_tool_result(result: list, tool_name: str) -> list:
     return formatted
 
 
-# ── Keys consumed by each formatter ──────────────────────────────────────────
-# Any key NOT in these sets gets collected into the "remaining" JSON dump.
+def _is_formatted_text(value: object) -> bool:
+    """Return True if value is a string with >= _NEWLINE_THRESHOLD newlines."""
+    return isinstance(value, str) and value.count("\n") >= _NEWLINE_THRESHOLD
 
-_SIMPLE_KNOWN_KEYS = frozenset({
-    "status", "content", "content_type", "metadata",
-    "continuation_offer",
-})
 
-_WORKFLOW_KNOWN_KEYS = frozenset({
-    "step_number", "total_steps", "status", "content",
-    "next_steps", "step_guidance", "required_actions",
-    "continuation_id", "next_step_required", "metadata",
-    "continuation_offer",
-    # _status dicts are handled dynamically
-})
+
+def _separate_fields(
+    data: dict,
+    prefix: str = "",
+    depth: int = 0,
+    max_depth: int = 2,
+) -> tuple[dict, list[tuple[str, str]]]:
+    """Recursively separate formatted text from inline metadata.
+
+    Returns:
+        inline: dict preserving insertion order, with formatted-text values removed
+        formatted: list of (dotted_key, text_value) in insertion order
+    """
+    inline = {}
+    formatted = []
+
+    for key, value in data.items():
+        full_key = f"{prefix}.{key}" if prefix else key
+
+        if value is None:
+            continue
+
+        if _is_formatted_text(value):
+            formatted.append((full_key, value))
+
+        elif isinstance(value, dict) and depth < max_depth:
+            nested_inline, nested_formatted = _separate_fields(
+                value, prefix=full_key, depth=depth + 1, max_depth=max_depth
+            )
+            formatted.extend(nested_formatted)
+            if nested_inline:
+                inline[key] = nested_inline
+
+        elif isinstance(value, list) and value:
+            multiline = [v for v in value if _is_formatted_text(v)]
+            if multiline:
+                formatted.append((full_key, "\n\n".join(multiline)))
+                rest = [v for v in value if not _is_formatted_text(v)]
+                if rest:
+                    inline[key] = rest
+            else:
+                inline[key] = value
+
+        else:
+            inline[key] = value
+
+    return inline, formatted
+
+
+def _format_tool_output(data: dict, tool_name: str) -> str:
+    """Unified formatter for all PAL tool output shapes.
+
+    Renders: header, JSON blob of inline metadata, then formatted text
+    sections in insertion order.
+    """
+    model, provider = _extract_model_provider(data)
+    status = data.get("status", "")
+
+    step_number = data.get("step_number")
+    total_steps = data.get("total_steps")
+    step_info = f" [{step_number}/{total_steps}]" if step_number and total_steps else None
+
+    if status == "error":
+        header = _format_header(tool_name, "ERROR", "")
+    else:
+        header = _format_header(tool_name, model, provider, step_info=step_info)
+
+    lines = [header, ""]
+
+    inline, formatted = _separate_fields(data)
+
+    if inline:
+        lines.append(json.dumps(inline, indent=2, ensure_ascii=False))
+        lines.append("")
+
+    for key, text in formatted:
+        lines.append("---")
+        lines.append(f"key: {key}")
+        lines.append("---")
+        lines.append("")
+        lines.append(text)
+        lines.append("")
+
+    return "\n".join(lines)
 
 
 def _extract_model_provider(data: dict) -> tuple[str, str]:
@@ -69,120 +141,6 @@ def _extract_model_provider(data: dict) -> tuple[str, str]:
     model = metadata.get("model_used", "") or data.get("model_used", "")
     provider = metadata.get("provider_used", "") or data.get("provider_used", "")
     return model, provider
-
-
-def _format_simple_tool_output(data: dict, tool_name: str) -> str:
-    """Format a ToolOutput-shaped dict into a readable string.
-
-    Renders: header, content body, continuation footer, and any remaining
-    fields as a JSON dump so nothing is silently dropped.
-    """
-    model, provider = _extract_model_provider(data)
-    status = data.get("status", "")
-
-    if status == "error":
-        header = _format_header(tool_name, "ERROR", "")
-    else:
-        header = _format_header(tool_name, model, provider)
-
-    content = data.get("content") or "(no content)"
-
-    lines = [header, "", content]
-
-    if status not in ("success", "continuation_available", "error") and status:
-        lines.append(f"\nstatus: {status}")
-
-    continuation_offer = data.get("continuation_offer")
-    if continuation_offer:
-        footer_pairs: dict[str, object] = {}
-        if cid := continuation_offer.get("continuation_id"):
-            footer_pairs["continuation_id"] = cid
-        if (remaining := continuation_offer.get("remaining_turns")) is not None:
-            footer_pairs["remaining_turns"] = remaining
-        if note := continuation_offer.get("note"):
-            footer_pairs["note"] = note
-        lines.append(_format_footer_from_pairs(footer_pairs))
-
-    remaining = _collect_remaining(data, _SIMPLE_KNOWN_KEYS)
-    if remaining:
-        lines.append(_format_remaining_json(remaining))
-
-    return "\n".join(lines)
-
-
-def _format_workflow_output(data: dict, tool_name: str) -> str:
-    """Format a WorkflowTool step dict into a readable string.
-
-    Renders step progress, content, next_steps, required actions, tool-specific
-    _status dicts, and a JSON dump of any remaining fields.
-    """
-    step_number = data.get("step_number", "?")
-    total_steps = data.get("total_steps", "?")
-    model, provider = _extract_model_provider(data)
-    status = data.get("status", "")
-    next_steps = data.get("next_steps", "") or data.get("step_guidance", "")
-    required_actions = data.get("required_actions") or []
-
-    step_info = f" [{step_number}/{total_steps}]"
-    header = _format_header(tool_name, model, provider, step_info=step_info)
-
-    lines = [header, ""]
-
-    if status:
-        lines.append(f"Status: {status}")
-        lines.append("")
-
-    content = data.get("content")
-    if isinstance(content, str) and content:
-        lines.append(content)
-        lines.append("")
-
-    if next_steps:
-        lines.append(next_steps)
-        lines.append("")
-
-    if required_actions:
-        lines.append("Required actions:")
-        for i, action in enumerate(required_actions, start=1):
-            if isinstance(action, dict):
-                label = action.get("action") or action.get("description") or str(action)
-            else:
-                label = str(action)
-            lines.append(f"  {i}. {label}")
-        lines.append("")
-
-    # Render tool-specific *_status dicts inline
-    status_keys = set()
-    for k, v in data.items():
-        if k.endswith("_status") and isinstance(v, dict):
-            status_keys.add(k)
-            for sk, sv in v.items():
-                lines.append(f"{sk}: {sv}")
-            lines.append("")
-
-    # Footer: continuation info
-    footer_pairs: dict[str, object] = {}
-    if cid := data.get("continuation_id"):
-        footer_pairs["continuation_id"] = cid
-    if (nsr := data.get("next_step_required")) is not None:
-        footer_pairs["next_step_required"] = str(nsr).lower()
-
-    continuation_offer = data.get("continuation_offer")
-    if continuation_offer and isinstance(continuation_offer, dict):
-        if cid2 := continuation_offer.get("continuation_id"):
-            footer_pairs.setdefault("continuation_id", cid2)
-        if (remaining := continuation_offer.get("remaining_turns")) is not None:
-            footer_pairs["remaining_turns"] = remaining
-
-    lines.append(_format_footer_from_pairs(footer_pairs))
-
-    # Dump everything else as JSON so nothing is silently lost
-    skip_keys = _WORKFLOW_KNOWN_KEYS | status_keys
-    remaining = _collect_remaining(data, skip_keys)
-    if remaining:
-        lines.append(_format_remaining_json(remaining))
-
-    return "\n".join(lines)
 
 
 def _format_header(
@@ -203,24 +161,3 @@ def _format_header(
         return f"{name_part} {model_str}{provider_str} ━━━"
 
     return name_part
-
-
-def _format_footer_from_pairs(pairs: dict[str, object]) -> str:
-    """Render a footer separator followed by key: value lines."""
-    if not pairs:
-        return ""
-
-    lines = [_FOOTER_SEP]
-    for k, v in pairs.items():
-        lines.append(f"{k}: {v}")
-    return "\n".join(lines)
-
-
-def _collect_remaining(data: dict, known_keys: frozenset | set) -> dict:
-    """Collect all keys from data that are not in known_keys."""
-    return {k: v for k, v in data.items() if k not in known_keys and v is not None}
-
-
-def _format_remaining_json(remaining: dict) -> str:
-    """Format remaining fields as a compact JSON block."""
-    return f"\n```json\n{json.dumps(remaining, indent=2, ensure_ascii=False)}\n```"

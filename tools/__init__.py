@@ -3,7 +3,6 @@ Tool implementations for PAL MCP Server
 """
 
 from .analyze import AnalyzeTool
-from .imagegen import ImageGenTool
 from .apilookup import LookupTool
 from .challenge import ChallengeTool
 from .chat import ChatTool
@@ -12,6 +11,7 @@ from .codereview import CodeReviewTool
 from .consensus import ConsensusTool
 from .debug import DebugIssueTool
 from .docgen import DocgenTool
+from .imagegen import ImageGenTool
 from .listmodels import ListModelsTool
 from .perceive import PerceiveTool
 from .planner import PlannerTool

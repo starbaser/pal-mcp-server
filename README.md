@@ -282,7 +282,6 @@ DISABLED_TOOLS=
         
         // Logging and performance
         "LOG_LEVEL": "INFO",
-        "CONVERSATION_TIMEOUT_HOURS": "6",
         "MAX_CONVERSATION_TURNS": "50"
       }
     }

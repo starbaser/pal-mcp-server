@@ -1,14 +1,11 @@
 """Tests for multimodal capability enforcement — explicit errors, no silent fallbacks."""
 
-import tempfile
-import os
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
-from providers.shared.model_capabilities import ModelCapabilities
 from providers.shared import ProviderType
-
+from providers.shared.model_capabilities import ModelCapabilities
 
 # ---------------------------------------------------------------------------
 # Helpers

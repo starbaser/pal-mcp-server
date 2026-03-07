@@ -12,7 +12,6 @@ import pytest
 
 from server import get_follow_up_instructions
 from utils.conversation_memory import (
-    CONVERSATION_TIMEOUT_SECONDS,
     MAX_CONVERSATION_TURNS,
     ConversationTurn,
     ThreadContext,
@@ -37,11 +36,10 @@ class TestConversationMemory:
         assert thread_id is not None
         assert len(thread_id) == 36  # UUID4 length
 
-        # Verify Redis was called
-        mock_client.setex.assert_called_once()
-        call_args = mock_client.setex.call_args
-        assert call_args[0][0] == f"thread:{thread_id}"  # key
-        assert call_args[0][1] == CONVERSATION_TIMEOUT_SECONDS  # TTL from configuration
+        # Verify storage was called
+        mock_client.set.assert_called_once()
+        call_args = mock_client.set.call_args
+        assert call_args[0][0] == f"thread:{thread_id}"
 
     @patch("utils.conversation_memory.get_storage")
     def test_get_thread_valid(self, mock_storage):
@@ -107,9 +105,9 @@ class TestConversationMemory:
         success = add_turn(test_uuid, "user", "Hello there")
 
         assert success is True
-        # Verify Redis get and setex were called
+        # Verify storage get and set were called
         mock_client.get.assert_called_once()
-        mock_client.setex.assert_called_once()
+        mock_client.set.assert_called()
 
     @patch("utils.conversation_memory.get_storage")
     def test_add_turn_max_limit(self, mock_storage):

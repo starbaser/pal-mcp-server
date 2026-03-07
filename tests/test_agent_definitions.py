@@ -1,7 +1,8 @@
 """Tests for agent definition loading and @ import resolution."""
 
-import pytest
 from pathlib import Path
+
+import pytest
 
 from clink.agent_definitions import (
     AgentDefinition,

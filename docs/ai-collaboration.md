@@ -51,7 +51,6 @@ This server enables **true AI collaboration** between Claude and multiple AI mod
 
 **Conversation Management:**
 - Up to 10 exchanges per conversation (configurable via `MAX_CONVERSATION_TURNS`)
-- 3-hour expiry (configurable via `CONVERSATION_TIMEOUT_HOURS`)
 - Thread-safe with in-memory persistence across all tools
 - **Image context preservation** - Images and visual references are maintained across conversation turns and tool switches
 

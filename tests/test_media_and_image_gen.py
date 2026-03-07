@@ -7,15 +7,14 @@ Covers:
   F2c - ImageContent surfacing in SimpleTool.execute()
 """
 
-import tempfile
 import os
-from unittest.mock import MagicMock, patch
+import tempfile
+from unittest.mock import MagicMock
 
 import pytest
 
 from providers.shared import ModelCapabilities, ModelResponse, ProviderType
 from tools.chat import ChatTool
-
 
 # ---------------------------------------------------------------------------
 # Helpers

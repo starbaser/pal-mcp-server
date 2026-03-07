@@ -148,7 +148,6 @@ Key variables (see `.env.example` for full list):
 - `DEFAULT_MODEL` — Default model (`"auto"` for intelligent selection)
 - `DISABLED_TOOLS` — Comma-separated list to disable tools
 - `LOG_LEVEL` — DEBUG, INFO, WARNING, ERROR
-- `CONVERSATION_TIMEOUT_HOURS` — Thread expiration (default: 6)
 
 ## Testing Strategy
 

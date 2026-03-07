@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from utils.media_utils import DEFAULT_MAX_IMAGE_SIZE_MB, is_audio_file, validate_image, validate_media
+from utils.media_utils import is_audio_file, validate_image, validate_media
 
 
 class TestIsAudioFile:

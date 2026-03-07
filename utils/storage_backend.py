@@ -30,9 +30,7 @@ import logging
 import os
 import tempfile
 import threading
-import time
 from typing import Optional
-
 
 logger = logging.getLogger("mcp_server")
 
@@ -41,67 +39,23 @@ class InMemoryStorage:
     """Thread-safe in-memory storage for conversation threads"""
 
     def __init__(self):
-        self._store: dict[str, tuple[str, float]] = {}
+        self._store: dict[str, str] = {}
         self._lock = threading.Lock()
-        from config import CONVERSATION_TIMEOUT_HOURS as timeout_hours
-        self._cleanup_interval = (timeout_hours * 3600) // 10
-        self._cleanup_interval = max(300, self._cleanup_interval)  # Minimum 5 minutes
-        self._shutdown = False
+        logger.info("In-memory storage initialized")
 
-        self._cleanup_thread = threading.Thread(target=self._cleanup_worker, daemon=True)
-        self._cleanup_thread.start()
-
-        logger.info(
-            f"In-memory storage initialized with {timeout_hours}h timeout, "
-            f"cleanup every {self._cleanup_interval // 60}m"
-        )
-
-    def set_with_ttl(self, key: str, ttl_seconds: int, value: str) -> None:
-        """Store value with expiration time"""
+    def set(self, key: str, value: str) -> None:
+        """Store a value."""
         with self._lock:
-            expires_at = time.time() + ttl_seconds
-            self._store[key] = (value, expires_at)
-            logger.debug(f"Stored key {key} with TTL {ttl_seconds}s")
+            self._store[key] = value
+            logger.debug(f"Stored key {key}")
 
     def get(self, key: str) -> Optional[str]:
-        """Retrieve value if not expired"""
+        """Retrieve a value."""
         with self._lock:
-            if key in self._store:
-                value, expires_at = self._store[key]
-                if time.time() < expires_at:
-                    logger.debug(f"Retrieved key {key}")
-                    return value
-                else:
-                    del self._store[key]
-                    logger.debug(f"Key {key} expired and removed")
-        return None
-
-    def setex(self, key: str, ttl_seconds: int, value: str) -> None:
-        """Redis-compatible setex method"""
-        self.set_with_ttl(key, ttl_seconds, value)
-
-    def _cleanup_worker(self):
-        """Background thread that periodically cleans up expired entries"""
-        while not self._shutdown:
-            time.sleep(self._cleanup_interval)
-            self._cleanup_expired()
-
-    def _cleanup_expired(self):
-        """Remove all expired entries"""
-        with self._lock:
-            current_time = time.time()
-            expired_keys = [k for k, (_, exp) in self._store.items() if exp < current_time]
-            for key in expired_keys:
-                del self._store[key]
-
-            if expired_keys:
-                logger.debug(f"Cleaned up {len(expired_keys)} expired conversation threads")
-
-    def shutdown(self):
-        """Graceful shutdown of background thread"""
-        self._shutdown = True
-        if self._cleanup_thread.is_alive():
-            self._cleanup_thread.join(timeout=1)
+            value = self._store.get(key)
+            if value is not None:
+                logger.debug(f"Retrieved key {key}")
+            return value
 
 
 class FileStorage:
@@ -121,7 +75,7 @@ class FileStorage:
 
     def __init__(self, storage_dir: str):
         self._storage_dir = storage_dir
-        self._cache: dict[str, tuple[str, float]] = {}
+        self._cache: dict[str, str] = {}
         self._lock = threading.Lock()
 
         try:
@@ -139,27 +93,20 @@ class FileStorage:
     # Public interface (matches InMemoryStorage)
     # ------------------------------------------------------------------
 
-    def setex(self, key: str, ttl_seconds: int, value: str) -> None:
-        """Redis-compatible setex method"""
-        self.set_with_ttl(key, ttl_seconds, value)
-
-    def set_with_ttl(self, key: str, ttl_seconds: int, value: str) -> None:
-        """Write value to memory cache and disk atomically"""
-        expires_at = time.time() + ttl_seconds
+    def set(self, key: str, value: str) -> None:
+        """Write value to memory cache and disk atomically."""
         with self._lock:
-            self._cache[key] = (value, expires_at)
-        self._write_to_disk(key, value, expires_at)
-        logger.debug(f"FileStorage: stored key {key!r} with TTL {ttl_seconds}s")
+            self._cache[key] = value
+        self._write_to_disk(key, value)
+        logger.debug(f"FileStorage: stored key {key!r}")
 
     def get(self, key: str) -> Optional[str]:
-        """Return value for key, checking memory cache first then disk"""
+        """Return value for key, checking memory cache first then disk."""
         with self._lock:
             if key in self._cache:
-                value, _ = self._cache[key]
                 logger.debug(f"FileStorage: cache hit for key {key!r}")
-                return value
+                return self._cache[key]
 
-        # Cache miss — try disk
         return self._read_from_disk(key)
 
     # ------------------------------------------------------------------
@@ -172,10 +119,10 @@ class FileStorage:
         safe_name = key.replace(":", "_")
         return os.path.join(self._storage_dir, f"{safe_name}.json")
 
-    def _write_to_disk(self, key: str, value: str, expires_at: float) -> None:
-        """Atomically write a key/value/expiry record to disk"""
+    def _write_to_disk(self, key: str, value: str) -> None:
+        """Atomically write a key/value record to disk."""
         path = self._key_to_filename(key)
-        payload = json.dumps({"value": value, "expires_at": expires_at})
+        payload = json.dumps({"value": value})
         try:
             dir_ = os.path.dirname(path)
             with tempfile.NamedTemporaryFile(
@@ -189,7 +136,7 @@ class FileStorage:
             # Non-fatal: value is already in memory cache
 
     def _read_from_disk(self, key: str) -> Optional[str]:
-        """Read and validate a single record from disk; delete if expired"""
+        """Read a record from disk and warm the cache."""
         path = self._key_to_filename(key)
         if not os.path.exists(path):
             return None
@@ -197,18 +144,16 @@ class FileStorage:
             with open(path) as f:
                 record = json.load(f)
             value: str = record["value"]
-            expires_at: float = record["expires_at"]
         except (OSError, json.JSONDecodeError, KeyError) as e:
             logger.warning(f"FileStorage: could not read {path!r}: {e}")
             return None
 
-        # Warm the cache on a disk-hit so subsequent reads stay fast
         with self._lock:
-            self._cache[key] = (value, expires_at)
+            self._cache[key] = value
         return value
 
     def _recover_from_disk(self) -> None:
-        """Load all non-expired thread files into the memory cache at startup"""
+        """Load all thread files into the memory cache at startup."""
         try:
             entries = os.listdir(self._storage_dir)
         except OSError as e:
@@ -223,14 +168,12 @@ class FileStorage:
                 with open(path) as f:
                     record = json.load(f)
                 value: str = record["value"]
-                expires_at: float = record["expires_at"]
             except (OSError, json.JSONDecodeError, KeyError) as e:
                 logger.warning(f"FileStorage: skipping unreadable file {path!r}: {e}")
                 continue
 
-            # Derive key from filename: "thread_<uuid>.json" -> "thread:<uuid>"
             key = filename[:-5].replace("_", ":", 1)
-            self._cache[key] = (value, expires_at)
+            self._cache[key] = value
 
 
 # ------------------------------------------------------------------

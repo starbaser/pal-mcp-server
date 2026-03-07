@@ -48,7 +48,6 @@ from config import (  # noqa: E402
     DEFAULT_MODEL,
     __version__,
 )
-from utils.response_formatter import format_tool_result  # noqa: E402
 from tools import (  # noqa: E402
     AnalyzeTool,
     ChallengeTool,
@@ -60,8 +59,8 @@ from tools import (  # noqa: E402
     DocgenTool,
     ImageGenTool,
     ListModelsTool,
-    PerceiveTool,
     LookupTool,
+    PerceiveTool,
     PlannerTool,
     PrecommitTool,
     RefactorTool,
@@ -74,6 +73,7 @@ from tools import (  # noqa: E402
 from tools.models import ToolOutput  # noqa: E402
 from tools.shared.exceptions import ToolExecutionError  # noqa: E402
 from utils.env import env_override_enabled, get_env  # noqa: E402
+from utils.response_formatter import format_tool_result  # noqa: E402
 
 # Configure logging for server operations
 # Can be controlled via LOG_LEVEL environment variable (DEBUG, INFO, WARNING, ERROR)

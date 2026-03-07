@@ -1211,7 +1211,6 @@ parse_env_variables() {
             "DEFAULT_MODEL"
             "LOG_LEVEL"
             "DEFAULT_THINKING_MODE_THINKDEEP"
-            "CONVERSATION_TIMEOUT_HOURS"
             "MAX_CONVERSATION_TURNS"
         )
 

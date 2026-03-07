@@ -226,11 +226,6 @@ CUSTOM_MODELS_CONFIG_PATH=/path/to/custom_models.json
 
 **Conversation Settings:**
 ```env
-# How long AI-to-AI conversation threads persist in memory (hours)
-# Conversations are auto-purged when claude closes its MCP connection or 
-# when a session is quit / re-launched 
-CONVERSATION_TIMEOUT_HOURS=5
-
 # Maximum conversation turns (each exchange = 2 turns)
 MAX_CONVERSATION_TURNS=20
 ```
@@ -253,7 +248,6 @@ GOOGLE_ALLOWED_MODELS=flash,pro
 OPENAI_ALLOWED_MODELS=gpt-5.1-codex-mini,gpt-5-mini,o4-mini
 XAI_API_KEY=your-xai-key
 LOG_LEVEL=DEBUG
-CONVERSATION_TIMEOUT_HOURS=1
 ```
 
 ### Production Setup
@@ -265,7 +259,6 @@ OPENAI_API_KEY=your-openai-key
 GOOGLE_ALLOWED_MODELS=flash
 OPENAI_ALLOWED_MODELS=gpt-5.1-codex-mini,o4-mini
 LOG_LEVEL=INFO
-CONVERSATION_TIMEOUT_HOURS=3
 ```
 
 ### Local Development

@@ -1,11 +1,11 @@
 """Unit tests for ImageGenTool."""
 
 import pytest
+from pydantic import ValidationError
 
 from config import TEMPERATURE_CREATIVE
 from tools.imagegen import ImageGenRequest, ImageGenTool
 from tools.models import ToolModelCategory
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -67,7 +67,7 @@ def test_imagegen_request_model_media_accepts_list() -> None:
 
 
 def test_imagegen_request_model_missing_prompt_raises() -> None:
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         ImageGenRequest()
 
 

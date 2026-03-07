@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from tools.models import ToolModelCategory
 
 from systemprompts import IMAGEGEN_PROMPT
-from tools.shared.base_models import COMMON_FIELD_DESCRIPTIONS, ToolRequest
+from tools.shared.base_models import ToolRequest
 
 from .simple.base import SimpleTool
 

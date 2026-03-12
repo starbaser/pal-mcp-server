@@ -87,15 +87,6 @@ saved document / `CLAUDE.md` etc - no need. PAL remembers.
 
 **The breakthrough**: Even when Claude's context resets, the conversation continues seamlessly because other models can "remind" Claude of the complete conversation history stored in memory.
 
-## Configuration
-
-The system is highly configurable:
-
-```env
-# Maximum conversation turns (default: 20)
-MAX_CONVERSATION_TURNS=20
-```
-
 ## The Result: True AI Orchestration
 
 This isn't just multi-model access—it's **true AI orchestration** where:

@@ -29,7 +29,7 @@ from mcp.types import TextContent
 from config import TEMPERATURE_ANALYTICAL
 from systemprompts import CONSENSUS_PROMPT
 from tools.shared.base_models import ConsolidatedFindings, WorkflowRequest
-from utils.conversation_memory import MAX_CONVERSATION_TURNS, create_thread, get_thread
+from utils.conversation_memory import create_thread
 
 from .workflow.base import WorkflowTool
 
@@ -535,7 +535,7 @@ of the evidence, even when it strongly points in one direction.""",
 
                 if continuation_id:
                     self.store_conversation_turn(continuation_id, response_data, request)
-                    continuation_offer = self._build_continuation_offer(continuation_id)
+                    continuation_offer = self._build_continuation_offer(continuation_id, arguments)
                     if continuation_offer:
                         response_data["continuation_offer"] = continuation_offer
 
@@ -544,28 +544,30 @@ of the evidence, even when it strongly points in one direction.""",
         # Otherwise, use standard workflow execution
         return await super().execute_workflow(arguments)
 
-    def _build_continuation_offer(self, continuation_id: str) -> dict[str, Any] | None:
-        """Create a continuation offer without exposing prior model responses."""
+    def _build_continuation_offer(
+        self, continuation_id: str, arguments: dict[str, Any] | None = None
+    ) -> dict[str, Any] | None:
+        """Create a continuation offer with context usage information."""
         try:
             from tools.models import ContinuationOffer
 
-            thread = get_thread(continuation_id)
-            if thread and thread.turns:
-                remaining_turns = max(0, MAX_CONVERSATION_TURNS - len(thread.turns))
-            else:
-                remaining_turns = MAX_CONVERSATION_TURNS - 1
+            context_window = 0
+            context_used = 0
 
-            # Provide a neutral note specific to consensus workflow
-            note = (
-                f"Consensus workflow can continue for {remaining_turns} more exchanges."
-                if remaining_turns > 0
-                else "Consensus workflow continuation limit reached."
-            )
+            if arguments:
+                context_window = arguments.get("_context_window", 0)
+                context_used = arguments.get("_context_used", 0)
+                if not context_window:
+                    model_ctx = arguments.get("_model_context")
+                    if model_ctx and hasattr(model_ctx, "capabilities"):
+                        context_window = model_ctx.capabilities.context_window or 0
 
             continuation_offer = ContinuationOffer(
                 continuation_id=continuation_id,
-                note=note,
-                remaining_turns=remaining_turns,
+                note="Consensus workflow is active and can be continued.",
+                context_window=context_window,
+                context_used=context_used,
+                context_remaining=max(0, context_window - context_used),
             )
             return continuation_offer.model_dump()
         except Exception:

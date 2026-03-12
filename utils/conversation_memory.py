@@ -112,23 +112,7 @@ from typing import Any, Optional
 
 from pydantic import BaseModel
 
-from utils.env import get_env
-
 logger = logging.getLogger(__name__)
-
-# Configuration constants
-# Get max conversation turns from environment, default to 50 turns (25 exchanges)
-try:
-    max_turns_raw = (get_env("MAX_CONVERSATION_TURNS", "50") or "50").strip()
-    MAX_CONVERSATION_TURNS = int(max_turns_raw)
-    if MAX_CONVERSATION_TURNS <= 0:
-        logger.warning(f"Invalid MAX_CONVERSATION_TURNS value ({MAX_CONVERSATION_TURNS}), using default of 50 turns")
-        MAX_CONVERSATION_TURNS = 50
-except ValueError:
-    logger.warning(
-        f"Invalid MAX_CONVERSATION_TURNS value ('{get_env('MAX_CONVERSATION_TURNS')}'), using default of 50 turns"
-    )
-    MAX_CONVERSATION_TURNS = 50
 
 
 class ConversationTurn(BaseModel):
@@ -320,11 +304,9 @@ def add_turn(
 
     Failure cases:
         - Thread doesn't exist or expired
-        - Maximum turn limit reached
         - Storage connection failure
 
     Note:
-        - Turn limits prevent runaway conversations
         - File references are preserved for cross-tool access with atomic ordering
         - Media references are preserved for cross-tool visual context
         - Model information enables cross-provider conversations
@@ -334,11 +316,6 @@ def add_turn(
     context = get_thread(thread_id)
     if not context:
         logger.debug(f"[FLOW] Thread {thread_id} not found for turn addition")
-        return False
-
-    # Check turn limit to prevent runaway conversations
-    if len(context.turns) >= MAX_CONVERSATION_TURNS:
-        logger.debug(f"[FLOW] Thread {thread_id} at max turns ({MAX_CONVERSATION_TURNS})")
         return False
 
     # Create new turn with complete metadata
@@ -778,7 +755,7 @@ def build_conversation_history(context: ThreadContext, model_context=None, read_
         "=== CONVERSATION HISTORY (CONTINUATION) ===",
         f"Thread: {context.thread_id}",
         f"Tool: {context.tool_name}",  # Original tool that started the conversation
-        f"Turn {total_turns}/{MAX_CONVERSATION_TURNS}",
+        f"Turn {total_turns}",
         "You are continuing this conversation thread from where it left off.",
         "",
     ]

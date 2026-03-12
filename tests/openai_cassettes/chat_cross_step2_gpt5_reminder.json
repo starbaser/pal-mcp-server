@@ -9,7 +9,7 @@
               "role": "system"
             },
             {
-              "content": "=== CONVERSATION HISTORY (CONTINUATION) ===\nThread: dbadc23e-c0f4-4853-982f-6c5bc722b5de\nTool: chat\nTurn 3/50\nYou are continuing this conversation thread from where it left off.\n\nPrevious conversation turns:\n\n--- Turn 1 (Agent using chat) ---\nPick a number between 1 and 10 and respond with JUST that number.\n\n--- Turn 2 (gemini-2.5-flash using chat via google) ---\n7\n\n---\n\nAGENT'S TURN: Evaluate this perspective alongside your analysis to form a comprehensive solution and continue with the user's request and task at hand.\n\n--- Turn 3 (Agent) ---\nRemind me, what number did you pick, respond with JUST that number.\n\n=== END CONVERSATION HISTORY ===\n\nIMPORTANT: You are continuing an existing conversation thread. Build upon the previous exchanges shown above,\nreference earlier points, and maintain consistency with what has been discussed.\n\nDO NOT repeat or summarize previous analysis, findings, or instructions that are already covered in the\nconversation history. Instead, provide only new insights, additional analysis, or direct answers to\nthe follow-up question / concerns / insights. Assume the user has read the prior conversation.\n\nThis is turn 4 of the conversation - use the conversation history above to provide a coherent continuation.\n\n=== NEW USER INPUT ===\n=== USER REQUEST ===\nRemind me, what number did you pick, respond with JUST that number.\n=== END REQUEST ===\n\nPlease provide a thoughtful, comprehensive response:",
+              "content": "=== CONVERSATION HISTORY (CONTINUATION) ===\nThread: dbadc23e-c0f4-4853-982f-6c5bc722b5de\nTool: chat\nTurn 3\nYou are continuing this conversation thread from where it left off.\n\nPrevious conversation turns:\n\n--- Turn 1 (Agent using chat) ---\nPick a number between 1 and 10 and respond with JUST that number.\n\n--- Turn 2 (gemini-2.5-flash using chat via google) ---\n7\n\n---\n\nAGENT'S TURN: Evaluate this perspective alongside your analysis to form a comprehensive solution and continue with the user's request and task at hand.\n\n--- Turn 3 (Agent) ---\nRemind me, what number did you pick, respond with JUST that number.\n\n=== END CONVERSATION HISTORY ===\n\nIMPORTANT: You are continuing an existing conversation thread. Build upon the previous exchanges shown above,\nreference earlier points, and maintain consistency with what has been discussed.\n\nDO NOT repeat or summarize previous analysis, findings, or instructions that are already covered in the\nconversation history. Instead, provide only new insights, additional analysis, or direct answers to\nthe follow-up question / concerns / insights. Assume the user has read the prior conversation.\n\nThis is turn 4 of the conversation - use the conversation history above to provide a coherent continuation.\n\n=== NEW USER INPUT ===\n=== USER REQUEST ===\nRemind me, what number did you pick, respond with JUST that number.\n=== END REQUEST ===\n\nPlease provide a thoughtful, comprehensive response:",
               "role": "user"
             }
           ],
@@ -22,19 +22,19 @@
           "accept-encoding": "gzip, deflate",
           "authorization": "Bearer SANITIZED",
           "connection": "keep-alive",
-          "content-length": "5587",
+          "content-length": "5584",
           "content-type": "application/json",
           "host": "api.openai.com",
-          "user-agent": "OpenAI/Python 2.1.0",
-          "x-stainless-arch": "arm64",
+          "user-agent": "OpenAI/Python 2.26.0",
+          "x-stainless-arch": "x64",
           "x-stainless-async": "false",
           "x-stainless-lang": "python",
-          "x-stainless-os": "MacOS",
-          "x-stainless-package-version": "2.1.0",
+          "x-stainless-os": "Linux",
+          "x-stainless-package-version": "2.26.0",
           "x-stainless-read-timeout": "900.0",
           "x-stainless-retry-count": "0",
           "x-stainless-runtime": "CPython",
-          "x-stainless-runtime-version": "3.12.11"
+          "x-stainless-runtime-version": "3.13.11"
         },
         "method": "POST",
         "path": "/v1/chat/completions",
@@ -42,7 +42,7 @@
       },
       "response": {
         "content": {
-          "data": "ewogICJpZCI6ICJjaGF0Y21wbC1DTXRaVXZHWjN3S3RTMWxEVTgxUXQxT3g2dnNtciIsCiAgIm9iamVjdCI6ICJjaGF0LmNvbXBsZXRpb24iLAogICJjcmVhdGVkIjogMTc1OTU3Mjg2OCwKICAibW9kZWwiOiAiZ3B0LTUtMjAyNS0wOC0wNyIsCiAgImNob2ljZXMiOiBbCiAgICB7CiAgICAgICJpbmRleCI6IDAsCiAgICAgICJtZXNzYWdlIjogewogICAgICAgICJyb2xlIjogImFzc2lzdGFudCIsCiAgICAgICAgImNvbnRlbnQiOiAiNyIsCiAgICAgICAgInJlZnVzYWwiOiBudWxsLAogICAgICAgICJhbm5vdGF0aW9ucyI6IFtdCiAgICAgIH0sCiAgICAgICJmaW5pc2hfcmVhc29uIjogInN0b3AiCiAgICB9CiAgXSwKICAidXNhZ2UiOiB7CiAgICAicHJvbXB0X3Rva2VucyI6IDEwNTUsCiAgICAiY29tcGxldGlvbl90b2tlbnMiOiAyNjYsCiAgICAidG90YWxfdG9rZW5zIjogMTMyMSwKICAgICJwcm9tcHRfdG9rZW5zX2RldGFpbHMiOiB7CiAgICAgICJjYWNoZWRfdG9rZW5zIjogMCwKICAgICAgImF1ZGlvX3Rva2VucyI6IDAKICAgIH0sCiAgICAiY29tcGxldGlvbl90b2tlbnNfZGV0YWlscyI6IHsKICAgICAgInJlYXNvbmluZ190b2tlbnMiOiAyNTYsCiAgICAgICJhdWRpb190b2tlbnMiOiAwLAogICAgICAiYWNjZXB0ZWRfcHJlZGljdGlvbl90b2tlbnMiOiAwLAogICAgICAicmVqZWN0ZWRfcHJlZGljdGlvbl90b2tlbnMiOiAwCiAgICB9CiAgfSwKICAic2VydmljZV90aWVyIjogImRlZmF1bHQiLAogICJzeXN0ZW1fZmluZ2VycHJpbnQiOiBudWxsCn0K",
+          "data": "ewogICJpZCI6ICJjaGF0Y21wbC1ESWlNZkgyQ0xVY2RkaFFNY2xhZGtoT2FqMmNLVCIsCiAgIm9iamVjdCI6ICJjaGF0LmNvbXBsZXRpb24iLAogICJjcmVhdGVkIjogMTc3MzM1MjgxMywKICAibW9kZWwiOiAiZ3B0LTUtMjAyNS0wOC0wNyIsCiAgImNob2ljZXMiOiBbCiAgICB7CiAgICAgICJpbmRleCI6IDAsCiAgICAgICJtZXNzYWdlIjogewogICAgICAgICJyb2xlIjogImFzc2lzdGFudCIsCiAgICAgICAgImNvbnRlbnQiOiAiNyIsCiAgICAgICAgInJlZnVzYWwiOiBudWxsLAogICAgICAgICJhbm5vdGF0aW9ucyI6IFtdCiAgICAgIH0sCiAgICAgICJmaW5pc2hfcmVhc29uIjogInN0b3AiCiAgICB9CiAgXSwKICAidXNhZ2UiOiB7CiAgICAicHJvbXB0X3Rva2VucyI6IDEwNTMsCiAgICAiY29tcGxldGlvbl90b2tlbnMiOiAyMDIsCiAgICAidG90YWxfdG9rZW5zIjogMTI1NSwKICAgICJwcm9tcHRfdG9rZW5zX2RldGFpbHMiOiB7CiAgICAgICJjYWNoZWRfdG9rZW5zIjogMCwKICAgICAgImF1ZGlvX3Rva2VucyI6IDAKICAgIH0sCiAgICAiY29tcGxldGlvbl90b2tlbnNfZGV0YWlscyI6IHsKICAgICAgInJlYXNvbmluZ190b2tlbnMiOiAxOTIsCiAgICAgICJhdWRpb190b2tlbnMiOiAwLAogICAgICAiYWNjZXB0ZWRfcHJlZGljdGlvbl90b2tlbnMiOiAwLAogICAgICAicmVqZWN0ZWRfcHJlZGljdGlvbl90b2tlbnMiOiAwCiAgICB9CiAgfSwKICAic2VydmljZV90aWVyIjogImRlZmF1bHQiLAogICJzeXN0ZW1fZmluZ2VycHJpbnQiOiBudWxsCn0K",
           "encoding": "base64",
           "size": 774
         },
@@ -50,29 +50,28 @@
           "access-control-expose-headers": "X-Request-ID",
           "alt-svc": "h3=\":443\"; ma=86400",
           "cf-cache-status": "DYNAMIC",
-          "cf-ray": "9893e998cd90f08b-DXB",
+          "cf-ray": "9db61208a9bf57a9-SJC",
           "connection": "keep-alive",
           "content-encoding": "gzip",
           "content-type": "application/json",
-          "date": "Sat, 04 Oct 2025 10:14:32 GMT",
-          "openai-organization": "beehive-innovations-fze",
-          "openai-processing-ms": "3725",
-          "openai-project": "proj_QP57xBVPOlWpp0vuJEPGwXK3",
+          "date": "Thu, 12 Mar 2026 22:00:20 GMT",
+          "openai-organization": "user-5xyl95bbakqlge2bj6umlk51",
+          "openai-processing-ms": "6463",
+          "openai-project": "proj_0Z164W6tntGNhQwHo26c4IzL",
           "openai-version": "2020-10-01",
           "server": "cloudflare",
-          "set-cookie": "__cf_bm=cyePl915F03L6RqnIdyla05Q1NzsdFJkMGvh3F89Q6Q-(XXX) XXX-XXXX-0.0.0.0-gBMxI3BY11pPcnlWTVD3TZiEcmP5Q5vbBrFFQoOwTFwRmSZpcanQETT3_6dQmMMX6vIGW8Gi3W44gI3ERJAyj7aROYPS6Ii7CkNPa2qxP04; path=/; expires=Sat, 04-Oct-25 10:44:32 GMT; domain=.api.openai.com; HttpOnly; Secure; SameSite=None, _cfuvid=e5KUvSkbb2EWE.MCk6ma4sq3qlfQOWx.geZuS4ggYfI-175(XXX) XXX-XXXX-0.0.0.0-604800000; path=/; domain=.api.openai.com; HttpOnly; Secure; SameSite=None",
+          "set-cookie": "__cf_bm=3jdzAazLq7lcKaK.9k31e_yNz2KAj0w388P1OM5fJnQ-1773352812.9026644-0.0.0.0-bdAv__i1R7ErIHNfybmSXjxd6KItl.Ct1.ChjAupxMv9oyQyX3WKdkS1VSvANVdklGWuiBpTHeTsIR4sHrJY18Xt5yFIJyPPuaUgCCE5AAh2iElQqxbWeNdlSHOl6EZz; HttpOnly; Secure; Path=/; Domain=api.openai.com; Expires=Thu, 12 Mar 2026 22:30:20 GMT",
           "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
           "transfer-encoding": "chunked",
           "x-content-type-options": "nosniff",
-          "x-envoy-upstream-service-time": "3885",
           "x-openai-proxy-wasm": "v0.1",
           "x-ratelimit-limit-requests": "500",
           "x-ratelimit-limit-tokens": "500000",
           "x-ratelimit-remaining-requests": "499",
-          "x-ratelimit-remaining-tokens": "498657",
+          "x-ratelimit-remaining-tokens": "498658",
           "x-ratelimit-reset-requests": "120ms",
           "x-ratelimit-reset-tokens": "161ms",
-          "x-request-id": "req_36d40cbab28f4a2cb8fd48aea5a4f394"
+          "x-request-id": "req_8b8316a542534bf780cb578b990accc2"
         },
         "reason_phrase": "OK",
         "status_code": 200

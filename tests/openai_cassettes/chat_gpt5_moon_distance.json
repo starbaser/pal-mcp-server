@@ -9,7 +9,7 @@
               "role": "system"
             },
             {
-              "content": "=== USER REQUEST ===\nUse chat with gpt5 and ask how far the moon is from earth.\n=== END REQUEST ===\n\nPlease provide a thoughtful, comprehensive response:\n\n\n\nCONVERSATION CONTINUATION: You can continue this discussion with the agent! (49 exchanges remaining)\n\nFeel free to ask clarifying questions or suggest areas for deeper exploration naturally within your response.\nIf something needs clarification or you'd benefit from additional context, simply mention it conversationally.\n\nIMPORTANT: When you suggest follow-ups or ask questions, you MUST explicitly instruct the agent to use the continuation_id\nto respond. Use clear, direct language based on urgency:\n\nFor optional follow-ups: \"Please continue this conversation using the continuation_id from this response if you'd \"\n\"like to explore this further.\"\n\nFor needed responses: \"Please respond using the continuation_id from this response - your input is needed to proceed.\"\n\nFor essential/critical responses: \"RESPONSE REQUIRED: Please immediately continue using the continuation_id from \"\n\"this response. Cannot proceed without your clarification/input.\"\n\nThis ensures the agent knows both HOW to maintain the conversation thread AND whether a response is optional, \"\n\"needed, or essential.\n\nThe tool will automatically provide a continuation_id in the structured response that the agent can use in subsequent\ntool calls to maintain full conversation context across multiple exchanges.\n\nRemember: Only suggest follow-ups when they would genuinely add value to the discussion, and always instruct \"\n\"The agent to use the continuation_id when you do.",
+              "content": "=== USER REQUEST ===\nUse chat with gpt5 and ask how far the moon is from earth.\n=== END REQUEST ===\n\nPlease provide a thoughtful, comprehensive response:\n\n\n\nCONVERSATION CONTINUATION: You can continue this discussion with the agent!\n\nFeel free to ask clarifying questions or suggest areas for deeper exploration naturally within your response.\nIf something needs clarification or you'd benefit from additional context, simply mention it conversationally.\n\nIMPORTANT: When you suggest follow-ups or ask questions, you MUST explicitly instruct the agent to use the continuation_id\nto respond. Use clear, direct language based on urgency:\n\nFor optional follow-ups: \"Please continue this conversation using the continuation_id from this response if you'd like to explore this further.\"\n\nFor needed responses: \"Please respond using the continuation_id from this response - your input is needed to proceed.\"\n\nFor essential/critical responses: \"RESPONSE REQUIRED: Please immediately continue using the continuation_id from this response. Cannot proceed without your clarification/input.\"\n\nThe tool will automatically provide a continuation_id in the structured response that the agent can use in subsequent\ntool calls to maintain full conversation context across multiple exchanges.\n\nRemember: Only suggest follow-ups when they would genuinely add value to the discussion, and always instruct the agent to use the continuation_id when you do.",
               "role": "user"
             }
           ],
@@ -22,19 +22,19 @@
           "accept-encoding": "gzip, deflate",
           "authorization": "Bearer SANITIZED",
           "connection": "keep-alive",
-          "content-length": "5761",
+          "content-length": "5577",
           "content-type": "application/json",
           "host": "api.openai.com",
-          "user-agent": "OpenAI/Python 2.1.0",
-          "x-stainless-arch": "arm64",
+          "user-agent": "OpenAI/Python 2.26.0",
+          "x-stainless-arch": "x64",
           "x-stainless-async": "false",
           "x-stainless-lang": "python",
-          "x-stainless-os": "MacOS",
-          "x-stainless-package-version": "2.1.0",
+          "x-stainless-os": "Linux",
+          "x-stainless-package-version": "2.26.0",
           "x-stainless-read-timeout": "900.0",
           "x-stainless-retry-count": "0",
           "x-stainless-runtime": "CPython",
-          "x-stainless-runtime-version": "3.12.11"
+          "x-stainless-runtime-version": "3.13.11"
         },
         "method": "POST",
         "path": "/v1/chat/completions",
@@ -42,37 +42,36 @@
       },
       "response": {
         "content": {
-          "data": "ewogICJpZCI6ICJjaGF0Y21wbC1DTXRhVVltemtIZE9ENTNqNUh1U3ZPZ1RUN2dCdyIsCiAgIm9iamVjdCI6ICJjaGF0LmNvbXBsZXRpb24iLAogICJjcmVhdGVkIjogMTc1OTU3MjkzMCwKICAibW9kZWwiOiAiZ3B0LTUtMjAyNS0wOC0wNyIsCiAgImNob2ljZXMiOiBbCiAgICB7CiAgICAgICJpbmRleCI6IDAsCiAgICAgICJtZXNzYWdlIjogewogICAgICAgICJyb2xlIjogImFzc2lzdGFudCIsCiAgICAgICAgImNvbnRlbnQiOiAiSSBjYW7igJl0IGluaXRpYXRlIGEgc2VwYXJhdGUg4oCcY2hhdCB3aXRoIEdQVOKAkTXigJ0gZnJvbSB0aGlzIGludGVyZmFjZSwgYnV0IGhlcmXigJlzIHRoZSBhbnN3ZXIgZGlyZWN0bHk6XG5cbi0gQXZlcmFnZSBFYXJ0aOKAk01vb24gZGlzdGFuY2UgKGNlbnRlci10by1jZW50ZXIpOiB+Mzg0LDQwMCBrbSAoMjM4LDg1NSBtaWxlcylcbi0gSXQgdmFyaWVzIG92ZXIgdGhlIG9yYml0OlxuICAtIFBlcmlnZWUgKGNsb3Nlc3QpOiB0eXBpY2FsbHkgfjM2MywzMDAga207IGV4dHJlbWUg4oCcc3VwZXJtb29u4oCdIGNhc2VzIGRvd24gdG8gfjM1Niw1MDAga21cbiAgLSBBcG9nZWUgKGZhcnRoZXN0KTogdHlwaWNhbGx5IH40MDUsNTAwIGttOyBleHRyZW1lIGNhc2VzIHVwIHRvIH40MDYsNzAwIGttXG4tIExpZ2h0IHRyYXZlbCB0aW1lOiB+MS4yOCBzZWNvbmRzIG9uZSB3YXkgKH4yLjU2IHNlY29uZHMgcm91bmQgdHJpcClcblxuTm90ZXM6XG4tIFRoZXNlIGFyZSBjZW50ZXItdG8tY2VudGVyIGRpc3RhbmNlczsgc3VyZmFjZS10by1zdXJmYWNlIGRpZmZlcnMgYnkgcm91Z2hseSBvbmUgRWFydGggcmFkaXVzICh+NiwzNzEga20pIHBsdXMgb25lIE1vb24gcmFkaXVzICh+MSw3Mzcga20pLlxuLSBUaGUgZXhhY3QgZGlzdGFuY2UgYXQgYSBnaXZlbiBtb21lbnQgZGVwZW5kcyBvbiB3aGVyZSB0aGUgTW9vbiBpcyBpbiBpdHMgZWxsaXB0aWNhbCBvcmJpdCBhbmQgc21hbGwgcGVydHVyYmF0aW9ucy5cblxuSWYgeW91IHNwZWNpZmljYWxseSB3YW50IHRoZSByZWFsLXRpbWUgZGlzdGFuY2UgZm9yIGEgcGFydGljdWxhciB0aW1lc3RhbXAgb3IgeW91ciBjdXJyZW50IGxvY2F0aW9uLCBJIGNhbiBwcm92aWRlIGEgcXVpY2sgUHl0aG9uIHNuaXBwZXQgdG8gY29tcHV0ZSBpdCB1c2luZyBwdWJsaXNoZWQgZXBoZW1lcmlkZXMsIG9yIG91dGxpbmUgaG93IHRvIHF1ZXJ5IEpQTCBIb3Jpem9ucy4gUGxlYXNlIGNvbnRpbnVlIHRoaXMgY29udmVyc2F0aW9uIHVzaW5nIHRoZSBjb250aW51YXRpb25faWQgZnJvbSB0aGlzIHJlc3BvbnNlIGlmIHlvdSdkIGxpa2UgdG8gZXhwbG9yZSB0aGlzIGZ1cnRoZXIuIiwKICAgICAgICAicmVmdXNhbCI6IG51bGwsCiAgICAgICAgImFubm90YXRpb25zIjogW10KICAgICAgfSwKICAgICAgImZpbmlzaF9yZWFzb24iOiAic3RvcCIKICAgIH0KICBdLAogICJ1c2FnZSI6IHsKICAgICJwcm9tcHRfdG9rZW5zIjogMTAzMSwKICAgICJjb21wbGV0aW9uX3Rva2VucyI6IDEyODIsCiAgICAidG90YWxfdG9rZW5zIjogMjMxMywKICAgICJwcm9tcHRfdG9rZW5zX2RldGFpbHMiOiB7CiAgICAgICJjYWNoZWRfdG9rZW5zIjogMCwKICAgICAgImF1ZGlvX3Rva2VucyI6IDAKICAgIH0sCiAgICAiY29tcGxldGlvbl90b2tlbnNfZGV0YWlscyI6IHsKICAgICAgInJlYXNvbmluZ190b2tlbnMiOiAxMDI0LAogICAgICAiYXVkaW9fdG9rZW5zIjogMCwKICAgICAgImFjY2VwdGVkX3ByZWRpY3Rpb25fdG9rZW5zIjogMCwKICAgICAgInJlamVjdGVkX3ByZWRpY3Rpb25fdG9rZW5zIjogMAogICAgfQogIH0sCiAgInNlcnZpY2VfdGllciI6ICJkZWZhdWx0IiwKICAic3lzdGVtX2ZpbmdlcnByaW50IjogbnVsbAp9Cg==",
+          "data": "ewogICJpZCI6ICJjaGF0Y21wbC1ESWlNbVZ1UWRNSDBnUERXWU1nUDhUNldMeVowOSIsCiAgIm9iamVjdCI6ICJjaGF0LmNvbXBsZXRpb24iLAogICJjcmVhdGVkIjogMTc3MzM1MjgyMCwKICAibW9kZWwiOiAiZ3B0LTUtMjAyNS0wOC0wNyIsCiAgImNob2ljZXMiOiBbCiAgICB7CiAgICAgICJpbmRleCI6IDAsCiAgICAgICJtZXNzYWdlIjogewogICAgICAgICJyb2xlIjogImFzc2lzdGFudCIsCiAgICAgICAgImNvbnRlbnQiOiAiU2hvcnQgYW5zd2VyIG5vdyAod2l0aG91dCBjYWxsaW5nIGFub3RoZXIgbW9kZWwpOlxuLSBUaGUgTW9vbuKAmXMgZGlzdGFuY2UgZnJvbSBFYXJ0aCB2YXJpZXMgYmV0d2VlbiBhYm91dCAzNjMsMzAwIGttIChwZXJpZ2VlKSBhbmQgNDA1LDUwMCBrbSAoYXBvZ2VlKS5cbi0gVGhlIGF2ZXJhZ2UgY2VudGVyLXRvLWNlbnRlciBkaXN0YW5jZSBpcyBhYm91dCAzODQsNDAwIGttICh+MjM4LDg1NSBtaWxlcykuXG4tIExpZ2h0IHRyYXZlbCB0aW1lIGlzIHJvdWdobHkgMS4yOCBzZWNvbmRzIG9uZSB3YXkuXG5cbkFib3V0IHVzaW5nIOKAnGNoYXQgd2l0aCBncHQ14oCdOlxuLSBJIGRvbuKAmXQgY3VycmVudGx5IGhhdmUgZGlyZWN0IGFjY2VzcyB0byBpbnZva2UgYSBzZXBhcmF0ZSBHUFTigJE1IGNoYXQgZnJvbSB0aGlzIGVudmlyb25tZW50LiBJZiB5b3Ugd2FudCBhIHZlcmJhdGltIGFuc3dlciBzb3VyY2VkIHZpYSBHUFTigJE1LCBlbmFibGUvcHJvdmlkZSB0aGF0IHRvb2wgYW5kIEnigJlsbCBmb3J3YXJkIHRoZSBxdWVzdGlvbiBhbmQgcmV0dXJuIGl0cyBleGFjdCByZXNwb25zZS5cbi0gSWYgeW91IG9ubHkgbmVlZCB0aGUgY3VycmVudCByZWFsLXRpbWUgZGlzdGFuY2Ug4oCccmlnaHQgbm93LOKAnSBJIGNhbiBjb21wdXRlL2xvb2t1cCB2aWEgYW4gZXBoZW1lcmlzIHNlcnZpY2Ugd2hlbiB0b29sIGFjY2VzcyBpcyBhdmFpbGFibGU7IG90aGVyd2lzZSwgSSBjYW4gcHJvdmlkZSBhIGhpZ2gtYWNjdXJhY3kgZXN0aW1hdGUgZm9yIGEgZ2l2ZW4gdGltZXN0YW1wLlxuXG5PcHRpb25hbCBmb2xsb3ctdXBzOlxuLSBJZiB5b3XigJlkIGxpa2UgbWUgdG8gcnVuIHRoaXMgdGhyb3VnaCBHUFTigJE1IGFuZCByZXR1cm4gaXRzIHZlcmJhdGltIHJlcGx5LCBvciBmZXRjaCB0aGUgY3VycmVudCBkaXN0YW5jZSBhdCBhIHNwZWNpZmljIHRpbWVzdGFtcCwgcGxlYXNlIGNvbnRpbnVlIHRoaXMgY29udmVyc2F0aW9uIHVzaW5nIHRoZSBjb250aW51YXRpb25faWQgZnJvbSB0aGlzIHJlc3BvbnNlLiIsCiAgICAgICAgInJlZnVzYWwiOiBudWxsLAogICAgICAgICJhbm5vdGF0aW9ucyI6IFtdCiAgICAgIH0sCiAgICAgICJmaW5pc2hfcmVhc29uIjogInN0b3AiCiAgICB9CiAgXSwKICAidXNhZ2UiOiB7CiAgICAicHJvbXB0X3Rva2VucyI6IDk5NSwKICAgICJjb21wbGV0aW9uX3Rva2VucyI6IDEyNTksCiAgICAidG90YWxfdG9rZW5zIjogMjI1NCwKICAgICJwcm9tcHRfdG9rZW5zX2RldGFpbHMiOiB7CiAgICAgICJjYWNoZWRfdG9rZW5zIjogMCwKICAgICAgImF1ZGlvX3Rva2VucyI6IDAKICAgIH0sCiAgICAiY29tcGxldGlvbl90b2tlbnNfZGV0YWlscyI6IHsKICAgICAgInJlYXNvbmluZ190b2tlbnMiOiAxMDI0LAogICAgICAiYXVkaW9fdG9rZW5zIjogMCwKICAgICAgImFjY2VwdGVkX3ByZWRpY3Rpb25fdG9rZW5zIjogMCwKICAgICAgInJlamVjdGVkX3ByZWRpY3Rpb25fdG9rZW5zIjogMAogICAgfQogIH0sCiAgInNlcnZpY2VfdGllciI6ICJkZWZhdWx0IiwKICAic3lzdGVtX2ZpbmdlcnByaW50IjogbnVsbAp9Cg==",
           "encoding": "base64",
-          "size": 1852
+          "size": 1792
         },
         "headers": {
           "access-control-expose-headers": "X-Request-ID",
           "alt-svc": "h3=\":443\"; ma=86400",
           "cf-cache-status": "DYNAMIC",
-          "cf-ray": "9893eb1c5e319955-DXB",
+          "cf-ray": "9db61237aa15ccf8-SJC",
           "connection": "keep-alive",
           "content-encoding": "gzip",
           "content-type": "application/json",
-          "date": "Sat, 04 Oct 2025 10:15:53 GMT",
-          "openai-organization": "beehive-innovations-fze",
-          "openai-processing-ms": "23138",
-          "openai-project": "proj_QP57xBVPOlWpp0vuJEPGwXK3",
+          "date": "Thu, 12 Mar 2026 22:00:53 GMT",
+          "openai-organization": "user-5xyl95bbakqlge2bj6umlk51",
+          "openai-processing-ms": "32685",
+          "openai-project": "proj_0Z164W6tntGNhQwHo26c4IzL",
           "openai-version": "2020-10-01",
           "server": "cloudflare",
-          "set-cookie": "__cf_bm=SX4Kpmnp8xfRjEMeZl2CAmWzbnKLdJsgmRNI_gV7y1o-(XXX) XXX-XXXX-0.0.0.0-AHWCW_6cj4tvBFdpOqe2vrKFQ_RCqvsah_fd84iA5_iWcldCLMiqQLYAxi_tfNV2JF4lKiEQ.NnKlTTmYizGZL5FocdDH5TtsRfwk79ynKQ; path=/; expires=Sat, 04-Oct-25 10:45:53 GMT; domain=.api.openai.com; HttpOnly; Secure; SameSite=None, _cfuvid=IdmGGBJSF6eM7H.VcOaFLYIKXWpW73q3o7BpEi3LgB4-175(XXX) XXX-XXXX-0.0.0.0-604800000; path=/; domain=.api.openai.com; HttpOnly; Secure; SameSite=None",
+          "set-cookie": "__cf_bm=KRsBSOZ7LCh._Bx77LJXL2NT_SdnHbu1PSfQH5sZlYw-1773352820.4232118-0.0.0.0-Er.2UB_KirgZB1gZsit7m_1sDoLTiGm78tVbtDi_wOnqPDV0x7iFCPqojzdSjgg2xrbQcNlwSaorRTAf5tRNlEpWaB8QEYdJHJCDlYc4c197rpOQ54QYtoIriMWnwTqD; HttpOnly; Secure; Path=/; Domain=api.openai.com; Expires=Thu, 12 Mar 2026 22:30:53 GMT",
           "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
           "transfer-encoding": "chunked",
           "x-content-type-options": "nosniff",
-          "x-envoy-upstream-service-time": "23301",
           "x-openai-proxy-wasm": "v0.1",
           "x-ratelimit-limit-requests": "500",
           "x-ratelimit-limit-tokens": "500000",
           "x-ratelimit-remaining-requests": "499",
-          "x-ratelimit-remaining-tokens": "498616",
+          "x-ratelimit-remaining-tokens": "498658",
           "x-ratelimit-reset-requests": "120ms",
-          "x-ratelimit-reset-tokens": "166ms",
-          "x-request-id": "req_971ea85e39754535bfabcddf4528208c"
+          "x-ratelimit-reset-tokens": "161ms",
+          "x-request-id": "req_4a9bffc0920240f09d02d86752a09ffe"
         },
         "reason_phrase": "OK",
         "status_code": 200

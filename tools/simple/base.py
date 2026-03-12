@@ -396,7 +396,7 @@ class SimpleTool(BaseTool):
                 # Add follow-up instructions for new conversations
                 from server import get_follow_up_instructions
 
-                follow_up_instructions = get_follow_up_instructions(0)
+                follow_up_instructions = get_follow_up_instructions()
                 prompt = f"{prompt}\n\n{follow_up_instructions}"
                 logger.debug(
                     f"Added follow-up instructions for new {self.get_name()} conversation"
@@ -693,9 +693,23 @@ class SimpleTool(BaseTool):
                 metadata=metadata if metadata else None,
             )
 
+    def _get_context_token_info(self) -> tuple[int, int]:
+        """Get context window and usage from current arguments or model context."""
+        args = getattr(self, "_current_arguments", None) or {}
+        context_window = args.get("_context_window", 0)
+        context_used = args.get("_context_used", 0)
+
+        if not context_window:
+            model_ctx = args.get("_model_context")
+            if model_ctx and hasattr(model_ctx, "capabilities"):
+                context_window = model_ctx.capabilities.context_window or 0
+
+        return context_window, context_used
+
     def _create_continuation_offer(self, request, model_info: Optional[dict] = None):
-        """Create continuation offer following old base.py pattern"""
+        """Create continuation offer with context usage information."""
         continuation_id = self.get_request_continuation_id(request)
+        context_window, context_used = self._get_context_token_info()
 
         try:
             from utils.conversation_memory import create_thread, get_thread
@@ -704,41 +718,32 @@ class SimpleTool(BaseTool):
                 # Existing conversation
                 thread_context = get_thread(continuation_id)
                 if thread_context and thread_context.turns:
-                    turn_count = len(thread_context.turns)
-                    from utils.conversation_memory import MAX_CONVERSATION_TURNS
-
-                    if turn_count >= MAX_CONVERSATION_TURNS - 1:
-                        return None  # No more turns allowed
-
-                    remaining_turns = MAX_CONVERSATION_TURNS - turn_count - 1
                     return {
                         "continuation_id": continuation_id,
-                        "remaining_turns": remaining_turns,
-                        "note": f"You can continue this conversation for {remaining_turns} more exchanges.",
+                        "context_window": context_window,
+                        "context_used": context_used,
+                        "note": "Conversation is active and can be continued.",
                     }
             else:
                 # New conversation - create thread and offer continuation
-                # Convert request to dict for initial_context
                 initial_request_dict = self.get_request_as_dict(request)
-
                 new_thread_id = create_thread(tool_name=self.get_name(), initial_request=initial_request_dict)
 
-                # Add the initial user turn to the new thread
-                from utils.conversation_memory import MAX_CONVERSATION_TURNS, add_turn
+                from utils.conversation_memory import add_turn
 
                 user_prompt = self.get_request_prompt(request)
                 user_files = self.get_request_files(request)
                 user_images = self.get_request_media(request)
 
-                # Add user's initial turn
                 add_turn(
                     new_thread_id, "user", user_prompt, files=user_files, media=user_images, tool_name=self.get_name()
                 )
 
                 return {
                     "continuation_id": new_thread_id,
-                    "remaining_turns": MAX_CONVERSATION_TURNS - 1,
-                    "note": f"You can continue this conversation for {MAX_CONVERSATION_TURNS - 1} more exchanges.",
+                    "context_window": context_window,
+                    "context_used": 0,
+                    "note": "Conversation is active and can be continued.",
                 }
         except Exception:
             return None
@@ -758,10 +763,14 @@ class SimpleTool(BaseTool):
                     model_info,
                 )
 
+            ctx_window = continuation_data.get("context_window", 0)
+            ctx_used = continuation_data.get("context_used", 0)
             continuation_offer = ContinuationOffer(
                 continuation_id=continuation_data["continuation_id"],
                 note=continuation_data["note"],
-                remaining_turns=continuation_data["remaining_turns"],
+                context_window=ctx_window,
+                context_used=ctx_used,
+                context_remaining=max(0, ctx_window - ctx_used),
             )
 
             # Build metadata with model and provider info

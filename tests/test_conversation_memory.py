@@ -10,9 +10,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from server import get_follow_up_instructions
 from utils.conversation_memory import (
-    MAX_CONVERSATION_TURNS,
     ConversationTurn,
     ThreadContext,
     add_turn,
@@ -109,33 +107,6 @@ class TestConversationMemory:
         mock_client.get.assert_called_once()
         mock_client.set.assert_called()
 
-    @patch("utils.conversation_memory.get_storage")
-    def test_add_turn_max_limit(self, mock_storage):
-        """Test turn limit enforcement"""
-        mock_client = Mock()
-        mock_storage.return_value = mock_client
-
-        test_uuid = "12345678-1234-1234-1234-123456789012"
-
-        # Create thread with MAX_CONVERSATION_TURNS turns (at limit)
-        turns = [
-            ConversationTurn(role="user", content=f"Turn {i}", timestamp="2023-01-01T00:00:00Z")
-            for i in range(MAX_CONVERSATION_TURNS)
-        ]
-        context_obj = ThreadContext(
-            thread_id=test_uuid,
-            created_at="2023-01-01T00:00:00Z",
-            last_updated_at="2023-01-01T00:01:00Z",
-            tool_name="chat",
-            turns=turns,
-            initial_context={"prompt": "test"},
-        )
-        mock_client.get.return_value = context_obj.model_dump_json()
-
-        success = add_turn(test_uuid, "user", "This should fail")
-
-        assert success is False
-
     @patch.dict(os.environ, {"GEMINI_API_KEY": "test-key", "OPENAI_API_KEY": ""}, clear=False)
     def test_build_conversation_history(self, project_path):
         """Test building conversation history format with files and speaker identification"""
@@ -192,7 +163,7 @@ class TestConversationMemory:
         assert "CONVERSATION HISTORY" in history
         assert f"Thread: {test_uuid}" in history
         assert "Tool: chat" in history
-        assert f"Turn 2/{MAX_CONVERSATION_TURNS}" in history
+        assert "Turn 2" in history
 
         # Test speaker identification
         assert "--- Turn 1 (Agent) ---" in history
@@ -319,28 +290,6 @@ class TestConversationFlow:
         success = add_turn(thread_id, "assistant", "Test coverage analyzed")
         assert success is True
 
-        # REQUEST 6: Try to exceed MAX_CONVERSATION_TURNS limit - should fail
-        turns_at_limit = [
-            ConversationTurn(
-                role="assistant" if i % 2 == 0 else "user", content=f"Turn {i + 1}", timestamp="2023-01-01T00:00:30Z"
-            )
-            for i in range(MAX_CONVERSATION_TURNS)
-        ]
-
-        context_at_limit = ThreadContext(
-            thread_id=thread_id,
-            created_at="2023-01-01T00:00:00Z",
-            last_updated_at="2023-01-01T00:05:00Z",
-            tool_name="chat",
-            turns=turns_at_limit,
-            initial_context={"prompt": "Analyze this code"},
-        )
-        mock_client.get.return_value = context_at_limit.model_dump_json()
-
-        # This should fail - conversation has reached limit
-        success = add_turn(thread_id, "user", "This should be rejected")
-        assert success is False  # CONVERSATION STOPS HERE
-
     @patch("utils.conversation_memory.get_storage")
     def test_invalid_continuation_id_error(self, mock_storage):
         """Test that invalid continuation IDs raise proper error for restart"""
@@ -365,135 +314,13 @@ class TestConversationFlow:
             in error_msg
         )
 
-    @patch.dict(os.environ, {"GEMINI_API_KEY": "test-key", "OPENAI_API_KEY": ""}, clear=False)
-    def test_dynamic_max_turns_configuration(self):
-        """Test that all functions respect MAX_CONVERSATION_TURNS configuration"""
-        from providers.registry import ModelProviderRegistry
+    def test_follow_up_instructions(self):
+        """Test that follow-up instructions contain continuation guidance"""
+        from server import get_follow_up_instructions
 
-        ModelProviderRegistry.clear_cache()
-
-        # This test ensures if we change MAX_CONVERSATION_TURNS, everything updates
-
-        # Test with different max values by patching the constant
-        test_values = [3, 7, 10]
-
-        for test_max in test_values:
-            # Create turns up to the test limit
-            turns = [
-                ConversationTurn(role="user", content=f"Turn {i}", timestamp="2023-01-01T00:00:00Z")
-                for i in range(test_max)
-            ]
-
-            # Test history building respects the limit
-            test_uuid = "12345678-1234-1234-1234-123456789012"
-            context = ThreadContext(
-                thread_id=test_uuid,
-                created_at="2023-01-01T00:00:00Z",
-                last_updated_at="2023-01-01T00:00:00Z",
-                tool_name="chat",
-                turns=turns,
-                initial_context={},
-            )
-
-            history, tokens = build_conversation_history(context, model_context=None)
-            expected_turn_text = f"Turn {test_max}/{MAX_CONVERSATION_TURNS}"
-            assert expected_turn_text in history
-
-    def test_follow_up_instructions_dynamic_behavior(self):
-        """Test that follow-up instructions change correctly based on turn count and max setting"""
-        # Test with default MAX_CONVERSATION_TURNS
-        max_turns = MAX_CONVERSATION_TURNS
-
-        # Test early conversation (should allow follow-ups)
-        early_instructions = get_follow_up_instructions(0, max_turns)
-        assert "CONVERSATION CONTINUATION" in early_instructions
-        assert f"({max_turns - 1} exchanges remaining)" in early_instructions
-        assert "Feel free to ask clarifying questions" in early_instructions
-
-        # Test mid conversation
-        mid_instructions = get_follow_up_instructions(2, max_turns)
-        assert "CONVERSATION CONTINUATION" in mid_instructions
-        assert f"({max_turns - 3} exchanges remaining)" in mid_instructions
-        assert "Feel free to ask clarifying questions" in mid_instructions
-
-        # Test approaching limit (should stop follow-ups)
-        limit_instructions = get_follow_up_instructions(max_turns - 1, max_turns)
-        assert "Do NOT include any follow-up questions" in limit_instructions
-        assert "final exchange" in limit_instructions
-
-        # Test at limit
-        at_limit_instructions = get_follow_up_instructions(max_turns, max_turns)
-        assert "Do NOT include any follow-up questions" in at_limit_instructions
-
-        # Test with custom max_turns to ensure dynamic behavior
-        custom_max = 3
-        custom_early = get_follow_up_instructions(0, custom_max)
-        assert f"({custom_max - 1} exchanges remaining)" in custom_early
-
-        custom_limit = get_follow_up_instructions(custom_max - 1, custom_max)
-        assert "Do NOT include any follow-up questions" in custom_limit
-
-    def test_follow_up_instructions_defaults_to_config(self):
-        """Test that follow-up instructions use MAX_CONVERSATION_TURNS when max_turns not provided"""
-        instructions = get_follow_up_instructions(0)  # No max_turns parameter
-        expected_remaining = MAX_CONVERSATION_TURNS - 1
-        assert f"({expected_remaining} exchanges remaining)" in instructions
-
-    @patch("utils.conversation_memory.get_storage")
-    def test_complete_conversation_with_dynamic_turns(self, mock_storage):
-        """Test complete conversation respecting MAX_CONVERSATION_TURNS dynamically"""
-        mock_client = Mock()
-        mock_storage.return_value = mock_client
-
-        thread_id = create_thread("chat", {"prompt": "Start conversation"})
-
-        # Simulate conversation up to MAX_CONVERSATION_TURNS - 1
-        for turn_num in range(MAX_CONVERSATION_TURNS - 1):
-            # Mock context with current turns
-            turns = [
-                ConversationTurn(
-                    role="user" if i % 2 == 0 else "assistant",
-                    content=f"Turn {i + 1}",
-                    timestamp="2023-01-01T00:00:00Z",
-                )
-                for i in range(turn_num)
-            ]
-
-            context = ThreadContext(
-                thread_id=thread_id,
-                created_at="2023-01-01T00:00:00Z",
-                last_updated_at="2023-01-01T00:00:00Z",
-                tool_name="chat",
-                turns=turns,
-                initial_context={"prompt": "Start conversation"},
-            )
-            mock_client.get.return_value = context.model_dump_json()
-
-            # Should succeed
-            success = add_turn(thread_id, "user", f"User turn {turn_num + 1}")
-            assert success is True, f"Turn {turn_num + 1} should succeed"
-
-        # Now we should be at the limit - create final context
-        final_turns = [
-            ConversationTurn(
-                role="user" if i % 2 == 0 else "assistant", content=f"Turn {i + 1}", timestamp="2023-01-01T00:00:00Z"
-            )
-            for i in range(MAX_CONVERSATION_TURNS)
-        ]
-
-        final_context = ThreadContext(
-            thread_id=thread_id,
-            created_at="2023-01-01T00:00:00Z",
-            last_updated_at="2023-01-01T00:00:00Z",
-            tool_name="chat",
-            turns=final_turns,
-            initial_context={"prompt": "Start conversation"},
-        )
-        mock_client.get.return_value = final_context.model_dump_json()
-
-        # This should fail - at the limit
-        success = add_turn(thread_id, "user", "This should fail")
-        assert success is False, f"Turn {MAX_CONVERSATION_TURNS + 1} should fail"
+        result = get_follow_up_instructions()
+        assert "continuation_id" in result
+        assert "CONVERSATION CONTINUATION" in result
 
     @patch("utils.conversation_memory.get_storage")
     @patch.dict(os.environ, {"GEMINI_API_KEY": "test-key", "OPENAI_API_KEY": ""}, clear=False)

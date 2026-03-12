@@ -281,8 +281,7 @@ DISABLED_TOOLS=
         "OPENROUTER_API_KEY": "your-openrouter-key",
         
         // Logging and performance
-        "LOG_LEVEL": "INFO",
-        "MAX_CONVERSATION_TURNS": "50"
+        "LOG_LEVEL": "INFO"
       }
     }
   }

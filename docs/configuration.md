@@ -224,12 +224,6 @@ DIAL_MODELS_CONFIG_PATH=/path/to/dial_models.json
 CUSTOM_MODELS_CONFIG_PATH=/path/to/custom_models.json
 ```
 
-**Conversation Settings:**
-```env
-# Maximum conversation turns (each exchange = 2 turns)
-MAX_CONVERSATION_TURNS=20
-```
-
 **Logging Configuration:**
 ```env
 # Logging level: DEBUG, INFO, WARNING, ERROR

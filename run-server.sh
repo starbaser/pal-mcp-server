@@ -1211,7 +1211,6 @@ parse_env_variables() {
             "DEFAULT_MODEL"
             "LOG_LEVEL"
             "DEFAULT_THINKING_MODE_THINKDEEP"
-            "MAX_CONVERSATION_TURNS"
         )
 
         for key_name in "${api_keys[@]}"; do

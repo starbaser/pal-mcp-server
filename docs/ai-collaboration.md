@@ -50,7 +50,7 @@ This server enables **true AI collaboration** between Claude and multiple AI mod
 ## Technical Configuration
 
 **Conversation Management:**
-- Up to 10 exchanges per conversation (configurable via `MAX_CONVERSATION_TURNS`)
+- Conversation length limited only by model context window
 - Thread-safe with in-memory persistence across all tools
 - **Image context preservation** - Images and visual references are maintained across conversation turns and tool switches
 

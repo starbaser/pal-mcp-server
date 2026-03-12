@@ -198,20 +198,13 @@ def disable_force_env_override(monkeypatch):
     monkeypatch.setenv("PAL_MCP_FORCE_ENV_OVERRIDE", "false")
     env_config.reload_env({"PAL_MCP_FORCE_ENV_OVERRIDE": "false"})
     monkeypatch.setenv("DEFAULT_MODEL", "gemini-2.5-flash")
-    monkeypatch.setenv("MAX_CONVERSATION_TURNS", "50")
-
     import importlib
-    import sys
 
     import config
     import utils.conversation_memory as conversation_memory
 
     importlib.reload(config)
     importlib.reload(conversation_memory)
-
-    test_conversation_module = sys.modules.get("tests.test_conversation_memory")
-    if test_conversation_module is not None:
-        test_conversation_module.MAX_CONVERSATION_TURNS = conversation_memory.MAX_CONVERSATION_TURNS
 
     try:
         yield

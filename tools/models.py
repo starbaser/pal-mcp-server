@@ -18,13 +18,15 @@ class ToolModelCategory(Enum):
 
 
 class ContinuationOffer(BaseModel):
-    """Offer for CLI agent to continue conversation when Gemini doesn't ask follow-up"""
+    """Offer for CLI agent to continue conversation"""
 
     continuation_id: str = Field(
         ..., description="Thread continuation ID for multi-turn conversations across different tools"
     )
     note: str = Field(..., description="Message explaining continuation opportunity to CLI agent")
-    remaining_turns: int = Field(..., description="Number of conversation turns remaining")
+    context_window: int = Field(..., description="Total model context window in tokens")
+    context_used: int = Field(..., description="Tokens consumed by conversation history")
+    context_remaining: int = Field(..., description="Tokens remaining in context window")
 
 
 class ToolOutput(BaseModel):

@@ -28,7 +28,9 @@ def test_format_simple_tool_output_basic():
         "continuation_offer": {
             "continuation_id": "abc-uuid",
             "note": "Continue...",
-            "remaining_turns": 9,
+            "context_window": 1000000,
+            "context_used": 5000,
+            "context_remaining": 995000,
         },
     }
     result = format_tool_result(_wrap(data), "chat")
@@ -49,7 +51,7 @@ def test_format_simple_tool_output_basic():
 
     # Continuation info in JSON blob
     assert '"continuation_id": "abc-uuid"' in text
-    assert '"remaining_turns": 9' in text
+    assert '"context_window": 1000000' in text
 
 
 def test_format_simple_tool_output_error():

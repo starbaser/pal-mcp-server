@@ -189,7 +189,6 @@ The `clink` tool bridges MCP requests to external AI CLIs (Claude Code, Codex CL
 
 - `utils/conversation_memory.py` handles AI-to-AI conversation threading
 - Cross-tool conversation memory allows models to remember previous tool responses
-- Controlled by `MAX_CONVERSATION_TURNS` environment variable
 - **Key gotcha:** File deduplication (`utils/file_utils.py`) ensures files aren't re-embedded across turns, saving tokens
 
 ### MCP Protocol Considerations
@@ -424,9 +423,6 @@ DISABLED_TOOLS=analyze,refactor,testgen  # Disable non-essential tools
 # Model restrictions (comma-separated, optional)
 OPENAI_ALLOWED_MODELS=o3-mini,o4-mini
 GOOGLE_ALLOWED_MODELS=flash,pro
-
-# Conversation memory
-MAX_CONVERSATION_TURNS=50
 
 # Thinking mode (for ThinkDeep tool)
 DEFAULT_THINKING_MODE_THINKDEEP=high  # minimal, low, medium, high, max

@@ -714,7 +714,7 @@ async def handle_list_tools() -> list[Tool]:
     return tools
 
 
-def _save_response_content(tool_name: str, result: list) -> None:
+def _save_response_content(tool_name: str, result: list, continuation_id: str | None = None) -> None:
     """Persist the AI response content as a markdown file for easy viewing."""
     import json
     from datetime import datetime
@@ -730,10 +730,18 @@ def _save_response_content(tool_name: str, result: list) -> None:
         if not content or status == "error":
             return
 
+        # Resolve continuation_id: prefer explicit arg, fall back to result JSON
+        cid = continuation_id
+        if not cid:
+            cont = parsed.get("continuation", {})
+            cid = cont.get("continuation_id") if isinstance(cont, dict) else None
+
         content_dir = Path(CONTENT_STORAGE_DIR)
+        if cid:
+            content_dir = content_dir / cid
         content_dir.mkdir(parents=True, exist_ok=True)
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H:%M:%S.%f")
         filename = f"{timestamp}_{tool_name}.md"
         (content_dir / filename).write_text(content, encoding="utf-8")
     except Exception:
@@ -918,7 +926,7 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
         result = await tool.execute(arguments)
         logger.info(f"Tool '{name}' execution completed")
 
-        _save_response_content(name, result)
+        _save_response_content(name, result, arguments.get("continuation_id"))
 
         if config.FORMATTED_OUTPUT:
             result = format_tool_result(result, name)

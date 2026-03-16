@@ -22,42 +22,18 @@
   },
   "models": [
     {
-      "model_name": "glm-4.7",
-      "friendly_name": "ZAI (GLM-4.7)",
+      "model_name": "glm-5",
+      "friendly_name": "ZAI (GLM-5)",
       "aliases": [
         "glm",
-        "glm4",
-        "glm-4",
-        "glm4.7"
+        "glm5"
       ],
-      "intelligence_score": 15,
-      "description": "GLM-4.7 (200K context) - MoE reasoning model with extended thinking support",
+      "intelligence_score": 17,
+      "description": "GLM-5 (200K context) - 744B MoE flagship with extended thinking support",
       "context_window": 200000,
       "max_output_tokens": 128000,
       "max_thinking_tokens": 32768,
       "supports_extended_thinking": true,
-      "supports_system_prompts": true,
-      "supports_streaming": true,
-      "supports_function_calling": true,
-      "supports_json_mode": true,
-      "supports_images": false,
-      "supports_temperature": true,
-      "max_image_size_mb": 0.0
-    },
-    {
-      "model_name": "glm-4.5-air",
-      "friendly_name": "ZAI (GLM-4.5 Air)",
-      "aliases": [
-        "glm-air",
-        "glm4-air",
-        "glm4.5",
-        "glm-4.5"
-      ],
-      "intelligence_score": 13,
-      "description": "GLM-4.5 Air (128K context) - Lightweight fast-response model",
-      "context_window": 128000,
-      "max_output_tokens": 128000,
-      "supports_extended_thinking": false,
       "supports_system_prompts": true,
       "supports_streaming": true,
       "supports_function_calling": true,

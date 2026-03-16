@@ -695,8 +695,9 @@ class BaseWorkflowMixin(ABC):
 
             # Create thread for first step
             if not continuation_id and request.step_number == 1:
+                resolved_model = arguments.get("_resolved_model_name")
                 clean_args = {k: v for k, v in arguments.items() if k not in ["_model_context", "_resolved_model_name"]}
-                continuation_id = create_thread(self.get_name(), clean_args)
+                continuation_id = create_thread(self.get_name(), clean_args, model_name=resolved_model)
                 self.initial_request = request.step
                 # Allow tools to store initial description for expert analysis
                 self.store_initial_issue(request.step)

@@ -176,14 +176,24 @@ class TestModelMetadataContinuation:
             importlib.reload(utils.model_context)
 
     @pytest.mark.asyncio
-    async def test_explicit_model_overrides_previous_turn(self):
-        """Test that explicitly specifying a model overrides the previous turn's model."""
+    async def test_explicit_model_mismatch_raises_error(self):
+        """Test that explicitly specifying a DIFFERENT model on continuation raises ValueError."""
         thread_id = create_thread("chat", {"prompt": "test"})
         add_turn(thread_id, "assistant", "Response", model_name="gemini-2.5-flash", model_provider="google")
 
-        arguments = {"continuation_id": thread_id, "model": "o3"}  # Explicitly specified
+        arguments = {"continuation_id": thread_id, "model": "o3"}
 
-        # Mock dependencies
+        with pytest.raises(ValueError, match="Model mismatch"):
+            await reconstruct_thread_context(arguments)
+
+    @pytest.mark.asyncio
+    async def test_explicit_same_model_passes(self):
+        """Test that specifying the same model on continuation succeeds."""
+        thread_id = create_thread("chat", {"prompt": "test"}, model_name="gemini-2.5-flash")
+        add_turn(thread_id, "assistant", "Response", model_name="gemini-2.5-flash", model_provider="google")
+
+        arguments = {"continuation_id": thread_id, "model": "gemini-2.5-flash"}
+
         with patch("utils.model_context.ModelContext.calculate_token_allocation") as mock_calc:
             mock_calc.return_value = MagicMock(
                 total_tokens=200000,
@@ -196,11 +206,56 @@ class TestModelMetadataContinuation:
             with patch("utils.conversation_memory.build_conversation_history") as mock_build:
                 mock_build.return_value = ("=== CONVERSATION HISTORY ===\n", 1000)
 
-                # Call the actual function
                 enhanced_args = await reconstruct_thread_context(arguments)
+                assert enhanced_args.get("model") == "gemini-2.5-flash"
 
-                # Should keep the explicit model
-                assert enhanced_args.get("model") == "o3"
+    @pytest.mark.asyncio
+    async def test_auto_model_forced_to_thread_model(self):
+        """Test that model='auto' on continuation is overridden by thread model."""
+        thread_id = create_thread("chat", {"prompt": "test"}, model_name="o3-mini")
+        add_turn(thread_id, "assistant", "Response", model_name="o3-mini", model_provider="openai")
+
+        arguments = {"continuation_id": thread_id, "model": "auto"}
+
+        with patch("utils.model_context.ModelContext.calculate_token_allocation") as mock_calc:
+            mock_calc.return_value = MagicMock(
+                total_tokens=200000,
+                content_tokens=160000,
+                response_tokens=40000,
+                file_tokens=64000,
+                history_tokens=64000,
+            )
+
+            with patch("utils.conversation_memory.build_conversation_history") as mock_build:
+                mock_build.return_value = ("=== CONVERSATION HISTORY ===\n", 1000)
+
+                enhanced_args = await reconstruct_thread_context(arguments)
+                assert enhanced_args.get("model") == "o3-mini"
+
+    @pytest.mark.asyncio
+    async def test_stored_model_name_takes_precedence(self):
+        """Test that ThreadContext.model_name takes precedence over turn scan."""
+        thread_id = create_thread("chat", {"prompt": "test"}, model_name="gemini-2.5-pro")
+        # Add turn with a different model (simulating a bug or edge case)
+        add_turn(thread_id, "assistant", "Response", model_name="o3", model_provider="openai")
+
+        arguments = {"continuation_id": thread_id}
+
+        with patch("utils.model_context.ModelContext.calculate_token_allocation") as mock_calc:
+            mock_calc.return_value = MagicMock(
+                total_tokens=200000,
+                content_tokens=160000,
+                response_tokens=40000,
+                file_tokens=64000,
+                history_tokens=64000,
+            )
+
+            with patch("utils.conversation_memory.build_conversation_history") as mock_build:
+                mock_build.return_value = ("=== CONVERSATION HISTORY ===\n", 1000)
+
+                enhanced_args = await reconstruct_thread_context(arguments)
+                # Should use stored model_name, not the turn's model
+                assert enhanced_args.get("model") == "gemini-2.5-pro"
 
     @pytest.mark.asyncio
     async def test_thread_chain_model_preservation(self):

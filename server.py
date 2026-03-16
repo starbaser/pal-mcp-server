@@ -1137,15 +1137,29 @@ async def reconstruct_thread_context(arguments: dict[str, Any]) -> dict[str, Any
     tool = TOOLS.get(context.tool_name)
     requires_model = tool.requires_model() if tool else True
 
-    # Check if we should use the model from the previous conversation turn
+    # Enforce model continuity: the thread's model is canonical
     model_from_args = arguments.get("model")
-    if requires_model and not model_from_args and context.turns:
-        # Find the last assistant turn to get the model used
+
+    # Determine canonical thread model (stored field, or turn scan for legacy threads)
+    thread_model = context.model_name
+    if thread_model is None and context.turns:
         for turn in reversed(context.turns):
             if turn.role == "assistant" and turn.model_name:
-                arguments["model"] = turn.model_name
-                logger.debug(f"[CONVERSATION_DEBUG] Using model from previous turn: {turn.model_name}")
+                thread_model = turn.model_name
+                logger.debug(f"[CONVERSATION_DEBUG] Thread model from turn scan (legacy): {thread_model}")
                 break
+
+    if requires_model and thread_model:
+        if model_from_args and model_from_args.lower() != "auto":
+            user_model_base, _ = parse_model_option(model_from_args)
+            if user_model_base.lower() != thread_model.lower():
+                raise ValueError(
+                    f"Model mismatch: thread '{continuation_id}' uses '{thread_model}', "
+                    f"but '{user_model_base}' was requested. "
+                    f"Use model='{thread_model}' to continue, or start a new conversation."
+                )
+        arguments["model"] = thread_model
+        logger.debug(f"[CONVERSATION_DEBUG] Enforcing thread model '{thread_model}' for continuation")
 
     # Resolve an effective model for context reconstruction when DEFAULT_MODEL=auto
     model_context = arguments.get("_model_context")

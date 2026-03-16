@@ -170,6 +170,7 @@ class ThreadContext(BaseModel):
     tool_name: str  # Tool that created this thread (preserved for attribution)
     turns: list[ConversationTurn]
     initial_context: dict[str, Any]  # Original request parameters
+    model_name: Optional[str] = None  # Canonical model locked to this thread
 
 
 def get_storage():
@@ -184,7 +185,12 @@ def get_storage():
     return get_storage_backend()
 
 
-def create_thread(tool_name: str, initial_request: dict[str, Any], parent_thread_id: Optional[str] = None) -> str:
+def create_thread(
+    tool_name: str,
+    initial_request: dict[str, Any],
+    parent_thread_id: Optional[str] = None,
+    model_name: Optional[str] = None,
+) -> str:
     """
     Create new conversation thread and return thread ID
 
@@ -223,6 +229,7 @@ def create_thread(tool_name: str, initial_request: dict[str, Any], parent_thread
         tool_name=tool_name,  # Track which tool initiated this conversation
         turns=[],  # Empty initially, turns added via add_turn()
         initial_context=filtered_context,
+        model_name=model_name,
     )
 
     storage = get_storage()

@@ -447,8 +447,9 @@ of the evidence, even when it strongly points in one direction.""",
 
         if request.step_number == 1:
             if not continuation_id:
+                resolved_model = arguments.get("_resolved_model_name")
                 clean_args = {k: v for k, v in arguments.items() if k not in ["_model_context", "_resolved_model_name"]}
-                continuation_id = create_thread(self.get_name(), clean_args)
+                continuation_id = create_thread(self.get_name(), clean_args, model_name=resolved_model)
                 request.continuation_id = continuation_id
                 arguments["continuation_id"] = continuation_id
                 self.work_history = []

@@ -727,7 +727,14 @@ class SimpleTool(BaseTool):
             else:
                 # New conversation - create thread and offer continuation
                 initial_request_dict = self.get_request_as_dict(request)
-                new_thread_id = create_thread(tool_name=self.get_name(), initial_request=initial_request_dict)
+                resolved_model = (
+                    self._current_arguments.get("_resolved_model_name")
+                    if hasattr(self, "_current_arguments") and self._current_arguments
+                    else None
+                )
+                new_thread_id = create_thread(
+                    tool_name=self.get_name(), initial_request=initial_request_dict, model_name=resolved_model
+                )
 
                 from utils.conversation_memory import add_turn
 

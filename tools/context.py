@@ -490,6 +490,7 @@ class CtxQueryTool(ContextBaseTool):
 
         model_provider = None
         model_name = None
+        model_metadata: dict[str, Any] = {}
         if model_info:
             provider = model_info.get("provider")
             if provider:
@@ -501,6 +502,9 @@ class CtxQueryTool(ContextBaseTool):
                     except AttributeError:
                         model_provider = str(provider)
             model_name = model_info.get("model_name")
+            model_response = model_info.get("model_response")
+            if model_response:
+                model_metadata = {"usage": model_response.usage, "metadata": model_response.metadata}
         add_turn(
             continuation_id,
             "assistant",
@@ -508,6 +512,7 @@ class CtxQueryTool(ContextBaseTool):
             tool_name=self.get_name(),
             model_provider=model_provider,
             model_name=model_name,
+            model_metadata=model_metadata if model_metadata else None,
         )
 
     async def prepare_prompt(self, request: CtxQueryRequest) -> str:

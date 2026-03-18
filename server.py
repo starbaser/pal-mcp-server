@@ -70,6 +70,7 @@ from tools import (  # noqa: E402
     TracerTool,
     VersionTool,
 )
+from tools.context import CtxForkTool, CtxListTool, CtxQueryTool, CtxStoreTool
 from tools.models import ToolOutput  # noqa: E402
 from tools.shared.exceptions import ToolExecutionError  # noqa: E402
 from utils.env import env_override_enabled, get_env  # noqa: E402
@@ -283,6 +284,10 @@ TOOLS = {
     "version": VersionTool(),  # Display server version and system information
     "imagegen": ImageGenTool(),  # Native AI image generation and editing
     "perceive": PerceiveTool(),  # Structured media intelligence extraction (image, video, audio)
+    "ctxstore": CtxStoreTool(),  # Store context layers in a persistent silo
+    "ctxquery": CtxQueryTool(),  # Ephemeral query against a context silo checkpoint
+    "ctxfork": CtxForkTool(),  # Fork a context silo into a new branch
+    "ctxlist": CtxListTool(),  # List context stores for a directory
 }
 TOOLS = filter_disabled_tools(TOOLS)
 
@@ -377,6 +382,26 @@ PROMPT_TEMPLATES = {
         "name": "version",
         "description": "Show server version and system information",
         "template": "Show PAL MCP Server version",
+    },
+    "ctxstore": {
+        "name": "ctxstore",
+        "description": "Store context layers in a persistent silo",
+        "template": "Store context with {model}",
+    },
+    "ctxquery": {
+        "name": "ctxquery",
+        "description": "Query a context silo without changing its state",
+        "template": "Query context silo with {model}",
+    },
+    "ctxfork": {
+        "name": "ctxfork",
+        "description": "Fork a context silo into a new branch",
+        "template": "Fork context silo with {model}",
+    },
+    "ctxlist": {
+        "name": "ctxlist",
+        "description": "List context stores for a directory",
+        "template": "List context stores",
     },
 }
 
@@ -817,6 +842,10 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
 
     # Handle thread context reconstruction if continuation_id is present
     if "continuation_id" in arguments and arguments["continuation_id"]:
+        # Check if tool declares ephemeral continuation (skips user turn recording)
+        _tool = TOOLS.get(name)
+        if _tool and getattr(_tool, "ephemeral_continuation", False):
+            arguments["_ephemeral_query"] = True
         continuation_id = arguments["continuation_id"]
         logger.debug(f"Resuming conversation thread: {continuation_id}")
         logger.debug(
@@ -1112,24 +1141,27 @@ async def reconstruct_thread_context(arguments: dict[str, Any]) -> dict[str, Any
         )
 
     # Add user's new input to the conversation
+    from utils.token_utils import estimate_tokens
+
     user_prompt = arguments.get("prompt", "")
     if user_prompt:
-        # Capture files referenced in this turn
-        user_files = arguments.get("absolute_file_paths") or []
-        logger.debug(f"[CONVERSATION_DEBUG] Adding user turn to thread {continuation_id}")
-        from utils.token_utils import estimate_tokens
-
-        user_prompt_tokens = estimate_tokens(user_prompt)
-        logger.debug(
-            f"[CONVERSATION_DEBUG] User prompt length: {len(user_prompt)} chars (~{user_prompt_tokens:,} tokens)"
-        )
-        logger.debug(f"[CONVERSATION_DEBUG] User files: {user_files}")
-        success = add_turn(continuation_id, "user", user_prompt, files=user_files)
-        if not success:
-            logger.warning(f"Failed to add user turn to thread {continuation_id}")
-            logger.debug("[CONVERSATION_DEBUG] Failed to add user turn - thread may be at turn limit or expired")
+        if not arguments.get("_ephemeral_query"):
+            # Capture files referenced in this turn
+            user_files = arguments.get("absolute_file_paths") or []
+            logger.debug(f"[CONVERSATION_DEBUG] Adding user turn to thread {continuation_id}")
+            user_prompt_tokens = estimate_tokens(user_prompt)
+            logger.debug(
+                f"[CONVERSATION_DEBUG] User prompt length: {len(user_prompt)} chars (~{user_prompt_tokens:,} tokens)"
+            )
+            logger.debug(f"[CONVERSATION_DEBUG] User files: {user_files}")
+            success = add_turn(continuation_id, "user", user_prompt, files=user_files)
+            if not success:
+                logger.warning(f"Failed to add user turn to thread {continuation_id}")
+                logger.debug("[CONVERSATION_DEBUG] Failed to add user turn - thread may be at turn limit or expired")
+            else:
+                logger.debug(f"[CONVERSATION_DEBUG] Successfully added user turn to thread {continuation_id}")
         else:
-            logger.debug(f"[CONVERSATION_DEBUG] Successfully added user turn to thread {continuation_id}")
+            logger.debug(f"[CONVERSATION_DEBUG] Skipping user turn recording (ephemeral) on thread {continuation_id}")
 
     # Create model context early to use for history building
     from utils.model_context import ModelContext

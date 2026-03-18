@@ -9,6 +9,7 @@ from .chat import ChatTool
 from .clink import CLinkTool
 from .codereview import CodeReviewTool
 from .consensus import ConsensusTool
+from .context import CtxForkTool, CtxListTool, CtxQueryTool, CtxStoreTool
 from .debug import DebugIssueTool
 from .docgen import DocgenTool
 from .imagegen import ImageGenTool
@@ -44,4 +45,8 @@ __all__ = [
     "VersionTool",
     "ImageGenTool",
     "PerceiveTool",
+    "CtxStoreTool",
+    "CtxQueryTool",
+    "CtxForkTool",
+    "CtxListTool",
 ]

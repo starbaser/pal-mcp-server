@@ -739,6 +739,83 @@ async def handle_list_tools() -> list[Tool]:
     return tools
 
 
+def _resolve_store_continuation(tool_name: str, arguments: dict) -> str | None:
+    """If continuation_id is a registered store_id, handle fork/continue.
+
+    Returns the path-based store_id for response injection, or None if
+    continuation_id is a regular UUID (not in registry).
+    """
+    from utils.context_registry import (
+        get_next_tool_index,
+        get_store_entry,
+        increment_follow_up_count,
+        register_store,
+    )
+    from utils.conversation_memory import create_thread
+
+    continuation_id = arguments.get("continuation_id", "")
+    if not continuation_id:
+        return None
+
+    entry = get_store_entry(continuation_id)
+    if not entry:
+        return None
+
+    # CONTINUE: same tool on same tool-fork entry
+    if entry["entry_type"] == "tool" and entry.get("tool_name") == tool_name:
+        thread_id = entry["thread_id"]
+        increment_follow_up_count(continuation_id)
+        arguments["continuation_id"] = thread_id
+        logger.info(f"Store continuation: CONTINUE {continuation_id} (follow_up incremented)")
+        return continuation_id
+
+    # FORK: any other case (store, query, layer, or different tool)
+    parent_thread_id = entry["thread_id"]
+    parent_directory = entry.get("directory", "")
+    index = get_next_tool_index(continuation_id, tool_name)
+    new_path = f"{continuation_id}.{tool_name}{index}"
+
+    new_thread_id = create_thread(
+        parent_thread_id=parent_thread_id,
+        tool_name=tool_name,
+        initial_request={"store_fork": continuation_id},
+        model_name="",
+    )
+
+    register_store(
+        store_id=new_path,
+        thread_id=new_thread_id,
+        directory=parent_directory,
+        label=None,
+        model="",
+        entry_type="tool",
+        parent_store_id=continuation_id,
+        tool_name=tool_name,
+    )
+
+    arguments["continuation_id"] = new_thread_id
+    logger.info(f"Store continuation: FORK {continuation_id} → {new_path}")
+    return new_path
+
+
+def _inject_store_path_continuation(result: list, store_path: str) -> list:
+    """Replace UUID continuation_id with store path in tool response."""
+    import json
+
+    processed = []
+    for item in result:
+        try:
+            data = json.loads(item.text)
+            if "continuation_offer" in data and data["continuation_offer"]:
+                data["continuation_offer"]["continuation_id"] = store_path
+                processed.append(TextContent(type="text", text=json.dumps(data)))
+            else:
+                processed.append(item)
+        except (json.JSONDecodeError, AttributeError):
+            processed.append(item)
+    return processed
+
+
 def _save_response_content(tool_name: str, result: list, continuation_id: str | None = None) -> None:
     """Persist the AI response content as a markdown file for easy viewing."""
     import json
@@ -841,7 +918,11 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
         pass
 
     # Handle thread context reconstruction if continuation_id is present
+    _store_path = None
     if "continuation_id" in arguments and arguments["continuation_id"]:
+        # Resolve store_id → thread UUID with fork/continue semantics
+        _store_path = _resolve_store_continuation(name, arguments)
+
         # Check if tool declares ephemeral continuation (skips user turn recording)
         _tool = TOOLS.get(name)
         if _tool and getattr(_tool, "ephemeral", False):
@@ -891,10 +972,12 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
         # Consensus tool handles its own model configuration validation
         # No special handling needed at server level
 
-        # Skip model resolution for tools that don't require models (e.g., planner)
+        # Skip model resolution for tools that don't require models (e.g., ctxinit, ctxlist)
         if not tool.requires_model():
             logger.debug(f"Tool {name} doesn't require model resolution - skipping model validation")
             result = await tool.execute(arguments)
+            if _store_path and result:
+                result = _inject_store_path_continuation(result, _store_path)
             if config.FORMATTED_OUTPUT:
                 result = format_tool_result(result, name)
             return result
@@ -954,6 +1037,10 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
         # Execute tool with pre-resolved model context
         result = await tool.execute(arguments)
         logger.info(f"Tool '{name}' execution completed")
+
+        # Replace UUID with store path in response if this was a store continuation
+        if _store_path and result:
+            result = _inject_store_path_continuation(result, _store_path)
 
         _save_response_content(name, result, arguments.get("continuation_id"))
 

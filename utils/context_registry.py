@@ -66,6 +66,14 @@ def get_next_query_index(parent_store_id: str) -> int:
     return count
 
 
+def get_next_tool_index(parent_store_id: str, tool_name: str) -> int:
+    """Count existing .<tool_name>\\d+ children to determine the next tool fork index."""
+    registry = load_registry()
+    pattern = re.compile(rf"^{re.escape(parent_store_id)}\.{re.escape(tool_name)}(\d+)$")
+    existing = [int(m.group(1)) for key in registry if (m := pattern.match(key))]
+    return max(existing, default=-1) + 1
+
+
 def register_store(
     store_id: str,
     thread_id: str,
@@ -74,6 +82,7 @@ def register_store(
     model: str = "",
     entry_type: str = "store",
     parent_store_id: str | None = None,
+    tool_name: str | None = None,
 ) -> None:
     """Write a new entry keyed by store_id path."""
     registry = load_registry()
@@ -86,6 +95,7 @@ def register_store(
         "model": model,
         "entry_type": entry_type,
         "parent_store_id": parent_store_id,
+        "tool_name": tool_name,
         "layer_count": 0,
         "follow_up_count": 0,
     }

@@ -573,5 +573,320 @@ class TestContextForkChain:
         assert chain[2].thread_id == id_c
 
 
+class TestToolForkRegistry:
+    """Registry-level tests for tool fork path creation and indexing."""
+
+    def test_get_next_tool_index_empty(self, tmp_path):
+        from utils import context_registry
+
+        context_registry._REGISTRY_PATH = str(tmp_path / "context" / "stores.json")
+
+        context_registry.register_store(store_id="proj", thread_id="t1", directory="/tmp")
+        result = context_registry.get_next_tool_index("proj", "thinkdeep")
+
+        assert result == 0
+
+    def test_get_next_tool_index_with_children(self, tmp_path):
+        from utils import context_registry
+
+        context_registry._REGISTRY_PATH = str(tmp_path / "context" / "stores.json")
+
+        context_registry.register_store(store_id="proj", thread_id="t1", directory="/tmp")
+        context_registry.register_store(
+            store_id="proj.thinkdeep0",
+            thread_id="t2",
+            directory="/tmp",
+            entry_type="tool",
+            parent_store_id="proj",
+            tool_name="thinkdeep",
+        )
+        context_registry.register_store(
+            store_id="proj.thinkdeep1",
+            thread_id="t3",
+            directory="/tmp",
+            entry_type="tool",
+            parent_store_id="proj",
+            tool_name="thinkdeep",
+        )
+        result = context_registry.get_next_tool_index("proj", "thinkdeep")
+
+        assert result == 2
+
+    def test_get_next_tool_index_different_tools_independent(self, tmp_path):
+        from utils import context_registry
+
+        context_registry._REGISTRY_PATH = str(tmp_path / "context" / "stores.json")
+
+        context_registry.register_store(store_id="proj", thread_id="t1", directory="/tmp")
+        context_registry.register_store(
+            store_id="proj.thinkdeep0",
+            thread_id="t2",
+            directory="/tmp",
+            entry_type="tool",
+            parent_store_id="proj",
+            tool_name="thinkdeep",
+        )
+        # analyze index should be independent of thinkdeep
+        result = context_registry.get_next_tool_index("proj", "analyze")
+
+        assert result == 0
+
+    def test_register_store_with_tool_name(self, tmp_path):
+        from utils import context_registry
+
+        context_registry._REGISTRY_PATH = str(tmp_path / "context" / "stores.json")
+
+        context_registry.register_store(
+            store_id="proj.thinkdeep0",
+            thread_id="t2",
+            directory="/tmp",
+            entry_type="tool",
+            parent_store_id="proj",
+            tool_name="thinkdeep",
+        )
+        entry = context_registry.get_store_entry("proj.thinkdeep0")
+
+        assert entry is not None
+        assert entry["entry_type"] == "tool"
+        assert entry["tool_name"] == "thinkdeep"
+        assert entry["parent_store_id"] == "proj"
+
+
+class TestResolveStoreContinuation:
+    """Tests for _resolve_store_continuation in server.py."""
+
+    def test_returns_none_for_uuid(self, tmp_path):
+        from server import _resolve_store_continuation
+        from utils import context_registry
+
+        context_registry._REGISTRY_PATH = str(tmp_path / "context" / "stores.json")
+
+        args = {"continuation_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"}
+        result = _resolve_store_continuation("thinkdeep", args)
+
+        assert result is None
+        # continuation_id unchanged
+        assert args["continuation_id"] == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+    def test_fork_from_store(self, tmp_path):
+        from server import _resolve_store_continuation
+        from utils import context_registry
+        from utils.conversation_memory import create_thread
+
+        context_registry._REGISTRY_PATH = str(tmp_path / "context" / "stores.json")
+
+        parent_uuid = create_thread("ctxstore", {"prompt": "init"})
+        context_registry.register_store(
+            store_id="myproject", thread_id=parent_uuid, directory="/tmp/proj"
+        )
+
+        args = {"continuation_id": "myproject"}
+        result = _resolve_store_continuation("thinkdeep", args)
+
+        assert result == "myproject.thinkdeep0"
+        # continuation_id should now be the new thread UUID, not "myproject"
+        assert args["continuation_id"] != "myproject"
+        assert args["continuation_id"] != parent_uuid
+
+        # Verify registry entry was created
+        entry = context_registry.get_store_entry("myproject.thinkdeep0")
+        assert entry is not None
+        assert entry["entry_type"] == "tool"
+        assert entry["tool_name"] == "thinkdeep"
+        assert entry["parent_store_id"] == "myproject"
+
+    def test_continue_same_tool(self, tmp_path):
+        from server import _resolve_store_continuation
+        from utils import context_registry
+        from utils.conversation_memory import create_thread
+
+        context_registry._REGISTRY_PATH = str(tmp_path / "context" / "stores.json")
+
+        parent_uuid = create_thread("ctxstore", {"prompt": "init"})
+        fork_uuid = create_thread("thinkdeep", {"store_fork": "myproject"}, parent_thread_id=parent_uuid)
+
+        context_registry.register_store(
+            store_id="myproject", thread_id=parent_uuid, directory="/tmp/proj"
+        )
+        context_registry.register_store(
+            store_id="myproject.thinkdeep0",
+            thread_id=fork_uuid,
+            directory="/tmp/proj",
+            entry_type="tool",
+            parent_store_id="myproject",
+            tool_name="thinkdeep",
+        )
+
+        args = {"continuation_id": "myproject.thinkdeep0"}
+        result = _resolve_store_continuation("thinkdeep", args)
+
+        assert result == "myproject.thinkdeep0"
+        assert args["continuation_id"] == fork_uuid
+
+        # follow_up_count should have incremented
+        entry = context_registry.get_store_entry("myproject.thinkdeep0")
+        assert entry["follow_up_count"] == 1
+
+    def test_refork_different_tool(self, tmp_path):
+        from server import _resolve_store_continuation
+        from utils import context_registry
+        from utils.conversation_memory import create_thread
+
+        context_registry._REGISTRY_PATH = str(tmp_path / "context" / "stores.json")
+
+        parent_uuid = create_thread("ctxstore", {"prompt": "init"})
+        fork_uuid = create_thread("thinkdeep", {"store_fork": "myproject"}, parent_thread_id=parent_uuid)
+
+        context_registry.register_store(
+            store_id="myproject", thread_id=parent_uuid, directory="/tmp/proj"
+        )
+        context_registry.register_store(
+            store_id="myproject.thinkdeep0",
+            thread_id=fork_uuid,
+            directory="/tmp/proj",
+            entry_type="tool",
+            parent_store_id="myproject",
+            tool_name="thinkdeep",
+        )
+
+        args = {"continuation_id": "myproject.thinkdeep0"}
+        result = _resolve_store_continuation("analyze", args)
+
+        assert result == "myproject.thinkdeep0.analyze0"
+        # Should be a new UUID, not the thinkdeep fork's UUID
+        assert args["continuation_id"] != fork_uuid
+        assert args["continuation_id"] != parent_uuid
+
+        entry = context_registry.get_store_entry("myproject.thinkdeep0.analyze0")
+        assert entry is not None
+        assert entry["entry_type"] == "tool"
+        assert entry["tool_name"] == "analyze"
+        assert entry["parent_store_id"] == "myproject.thinkdeep0"
+
+    def test_fork_from_query(self, tmp_path):
+        from server import _resolve_store_continuation
+        from utils import context_registry
+        from utils.conversation_memory import create_thread
+
+        context_registry._REGISTRY_PATH = str(tmp_path / "context" / "stores.json")
+
+        store_uuid = create_thread("ctxstore", {"prompt": "init"})
+        query_uuid = create_thread("ctxquery", {"prompt": "ask"}, parent_thread_id=store_uuid)
+
+        context_registry.register_store(
+            store_id="myproject", thread_id=store_uuid, directory="/tmp/proj"
+        )
+        context_registry.register_store(
+            store_id="myproject.Q0",
+            thread_id=query_uuid,
+            directory="/tmp/proj",
+            entry_type="query",
+            parent_store_id="myproject",
+        )
+
+        args = {"continuation_id": "myproject.Q0"}
+        result = _resolve_store_continuation("thinkdeep", args)
+
+        assert result == "myproject.Q0.thinkdeep0"
+
+    def test_fork_from_layer(self, tmp_path):
+        from server import _resolve_store_continuation
+        from utils import context_registry
+        from utils.conversation_memory import create_thread
+
+        context_registry._REGISTRY_PATH = str(tmp_path / "context" / "stores.json")
+
+        store_uuid = create_thread("ctxstore", {"prompt": "init"})
+
+        context_registry.register_store(
+            store_id="myproject", thread_id=store_uuid, directory="/tmp/proj"
+        )
+        context_registry.register_store(
+            store_id="myproject.L1",
+            thread_id=store_uuid,
+            directory="/tmp/proj",
+            entry_type="store",
+            parent_store_id="myproject",
+        )
+
+        args = {"continuation_id": "myproject.L1"}
+        result = _resolve_store_continuation("chat", args)
+
+        assert result == "myproject.L1.chat0"
+
+    def test_fork_index_increments(self, tmp_path):
+        from server import _resolve_store_continuation
+        from utils import context_registry
+        from utils.conversation_memory import create_thread
+
+        context_registry._REGISTRY_PATH = str(tmp_path / "context" / "stores.json")
+
+        parent_uuid = create_thread("ctxstore", {"prompt": "init"})
+        context_registry.register_store(
+            store_id="myproject", thread_id=parent_uuid, directory="/tmp/proj"
+        )
+
+        # First fork
+        args1 = {"continuation_id": "myproject"}
+        result1 = _resolve_store_continuation("thinkdeep", args1)
+        assert result1 == "myproject.thinkdeep0"
+
+        # Second fork (new invocation from same store)
+        args2 = {"continuation_id": "myproject"}
+        result2 = _resolve_store_continuation("thinkdeep", args2)
+        assert result2 == "myproject.thinkdeep1"
+
+
+class TestInjectStorePathContinuation:
+    """Tests for _inject_store_path_continuation response post-processing."""
+
+    def test_uuid_replaced_in_response(self):
+        from mcp.types import TextContent
+
+        from server import _inject_store_path_continuation
+
+        response_json = json.dumps({
+            "status": "continuation_available",
+            "content": "Analysis complete.",
+            "continuation_offer": {
+                "continuation_id": "some-uuid-value",
+                "note": "Conversation active.",
+                "context_window": 100000,
+                "context_used": 5000,
+                "context_remaining": 95000,
+            },
+        })
+        items = [TextContent(type="text", text=response_json)]
+
+        result = _inject_store_path_continuation(items, "myproject.thinkdeep0")
+
+        parsed = json.loads(result[0].text)
+        assert parsed["continuation_offer"]["continuation_id"] == "myproject.thinkdeep0"
+        assert parsed["content"] == "Analysis complete."
+
+    def test_non_json_passthrough(self):
+        from mcp.types import TextContent
+
+        from server import _inject_store_path_continuation
+
+        items = [TextContent(type="text", text="not json")]
+        result = _inject_store_path_continuation(items, "myproject.thinkdeep0")
+
+        assert result[0].text == "not json"
+
+    def test_no_continuation_offer_passthrough(self):
+        from mcp.types import TextContent
+
+        from server import _inject_store_path_continuation
+
+        response_json = json.dumps({"status": "success", "content": "Done."})
+        items = [TextContent(type="text", text=response_json)]
+
+        result = _inject_store_path_continuation(items, "myproject.thinkdeep0")
+
+        parsed = json.loads(result[0].text)
+        assert "continuation_offer" not in parsed or parsed.get("continuation_offer") is None
+
+
 if __name__ == "__main__":
     pytest.main([__file__])

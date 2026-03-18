@@ -739,6 +739,38 @@ async def handle_list_tools() -> list[Tool]:
     return tools
 
 
+def _build_store_listing() -> str:
+    """Build a compact context store snapshot for MCP handshake instructions."""
+    import os
+
+    from utils.context_registry import list_stores
+
+    cwd = os.getcwd()
+    stores = list_stores(directory=cwd)
+
+    if not stores:
+        return ""
+
+    lines = [f"\n\nctxStores: Context stores for {cwd}:"]
+    for entry in stores:
+        sid = entry.get("store_id", "?")
+        etype = entry.get("entry_type", "?")
+        layers = entry.get("layer_count", 0)
+        follow_ups = entry.get("follow_up_count", 0)
+        tool_name_entry = entry.get("tool_name")
+
+        line = f"- {sid} [{etype}]"
+        if etype == "store" and layers > 0:
+            line += f" ({layers} layer{'s' if layers != 1 else ''})"
+        if etype == "query" and follow_ups > 0:
+            line += f" ({follow_ups} follow-up{'s' if follow_ups != 1 else ''})"
+        if etype == "tool" and tool_name_entry:
+            line += f" (tool: {tool_name_entry})"
+        lines.append(line)
+
+    return "\n".join(lines)
+
+
 def _resolve_store_continuation(tool_name: str, arguments: dict) -> str | None:
     """If continuation_id is a registered store_id, handle fork/continue.
 
@@ -1672,6 +1704,9 @@ async def main():
             "When the user names a specific model (e.g. 'use chat with gpt5'), send that exact model in the tool call. "
             f"When no model is mentioned, default to '{DEFAULT_MODEL}'."
         )
+
+    # Append context store snapshot for the current working directory
+    handshake_instructions += _build_store_listing()
 
     # Run the server using stdio transport (standard input/output)
     # This allows the server to be launched by MCP clients as a subprocess

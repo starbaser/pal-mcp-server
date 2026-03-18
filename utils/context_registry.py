@@ -1,11 +1,12 @@
 """
-Registry for tracking context stores organized by directory.
+Registry for tracking context stores, keyed by human-readable store_id path.
 
 Persists to {PAL_STORAGE_DIR}/context/stores.json.
 """
 
 import json
 import os
+import re
 import tempfile
 from datetime import datetime, timezone
 
@@ -36,51 +37,123 @@ def save_registry(data: dict) -> None:
     os.rename(tmp_path, _REGISTRY_PATH)
 
 
+def get_store_entry(store_id: str) -> dict | None:
+    """Look up a registry entry by its store_id path."""
+    registry = load_registry()
+    return registry.get(store_id)
+
+
+def resolve_thread_id(store_id: str) -> str | None:
+    """Return the internal thread UUID for a given store_id path."""
+    entry = get_store_entry(store_id)
+    if entry is None:
+        return None
+    return entry.get("thread_id")
+
+
+def get_next_query_index(parent_store_id: str) -> int:
+    """Count direct Q-children of parent_store_id to determine the next query index."""
+    registry = load_registry()
+    pattern = re.compile(r"^" + re.escape(parent_store_id) + r"\.Q\d+$")
+    count = 0
+    for sid, entry in registry.items():
+        if (
+            entry.get("parent_store_id") == parent_store_id
+            and entry.get("entry_type") == "query"
+            and pattern.match(sid)
+        ):
+            count += 1
+    return count
+
+
 def register_store(
-    directory: str,
     store_id: str,
-    label: str | None,
-    model: str,
+    thread_id: str,
+    directory: str,
+    label: str | None = None,
+    model: str = "",
+    entry_type: str = "store",
     parent_store_id: str | None = None,
 ) -> None:
-    """Add a new store entry under the given directory."""
+    """Write a new entry keyed by store_id path."""
     registry = load_registry()
-    entry = {
+    registry[store_id] = {
         "store_id": store_id,
+        "thread_id": thread_id,
+        "directory": directory,
         "label": label,
         "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "model": model,
-        "turn_count": 0,
+        "entry_type": entry_type,
         "parent_store_id": parent_store_id,
+        "layer_count": 0,
+        "follow_up_count": 0,
     }
-    registry.setdefault(directory, []).append(entry)
     save_registry(registry)
 
 
-def update_store_turn_count(store_id: str) -> None:
-    """Increment turn_count for the store matching store_id, wherever it lives."""
+def increment_layer_count(store_id: str) -> str:
+    """Increment layer_count on entry, register a new layered path, return it."""
     registry = load_registry()
-    for entries in registry.values():
-        for entry in entries:
-            if entry.get("store_id") == store_id:
-                entry["turn_count"] = entry.get("turn_count", 0) + 1
-                save_registry(registry)
-                return
+    entry = registry.get(store_id)
+    if entry is None:
+        raise KeyError(f"store_id not found: {store_id}")
+
+    entry["layer_count"] = entry.get("layer_count", 0) + 1
+    registry[store_id] = entry
+    save_registry(registry)
+
+    # Derive next layer number from the path suffix, not the entry's layer_count
+    match = re.search(r"\.L(\d+)$", store_id)
+    if match:
+        base = store_id[: match.start()]
+        current_layer = int(match.group(1))
+    else:
+        base = store_id
+        current_layer = 0
+    new_path = f"{base}.L{current_layer + 1}"
+
+    register_store(
+        store_id=new_path,
+        thread_id=entry["thread_id"],
+        directory=entry["directory"],
+        label=entry.get("label"),
+        model=entry.get("model", ""),
+        entry_type="store",
+        parent_store_id=store_id,
+    )
+    return new_path
+
+
+def increment_follow_up_count(store_id: str) -> str:
+    """Increment follow_up_count on entry, register a new follow-up path, return it."""
+    registry = load_registry()
+    entry = registry.get(store_id)
+    if entry is None:
+        raise KeyError(f"store_id not found: {store_id}")
+
+    entry["follow_up_count"] = entry.get("follow_up_count", 0) + 1
+    new_count = entry["follow_up_count"]
+    registry[store_id] = entry
+    save_registry(registry)
+
+    new_path = f"{store_id}.{new_count}"
+
+    register_store(
+        store_id=new_path,
+        thread_id=entry["thread_id"],
+        directory=entry["directory"],
+        label=entry.get("label"),
+        model=entry.get("model", ""),
+        entry_type="query",
+        parent_store_id=store_id,
+    )
+    return new_path
 
 
 def list_stores(directory: str | None = None) -> list[dict]:
-    """Return store entries for a specific directory, or all entries if directory is None."""
+    """Return all entries, optionally filtered by directory."""
     registry = load_registry()
     if directory is not None:
-        return list(registry.get(directory, []))
-    return [entry for entries in registry.values() for entry in entries]
-
-
-def get_store_directory(store_id: str) -> str | None:
-    """Return the directory a store_id belongs to, or None if not found."""
-    registry = load_registry()
-    for directory, entries in registry.items():
-        for entry in entries:
-            if entry.get("store_id") == store_id:
-                return directory
-    return None
+        return [e for e in registry.values() if e.get("directory") == directory]
+    return list(registry.values())

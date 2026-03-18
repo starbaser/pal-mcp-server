@@ -81,7 +81,7 @@ class BaseTool(ABC):
     4. Register the tool in server.py's TOOLS dictionary
     """
 
-    ephemeral_continuation: bool = False
+    ephemeral: bool = False
 
     # Class-level cache for OpenRouter registry to avoid multiple loads
     _openrouter_registry_cache = None

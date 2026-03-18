@@ -1,15 +1,79 @@
 """
-Tests for context silo tools — ctxstore, ctxquery, ctxfork, ctxlist, and context_registry.
+Tests for context silo tools — ctxinit, ctxstore, ctxquery, ctxlist, and context_registry.
 """
 
 import json
 from unittest.mock import MagicMock, patch
 
 import pytest
-from pydantic import ValidationError
 
-from tools.context import CtxForkTool, CtxListTool, CtxQueryTool, CtxStoreRequest, CtxStoreTool
+from tools.context import CtxInitTool, CtxListTool, CtxQueryTool, CtxStoreRequest, CtxStoreTool
 from tools.models import ToolModelCategory
+
+
+class TestCtxInitTool:
+    def setup_method(self):
+        self.tool = CtxInitTool()
+
+    def test_tool_metadata(self):
+        assert self.tool.get_name() == "ctxinit"
+        assert "create" in self.tool.get_description().lower()
+        assert self.tool.requires_model() is False
+        assert self.tool.get_model_category() is ToolModelCategory.FAST_RESPONSE
+
+    def test_schema_structure(self):
+        schema = self.tool.get_input_schema()
+        props = schema["properties"]
+        required = schema["required"]
+
+        assert "store_name" in props
+        assert "directory" in props
+        assert "store_name" in required
+        assert "directory" in required
+
+    def test_annotations_not_read_only(self):
+        annotations = self.tool.get_annotations()
+        assert annotations["readOnlyHint"] is False
+
+    async def test_create_store(self):
+        new_uuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+
+        with patch("utils.conversation_memory.create_thread", return_value=new_uuid):
+            with patch("utils.context_registry.get_store_entry", return_value=None):
+                with patch("utils.context_registry.register_store") as mock_register:
+                    result = await self.tool.execute({"store_name": "myproject", "directory": "/tmp/proj"})
+
+        assert len(result) == 1
+        payload = json.loads(result[0].text)
+        assert payload["status"] == "success"
+        assert "myproject" in payload["content"]
+        mock_register.assert_called_once_with(
+            store_id="myproject",
+            thread_id=new_uuid,
+            directory="/tmp/proj",
+            entry_type="store",
+        )
+
+    async def test_collision_same_directory(self):
+        with patch("utils.context_registry.get_store_entry", return_value={"directory": "/tmp/proj"}):
+            result = await self.tool.execute({"store_name": "myproject", "directory": "/tmp/proj"})
+
+        assert len(result) == 1
+        payload = json.loads(result[0].text)
+        assert payload["status"] == "error"
+        assert "already exists" in payload["content"].lower()
+
+    async def test_collision_different_directory_allowed(self):
+        new_uuid = "ffffffff-0000-1111-2222-333333333333"
+
+        with patch("utils.context_registry.get_store_entry", return_value={"directory": "/other/dir"}):
+            with patch("utils.conversation_memory.create_thread", return_value=new_uuid):
+                with patch("utils.context_registry.register_store"):
+                    result = await self.tool.execute({"store_name": "myproject", "directory": "/tmp/proj"})
+
+        assert len(result) == 1
+        payload = json.loads(result[0].text)
+        assert payload["status"] == "success"
 
 
 class TestCtxStoreTool:
@@ -18,53 +82,44 @@ class TestCtxStoreTool:
 
     def test_tool_metadata(self):
         assert self.tool.get_name() == "ctxstore"
-        assert "store" in self.tool.get_description().lower()
-        assert self.tool.get_system_prompt()
-        assert self.tool.get_default_temperature() > 0
+        assert "layer" in self.tool.get_description().lower()
         assert self.tool.get_model_category() is ToolModelCategory.EXTENDED_REASONING
 
     def test_schema_structure(self):
         schema = self.tool.get_input_schema()
         props = schema["properties"]
+        required = schema["required"]
 
-        assert "prompt" in props
-        assert "store_id" in props
-        assert "directory" in props
+        assert "prompt" in required
+        assert "store_id" in required
+        assert "directory" not in props
         assert "context_label" in props
-        assert "absolute_file_paths" in props
-        assert "media" in props
-        assert "model" in props
-        assert "temperature" in props
 
-        assert "thinking_mode" not in props
-        assert "prompt" in schema["required"]
+    def test_ephemeral_false(self):
+        assert self.tool.ephemeral is False
 
-    def test_request_model_validation(self):
-        req = CtxStoreRequest(prompt="store this")
-        assert req.prompt == "store this"
+    async def test_store_requires_store_id(self):
+        result = await self.tool.execute({"prompt": "test"})
 
-        with pytest.raises(ValidationError):
-            CtxStoreRequest()
+        assert len(result) == 1
+        payload = json.loads(result[0].text)
+        assert payload["status"] == "error"
+        assert "ctxinit" in payload["content"].lower()
+
+    async def test_store_id_not_found(self):
+        with patch("utils.context_registry.resolve_thread_id", return_value=None):
+            result = await self.tool.execute({"store_id": "nonexistent", "prompt": "test"})
+
+        assert len(result) == 1
+        payload = json.loads(result[0].text)
+        assert payload["status"] == "error"
+        assert "not found" in payload["content"].lower()
 
     def test_default_thinking_mode(self):
         assert self.tool.get_default_thinking_mode() == "max"
 
-    def test_ephemeral_continuation_false(self):
-        assert self.tool.ephemeral_continuation is False
-
-    def test_annotations(self):
-        annotations = self.tool.get_annotations()
-        assert annotations["readOnlyHint"] is False
-
-    async def test_first_store_requires_directory(self):
-        result = await self.tool.execute({"prompt": "test content"})
-        assert len(result) == 1
-        payload = json.loads(result[0].text)
-        assert payload["status"] == "error"
-        assert "directory" in payload["content"].lower()
-
     async def test_prepare_prompt_includes_header(self):
-        request = CtxStoreRequest(prompt="ignored", store_id="abc-123")
+        request = CtxStoreRequest(prompt="ignored", store_id="myproject")
 
         with patch.object(self.tool, "handle_prompt_file_with_fallback", return_value="test content"):
             with patch.object(self.tool, "get_request_files", return_value=[]):
@@ -73,23 +128,6 @@ class TestCtxStoreTool:
         assert "CONTEXT LAYER SUBMISSION" in prompt
         assert "test content" in prompt
 
-    def test_format_response_appends_agent_turn(self):
-        request = CtxStoreRequest(prompt="x", store_id="abc")
-        result = self.tool.format_response("model answer", request)
-        assert "model answer" in result
-        assert "AGENT'S TURN:" in result
-
-    def test_record_assistant_turn_injects_label(self):
-        request = CtxStoreRequest(prompt="x", store_id="abc-123", context_label="my-label")
-
-        with patch("utils.conversation_memory.add_turn") as mock_add_turn:
-            self.tool._record_assistant_turn("abc-123", "response text", request, model_info=None)
-
-        mock_add_turn.assert_called_once()
-        call_kwargs = mock_add_turn.call_args.kwargs
-        metadata = call_kwargs.get("model_metadata") or {}
-        assert metadata.get("context_label") == "my-label"
-
 
 class TestCtxQueryTool:
     def setup_method(self):
@@ -97,8 +135,7 @@ class TestCtxQueryTool:
 
     def test_tool_metadata(self):
         assert self.tool.get_name() == "ctxquery"
-        desc = self.tool.get_description().lower()
-        assert "ephemeral" in desc or "read-only" in desc
+        assert "query" in self.tool.get_description().lower()
 
     def test_schema_structure(self):
         schema = self.tool.get_input_schema()
@@ -111,57 +148,23 @@ class TestCtxQueryTool:
         assert "absolute_file_paths" not in props
         assert "context_label" not in props
 
-    def test_ephemeral_continuation_true(self):
-        assert self.tool.ephemeral_continuation is True
+    def test_ephemeral_true(self):
+        assert self.tool.ephemeral is True
 
     async def test_query_without_store_id_returns_error(self):
-        result = await self.tool.execute({"prompt": "what is stored?"})
+        result = await self.tool.execute({"prompt": "test"})
+
         assert len(result) == 1
         payload = json.loads(result[0].text)
         assert payload["status"] == "error"
-        assert "store_id" in payload["content"].lower()
 
-    def test_record_assistant_turn_is_noop(self):
-        with patch("utils.conversation_memory.add_turn") as mock_add_turn:
-            self.tool._record_assistant_turn("abc-123", "response", MagicMock(), model_info=None)
-        mock_add_turn.assert_not_called()
+    async def test_query_store_id_not_found(self):
+        with patch("utils.context_registry.resolve_thread_id", return_value=None):
+            result = await self.tool.execute({"store_id": "missing", "prompt": "test"})
 
-    def test_create_continuation_offer_preserves_store_id(self):
-        request = MagicMock()
-        request.continuation_id = "silo-xyz-789"
-
-        with patch.object(self.tool, "get_request_continuation_id", return_value="silo-xyz-789"):
-            with patch.object(self.tool, "_get_context_token_info", return_value=(100000, 1000)):
-                result = self.tool._create_continuation_offer(request)
-
-        assert result is not None
-        assert result["continuation_id"] == "silo-xyz-789"
-
-
-class TestCtxForkTool:
-    def setup_method(self):
-        self.tool = CtxForkTool()
-
-    def test_tool_metadata(self):
-        assert self.tool.get_name() == "ctxfork"
-        assert "fork" in self.tool.get_description().lower()
-
-    def test_schema_structure(self):
-        schema = self.tool.get_input_schema()
-        required = schema["required"]
-
-        assert "prompt" in required
-        assert "store_id" in required
-
-    def test_ephemeral_continuation_true(self):
-        assert self.tool.ephemeral_continuation is True
-
-    async def test_fork_without_store_id_returns_error(self):
-        result = await self.tool.execute({"prompt": "branch this"})
         assert len(result) == 1
         payload = json.loads(result[0].text)
         assert payload["status"] == "error"
-        assert "store_id" in payload["content"].lower()
 
 
 class TestCtxListTool:
@@ -194,8 +197,20 @@ class TestCtxListTool:
 
     async def test_execute_with_stores(self):
         stores = [
-            {"store_id": "abc-1", "label": "first", "model": "gpt-4", "turn_count": 3, "created_at": "2026-01-01"},
-            {"store_id": "abc-2", "label": None, "model": "gemini-pro", "turn_count": 1, "created_at": "2026-01-02"},
+            {
+                "store_id": "myproject",
+                "entry_type": "store",
+                "label": "first",
+                "layer_count": 2,
+                "follow_up_count": 0,
+            },
+            {
+                "store_id": "myproject.Q0",
+                "entry_type": "query",
+                "label": None,
+                "layer_count": 0,
+                "follow_up_count": 1,
+            },
         ]
 
         with patch("utils.context_registry.list_stores", return_value=stores):
@@ -204,114 +219,195 @@ class TestCtxListTool:
         assert len(result) == 1
         payload = json.loads(result[0].text)
         assert payload["status"] == "success"
-        assert "Found 2 store(s)" in payload["content"]
+        assert "Found 2 node(s)" in payload["content"]
         assert payload["metadata"]["store_count"] == 2
 
 
 class TestContextRegistry:
-    def test_register_store(self, tmp_path):
-        with patch("utils.context_registry._REGISTRY_PATH", str(tmp_path / "context" / "stores.json")):
-            from utils import context_registry
+    def test_register_and_get_store_entry(self, tmp_path):
+        reg_path = str(tmp_path / "context" / "stores.json")
 
-            context_registry._REGISTRY_PATH = str(tmp_path / "context" / "stores.json")
+        from utils import context_registry
 
-            context_registry.register_store("/proj/alpha", "store-001", "alpha label", "gemini-pro")
-            registry = context_registry.load_registry()
+        context_registry._REGISTRY_PATH = reg_path
 
-        assert "/proj/alpha" in registry
-        entries = registry["/proj/alpha"]
-        assert len(entries) == 1
-        assert entries[0]["store_id"] == "store-001"
-        assert entries[0]["label"] == "alpha label"
+        context_registry.register_store(
+            store_id="myproject",
+            thread_id="uuid-1234",
+            directory="/tmp/proj",
+            entry_type="store",
+        )
+        entry = context_registry.get_store_entry("myproject")
+
+        assert entry is not None
+        assert entry["store_id"] == "myproject"
+        assert entry["thread_id"] == "uuid-1234"
+        assert entry["directory"] == "/tmp/proj"
+        assert entry["entry_type"] == "store"
+        assert entry["layer_count"] == 0
+        assert entry["follow_up_count"] == 0
+
+    def test_resolve_thread_id(self, tmp_path):
+        reg_path = str(tmp_path / "context" / "stores.json")
+
+        from utils import context_registry
+
+        context_registry._REGISTRY_PATH = reg_path
+
+        context_registry.register_store(
+            store_id="proj",
+            thread_id="known-uuid",
+            directory="/tmp/proj",
+        )
+        result = context_registry.resolve_thread_id("proj")
+
+        assert result == "known-uuid"
+
+    def test_resolve_thread_id_missing(self, tmp_path):
+        reg_path = str(tmp_path / "context" / "stores.json")
+
+        from utils import context_registry
+
+        context_registry._REGISTRY_PATH = reg_path
+
+        result = context_registry.resolve_thread_id("does-not-exist")
+
+        assert result is None
+
+    def test_get_next_query_index_empty(self, tmp_path):
+        reg_path = str(tmp_path / "context" / "stores.json")
+
+        from utils import context_registry
+
+        context_registry._REGISTRY_PATH = reg_path
+
+        context_registry.register_store(store_id="proj", thread_id="t1", directory="/tmp")
+        result = context_registry.get_next_query_index("proj")
+
+        assert result == 0
+
+    def test_get_next_query_index_with_children(self, tmp_path):
+        reg_path = str(tmp_path / "context" / "stores.json")
+
+        from utils import context_registry
+
+        context_registry._REGISTRY_PATH = reg_path
+
+        context_registry.register_store(store_id="proj.L2", thread_id="t1", directory="/tmp")
+        context_registry.register_store(
+            store_id="proj.L2.Q0",
+            thread_id="t2",
+            directory="/tmp",
+            entry_type="query",
+            parent_store_id="proj.L2",
+        )
+        context_registry.register_store(
+            store_id="proj.L2.Q1",
+            thread_id="t3",
+            directory="/tmp",
+            entry_type="query",
+            parent_store_id="proj.L2",
+        )
+        result = context_registry.get_next_query_index("proj.L2")
+
+        assert result == 2
+
+    def test_increment_layer_count(self, tmp_path):
+        reg_path = str(tmp_path / "context" / "stores.json")
+
+        from utils import context_registry
+
+        context_registry._REGISTRY_PATH = reg_path
+
+        context_registry.register_store(store_id="myproject", thread_id="uuid-abc", directory="/tmp")
+        new_path = context_registry.increment_layer_count("myproject")
+
+        assert new_path == "myproject.L1"
+        new_entry = context_registry.get_store_entry("myproject.L1")
+        assert new_entry is not None
+        assert new_entry["thread_id"] == "uuid-abc"
+
+    def test_increment_layer_count_stacked(self, tmp_path):
+        """Incrementing a .L1 entry produces .L2 — layer number derived from path suffix."""
+        reg_path = str(tmp_path / "context" / "stores.json")
+
+        from utils import context_registry
+
+        context_registry._REGISTRY_PATH = reg_path
+
+        context_registry.register_store(store_id="myproject.L1", thread_id="uuid-def", directory="/tmp")
+        new_path = context_registry.increment_layer_count("myproject.L1")
+
+        assert new_path == "myproject.L2"
+        new_entry = context_registry.get_store_entry("myproject.L2")
+        assert new_entry is not None
+        assert new_entry["thread_id"] == "uuid-def"
+
+    def test_increment_follow_up_count(self, tmp_path):
+        reg_path = str(tmp_path / "context" / "stores.json")
+
+        from utils import context_registry
+
+        context_registry._REGISTRY_PATH = reg_path
+
+        context_registry.register_store(
+            store_id="proj.L2.Q0",
+            thread_id="uuid-q",
+            directory="/tmp",
+            entry_type="query",
+        )
+        new_path = context_registry.increment_follow_up_count("proj.L2.Q0")
+
+        assert new_path == "proj.L2.Q0.1"
+        new_entry = context_registry.get_store_entry("proj.L2.Q0.1")
+        assert new_entry is not None
+        assert new_entry["thread_id"] == "uuid-q"
+        assert new_entry["entry_type"] == "query"
 
     def test_list_stores_by_directory(self, tmp_path):
         reg_path = str(tmp_path / "context" / "stores.json")
 
-        with patch("utils.context_registry._REGISTRY_PATH", reg_path):
-            from utils import context_registry
+        from utils import context_registry
 
-            context_registry._REGISTRY_PATH = reg_path
+        context_registry._REGISTRY_PATH = reg_path
 
-            context_registry.register_store("/proj/alpha", "store-a1", None, "gpt-4")
-            context_registry.register_store("/proj/beta", "store-b1", None, "gpt-4")
-            context_registry.register_store("/proj/alpha", "store-a2", None, "gpt-4")
+        context_registry.register_store(store_id="alpha", thread_id="t1", directory="/proj/alpha")
+        context_registry.register_store(store_id="beta", thread_id="t2", directory="/proj/beta")
+        context_registry.register_store(store_id="alpha2", thread_id="t3", directory="/proj/alpha")
 
-            alpha_stores = context_registry.list_stores("/proj/alpha")
-            beta_stores = context_registry.list_stores("/proj/beta")
+        alpha = context_registry.list_stores("/proj/alpha")
+        beta = context_registry.list_stores("/proj/beta")
 
-        assert len(alpha_stores) == 2
-        assert len(beta_stores) == 1
-        assert alpha_stores[0]["store_id"] == "store-a1"
-        assert beta_stores[0]["store_id"] == "store-b1"
+        assert len(alpha) == 2
+        assert len(beta) == 1
+        alpha_ids = {e["store_id"] for e in alpha}
+        assert alpha_ids == {"alpha", "alpha2"}
 
     def test_list_stores_all(self, tmp_path):
         reg_path = str(tmp_path / "context" / "stores.json")
 
-        with patch("utils.context_registry._REGISTRY_PATH", reg_path):
-            from utils import context_registry
+        from utils import context_registry
 
-            context_registry._REGISTRY_PATH = reg_path
+        context_registry._REGISTRY_PATH = reg_path
 
-            context_registry.register_store("/proj/alpha", "store-a1", None, "gpt-4")
-            context_registry.register_store("/proj/beta", "store-b1", None, "gpt-4")
+        context_registry.register_store(store_id="one", thread_id="t1", directory="/proj/a")
+        context_registry.register_store(store_id="two", thread_id="t2", directory="/proj/b")
 
-            all_stores = context_registry.list_stores(None)
+        all_stores = context_registry.list_stores(None)
 
         assert len(all_stores) == 2
-        ids = {s["store_id"] for s in all_stores}
-        assert ids == {"store-a1", "store-b1"}
-
-    def test_update_turn_count(self, tmp_path):
-        reg_path = str(tmp_path / "context" / "stores.json")
-
-        with patch("utils.context_registry._REGISTRY_PATH", reg_path):
-            from utils import context_registry
-
-            context_registry._REGISTRY_PATH = reg_path
-
-            context_registry.register_store("/proj/alpha", "store-tc", None, "gpt-4")
-            context_registry.update_store_turn_count("store-tc")
-            context_registry.update_store_turn_count("store-tc")
-
-            registry = context_registry.load_registry()
-
-        entry = registry["/proj/alpha"][0]
-        assert entry["turn_count"] == 2
-
-    def test_get_store_directory(self, tmp_path):
-        reg_path = str(tmp_path / "context" / "stores.json")
-
-        with patch("utils.context_registry._REGISTRY_PATH", reg_path):
-            from utils import context_registry
-
-            context_registry._REGISTRY_PATH = reg_path
-
-            context_registry.register_store("/proj/gamma", "store-dir", None, "gpt-4")
-            directory = context_registry.get_store_directory("store-dir")
-            missing = context_registry.get_store_directory("nonexistent")
-
-        assert directory == "/proj/gamma"
-        assert missing is None
+        ids = {e["store_id"] for e in all_stores}
+        assert ids == {"one", "two"}
 
     def test_registry_file_creation(self, tmp_path):
         nonexistent = str(tmp_path / "new_dir" / "context" / "stores.json")
 
-        with patch("utils.context_registry._REGISTRY_PATH", nonexistent):
-            from utils import context_registry
+        from utils import context_registry
 
-            context_registry._REGISTRY_PATH = nonexistent
-            result = context_registry.load_registry()
+        context_registry._REGISTRY_PATH = nonexistent
+        result = context_registry.load_registry()
 
         assert result == {}
-
-
-if __name__ == "__main__":
-    pytest.main([__file__])
-
-
-# ---------------------------------------------------------------------------
-# Integration tests
-# ---------------------------------------------------------------------------
 
 
 class TestContextEphemeralGuard:
@@ -327,7 +423,6 @@ class TestContextEphemeralGuard:
         )
 
     async def test_ephemeral_skips_user_turn(self):
-        """Ephemeral query must not record a new user turn in the thread."""
         from server import reconstruct_thread_context
         from utils.conversation_memory import add_turn, create_thread, get_thread
 
@@ -352,7 +447,6 @@ class TestContextEphemeralGuard:
         assert len(thread.turns) == 1
 
     async def test_non_ephemeral_records_user_turn(self):
-        """Non-ephemeral continuation must add the new user prompt as a turn."""
         from server import reconstruct_thread_context
         from utils.conversation_memory import add_turn, create_thread, get_thread
 
@@ -380,31 +474,59 @@ class TestContextEphemeralGuard:
     def test_ctxquery_has_ephemeral_true(self):
         from server import TOOLS
 
-        assert TOOLS["ctxquery"].ephemeral_continuation is True
+        assert TOOLS["ctxquery"].ephemeral is True
 
-    def test_ctxfork_has_ephemeral_true(self):
+    def test_ctxinit_not_in_ephemeral_tools(self):
         from server import TOOLS
 
-        assert TOOLS["ctxfork"].ephemeral_continuation is True
+        assert getattr(TOOLS["ctxinit"], "ephemeral", False) is False
 
     def test_ctxstore_has_ephemeral_false(self):
         from server import TOOLS
 
-        assert TOOLS["ctxstore"].ephemeral_continuation is False
+        assert TOOLS["ctxstore"].ephemeral is False
+
+
+class TestContextStoreIdMapping:
+    """store_id to continuation_id argument mapping via registry lookup."""
+
+    def test_store_id_resolves_to_thread_uuid(self):
+        tool = CtxStoreTool()
+        args = {"store_id": "myproject", "prompt": "hello"}
+
+        with patch("utils.context_registry.resolve_thread_id", return_value="real-uuid-5678"):
+            tool._map_store_id(args)
+
+        assert args["continuation_id"] == "real-uuid-5678"
+
+    def test_store_id_not_found_sets_flag(self):
+        tool = CtxStoreTool()
+        args = {"store_id": "unknown-store", "prompt": "hello"}
+
+        with patch("utils.context_registry.resolve_thread_id", return_value=None):
+            tool._map_store_id(args)
+
+        assert args.get("_store_id_not_found") is True
+
+    def test_no_store_id_no_mapping(self):
+        tool = CtxStoreTool()
+        args = {"prompt": "hello"}
+        tool._map_store_id(args)
+
+        assert "continuation_id" not in args
 
 
 class TestContextForkChain:
     """Fork chain creation and parent traversal using real thread storage."""
 
     async def test_fork_creates_parent_chain(self):
-        """Fork thread must link to parent, and get_thread_chain returns both in order."""
         from utils.conversation_memory import add_turn, create_thread, get_thread_chain
 
         parent_id = create_thread("ctxstore", {"prompt": "parent init"}, model_name="gemini-test")
         add_turn(parent_id, "user", "Store this context")
         add_turn(parent_id, "assistant", "Context stored", model_name="gemini-test", model_provider="google")
 
-        fork_id = create_thread("ctxfork", {"prompt": "fork start"}, parent_thread_id=parent_id)
+        fork_id = create_thread("ctxquery", {"prompt": "fork start"}, parent_thread_id=parent_id)
 
         chain = get_thread_chain(fork_id)
 
@@ -413,7 +535,6 @@ class TestContextForkChain:
         assert chain[1].thread_id == fork_id
 
     async def test_fork_does_not_modify_parent(self):
-        """Adding turns to a fork must not affect the parent thread's turn count."""
         from utils.conversation_memory import add_turn, create_thread, get_thread
 
         parent_id = create_thread("ctxstore", {"prompt": "parent"}, model_name="gemini-test")
@@ -424,7 +545,7 @@ class TestContextForkChain:
         assert parent_before is not None
         parent_turn_count = len(parent_before.turns)
 
-        fork_id = create_thread("ctxfork", {"prompt": "fork"}, parent_thread_id=parent_id)
+        fork_id = create_thread("ctxquery", {"prompt": "fork"}, parent_thread_id=parent_id)
         add_turn(fork_id, "user", "Fork query 1")
         add_turn(fork_id, "assistant", "Fork answer 1", model_name="gemini-test", model_provider="google")
         add_turn(fork_id, "user", "Fork query 2")
@@ -434,16 +555,15 @@ class TestContextForkChain:
         assert len(parent_after.turns) == parent_turn_count
 
     async def test_multi_level_fork_chain(self):
-        """Three-level fork chain must be returned in chronological order A, B, C."""
         from utils.conversation_memory import add_turn, create_thread, get_thread_chain
 
         id_a = create_thread("ctxstore", {"prompt": "root"}, model_name="test-model")
         add_turn(id_a, "assistant", "Root context", model_name="test-model", model_provider="custom")
 
-        id_b = create_thread("ctxfork", {"prompt": "fork-b"}, parent_thread_id=id_a)
+        id_b = create_thread("ctxquery", {"prompt": "fork-b"}, parent_thread_id=id_a)
         add_turn(id_b, "assistant", "Fork B context", model_name="test-model", model_provider="custom")
 
-        id_c = create_thread("ctxfork", {"prompt": "fork-c"}, parent_thread_id=id_b)
+        id_c = create_thread("ctxquery", {"prompt": "fork-c"}, parent_thread_id=id_b)
 
         chain = get_thread_chain(id_c)
 
@@ -453,97 +573,5 @@ class TestContextForkChain:
         assert chain[2].thread_id == id_c
 
 
-class TestContextStoreIdMapping:
-    """store_id to continuation_id argument mapping."""
-
-    def test_store_id_maps_to_continuation_id(self):
-        tool = CtxStoreTool()
-        args = {"store_id": "test-uuid", "prompt": "hello"}
-        tool._map_store_id(args)
-        assert args["continuation_id"] == "test-uuid"
-
-    def test_no_store_id_no_mapping(self):
-        tool = CtxStoreTool()
-        args = {"prompt": "hello"}
-        tool._map_store_id(args)
-        assert "continuation_id" not in args
-
-
-class TestContextRegistryIntegration:
-    """Registry integration with _create_continuation_offer overrides."""
-
-    def test_store_registers_via_continuation_offer(self):
-        """First ctxstore call must register the new store_id in the registry."""
-        from tools.simple.base import SimpleTool
-
-        tool = CtxStoreTool()
-        tool._is_first_store = True
-        tool._pending_directory = "/tmp/test-project"
-        tool._pending_label = "test-label"
-        tool._current_arguments = {"_resolved_model_name": "gemini-test"}
-
-        mock_request = MagicMock()
-
-        with patch.object(
-            SimpleTool,
-            "_create_continuation_offer",
-            return_value={
-                "continuation_id": "new-uuid-123",
-                "context_window": 100000,
-                "context_used": 5000,
-                "note": "test",
-            },
-        ):
-            with patch("utils.context_registry.register_store") as mock_register:
-                tool._create_continuation_offer(mock_request, None)
-                mock_register.assert_called_once_with("/tmp/test-project", "new-uuid-123", "test-label", "gemini-test")
-
-    def test_store_updates_turn_count_on_continuation(self):
-        """Subsequent ctxstore calls must increment the store's turn count."""
-        from tools.simple.base import SimpleTool
-
-        tool = CtxStoreTool()
-        tool._is_first_store = False
-        tool._pending_directory = None
-        tool._pending_label = None
-        tool._current_arguments = {}
-
-        mock_request = MagicMock()
-
-        with patch.object(
-            SimpleTool,
-            "_create_continuation_offer",
-            return_value={
-                "continuation_id": "existing-uuid-456",
-                "context_window": 100000,
-                "context_used": 8000,
-                "note": "continued",
-            },
-        ):
-            with patch("utils.context_registry.update_store_turn_count") as mock_update:
-                tool._create_continuation_offer(mock_request, None)
-                mock_update.assert_called_once_with("existing-uuid-456")
-
-    async def test_ctxlist_with_real_registry(self, tmp_path):
-        """CtxListTool.execute must reflect stores registered in a real registry file."""
-        from utils import context_registry
-
-        reg_path = str(tmp_path / "context" / "stores.json")
-        context_registry._REGISTRY_PATH = reg_path
-
-        try:
-            context_registry.register_store("/tmp/project1", "store-aaa", "label-a", "gemini-pro")
-            context_registry.register_store("/tmp/project1", "store-bbb", None, "gpt-4o")
-            context_registry.register_store("/tmp/project2", "store-ccc", "label-c", "claude-3")
-
-            with patch("utils.context_registry._REGISTRY_PATH", reg_path):
-                result = await CtxListTool().execute({"directory": "/tmp/project1"})
-
-            assert len(result) == 1
-            payload = json.loads(result[0].text)
-            assert payload["status"] == "success"
-            assert payload["metadata"]["store_count"] == 2
-        finally:
-            context_registry._REGISTRY_PATH = __import__("os").path.join(
-                __import__("config").PAL_STORAGE_DIR, "context", "stores.json"
-            )
+if __name__ == "__main__":
+    pytest.main([__file__])

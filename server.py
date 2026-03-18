@@ -70,7 +70,7 @@ from tools import (  # noqa: E402
     TracerTool,
     VersionTool,
 )
-from tools.context import CtxForkTool, CtxListTool, CtxQueryTool, CtxStoreTool
+from tools.context import CtxInitTool, CtxListTool, CtxQueryTool, CtxStoreTool
 from tools.models import ToolOutput  # noqa: E402
 from tools.shared.exceptions import ToolExecutionError  # noqa: E402
 from utils.env import env_override_enabled, get_env  # noqa: E402
@@ -284,9 +284,9 @@ TOOLS = {
     "version": VersionTool(),  # Display server version and system information
     "imagegen": ImageGenTool(),  # Native AI image generation and editing
     "perceive": PerceiveTool(),  # Structured media intelligence extraction (image, video, audio)
+    "ctxinit": CtxInitTool(),  # Create a named context store
     "ctxstore": CtxStoreTool(),  # Store context layers in a persistent silo
-    "ctxquery": CtxQueryTool(),  # Ephemeral query against a context silo checkpoint
-    "ctxfork": CtxForkTool(),  # Fork a context silo into a new branch
+    "ctxquery": CtxQueryTool(),  # Query against a context silo
     "ctxlist": CtxListTool(),  # List context stores for a directory
 }
 TOOLS = filter_disabled_tools(TOOLS)
@@ -383,6 +383,11 @@ PROMPT_TEMPLATES = {
         "description": "Show server version and system information",
         "template": "Show PAL MCP Server version",
     },
+    "ctxinit": {
+        "name": "ctxinit",
+        "description": "Create a named context store",
+        "template": "Initialize context store",
+    },
     "ctxstore": {
         "name": "ctxstore",
         "description": "Store context layers in a persistent silo",
@@ -392,11 +397,6 @@ PROMPT_TEMPLATES = {
         "name": "ctxquery",
         "description": "Query a context silo without changing its state",
         "template": "Query context silo with {model}",
-    },
-    "ctxfork": {
-        "name": "ctxfork",
-        "description": "Fork a context silo into a new branch",
-        "template": "Fork context silo with {model}",
     },
     "ctxlist": {
         "name": "ctxlist",
@@ -844,7 +844,7 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
     if "continuation_id" in arguments and arguments["continuation_id"]:
         # Check if tool declares ephemeral continuation (skips user turn recording)
         _tool = TOOLS.get(name)
-        if _tool and getattr(_tool, "ephemeral_continuation", False):
+        if _tool and getattr(_tool, "ephemeral", False):
             arguments["_ephemeral_query"] = True
         continuation_id = arguments["continuation_id"]
         logger.debug(f"Resuming conversation thread: {continuation_id}")

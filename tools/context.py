@@ -25,6 +25,14 @@ STORE_ID_DESCRIPTION = (
 )
 
 
+def _truncate_label(text: str, max_len: int = 80) -> str:
+    """Truncate label at a word boundary with ellipsis."""
+    if len(text) <= max_len:
+        return text
+    truncated = text[:max_len].rsplit(" ", 1)[0]
+    return truncated + "…"
+
+
 # ---------------------------------------------------------------------------
 # Request models
 # ---------------------------------------------------------------------------
@@ -447,7 +455,7 @@ class CtxQueryTool(ContextBaseTool):
             store_id=new_store_id,
             thread_id=new_thread_id,
             directory=entry["directory"],
-            label=prompt[:80] if prompt else None,
+            label=_truncate_label(prompt) if prompt else None,
             entry_type="query",
             parent_store_id=self._store_id,
         )

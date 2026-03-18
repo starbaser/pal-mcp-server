@@ -373,9 +373,18 @@ class SimpleTool(BaseTool):
                             )
 
                         # Build conversation history with updated thread context
+                        # Context silo tools require strict mode — no silent truncation
+                        _strict_history = self.get_name() in ("ctxstore", "ctxquery")
                         conversation_history, conversation_tokens = build_conversation_history(
-                            thread_context, self._model_context
+                            thread_context, self._model_context, strict=_strict_history
                         )
+
+                        # Store context usage for continuation_offer reporting
+                        self._current_arguments["_context_used"] = conversation_tokens
+                        if self._model_context and hasattr(self._model_context, "capabilities"):
+                            self._current_arguments["_context_window"] = (
+                                self._model_context.capabilities.context_window or 0
+                            )
 
                         # Get the base prompt from the tool
                         base_prompt = await self.prepare_prompt(request)

@@ -1378,7 +1378,11 @@ async def reconstruct_thread_context(arguments: dict[str, Any]) -> dict[str, Any
     logger.debug(f"[CONVERSATION_DEBUG] Building conversation history for thread {continuation_id}")
     logger.debug(f"[CONVERSATION_DEBUG] Thread has {len(context.turns)} turns, tool: {context.tool_name}")
     logger.debug(f"[CONVERSATION_DEBUG] Using model: {model_context.model_name}")
-    conversation_history, conversation_tokens = build_conversation_history(context, model_context)
+    # Context silo forks require strict mode — no silent history truncation
+    _strict_history = "store_fork" in arguments
+    conversation_history, conversation_tokens = build_conversation_history(
+        context, model_context, strict=_strict_history
+    )
     logger.debug(f"[CONVERSATION_DEBUG] Conversation history built: {conversation_tokens:,} tokens")
     logger.debug(
         f"[CONVERSATION_DEBUG] Conversation history length: {len(conversation_history)} chars (~{conversation_tokens:,} tokens)"

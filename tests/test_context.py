@@ -888,5 +888,135 @@ class TestInjectStorePathContinuation:
         assert "continuation_offer" not in parsed or parsed.get("continuation_offer") is None
 
 
+class TestStrictHistoryEnforcement:
+    """Context silos must never silently truncate conversation history."""
+
+    def test_strict_mode_raises_on_truncation(self):
+        """When strict=True, build_conversation_history raises ValueError if turns would be dropped."""
+        from unittest.mock import MagicMock
+
+        from utils.conversation_memory import ThreadContext, build_conversation_history
+
+        # Create a thread with many large turns that will exceed any budget
+        turns = []
+        for i in range(50):
+            from utils.conversation_memory import ConversationTurn
+
+            turns.append(
+                ConversationTurn(
+                    role="user" if i % 2 == 0 else "assistant",
+                    content="x" * 10000,  # ~2500 tokens per turn
+                    timestamp="2026-01-01T00:00:00Z",
+                )
+            )
+
+        context = ThreadContext(
+            thread_id="test-strict",
+            created_at="2026-01-01T00:00:00Z",
+            last_updated_at="2026-01-01T00:00:00Z",
+            tool_name="ctxstore",
+            turns=turns,
+            initial_context={},
+        )
+
+        # Create a model_context with a tiny window that can't fit all turns
+        model_context = MagicMock()
+        model_context.model_name = "tiny-model"
+        model_context.capabilities.context_window = 8000
+        model_context.calculate_token_allocation.return_value = MagicMock(
+            history_tokens=2000,  # Only 2000 tokens for history
+            file_tokens=1000,
+            total_tokens=8000,
+            content_tokens=4000,
+        )
+        model_context.estimate_tokens = lambda text: len(text) // 4
+
+        with pytest.raises(ValueError, match="Context silo history"):
+            build_conversation_history(context, model_context, strict=True)
+
+    def test_non_strict_mode_truncates_silently(self):
+        """Default (strict=False) still truncates without error."""
+        from unittest.mock import MagicMock
+
+        from utils.conversation_memory import ConversationTurn, ThreadContext, build_conversation_history
+
+        turns = []
+        for i in range(50):
+            turns.append(
+                ConversationTurn(
+                    role="user" if i % 2 == 0 else "assistant",
+                    content="x" * 10000,
+                    timestamp="2026-01-01T00:00:00Z",
+                )
+            )
+
+        context = ThreadContext(
+            thread_id="test-nonstrict",
+            created_at="2026-01-01T00:00:00Z",
+            last_updated_at="2026-01-01T00:00:00Z",
+            tool_name="chat",
+            turns=turns,
+            initial_context={},
+        )
+
+        model_context = MagicMock()
+        model_context.model_name = "tiny-model"
+        model_context.capabilities.context_window = 8000
+        model_context.calculate_token_allocation.return_value = MagicMock(
+            history_tokens=2000,
+            file_tokens=1000,
+            total_tokens=8000,
+            content_tokens=4000,
+        )
+        model_context.estimate_tokens = lambda text: len(text) // 4
+
+        # Should NOT raise — truncates silently
+        history, tokens = build_conversation_history(context, model_context, strict=False)
+        assert "most recent turns" in history
+
+    def test_strict_mode_passes_when_history_fits(self):
+        """strict=True should not error when all turns fit within budget."""
+        from unittest.mock import MagicMock
+
+        from utils.conversation_memory import ConversationTurn, ThreadContext, build_conversation_history
+
+        turns = [
+            ConversationTurn(
+                role="user",
+                content="hello",
+                timestamp="2026-01-01T00:00:00Z",
+            ),
+            ConversationTurn(
+                role="assistant",
+                content="hi there",
+                timestamp="2026-01-01T00:00:01Z",
+            ),
+        ]
+
+        context = ThreadContext(
+            thread_id="test-fits",
+            created_at="2026-01-01T00:00:00Z",
+            last_updated_at="2026-01-01T00:00:01Z",
+            tool_name="ctxstore",
+            turns=turns,
+            initial_context={},
+        )
+
+        model_context = MagicMock()
+        model_context.model_name = "big-model"
+        model_context.capabilities.context_window = 1000000
+        model_context.calculate_token_allocation.return_value = MagicMock(
+            history_tokens=500000,
+            file_tokens=100000,
+            total_tokens=1000000,
+            content_tokens=800000,
+        )
+        model_context.estimate_tokens = lambda text: len(text) // 4
+
+        # Should not raise
+        history, tokens = build_conversation_history(context, model_context, strict=True)
+        assert "most recent turns" not in history
+
+
 if __name__ == "__main__":
     pytest.main([__file__])

@@ -599,7 +599,9 @@ def _plan_file_inclusion_by_size(all_files: list[str], max_file_tokens: int) -> 
     return files_to_include, files_to_skip, total_tokens
 
 
-def build_conversation_history(context: ThreadContext, model_context=None, read_files_func=None) -> tuple[str, int]:
+def build_conversation_history(
+    context: ThreadContext, model_context=None, read_files_func=None, strict: bool = False
+) -> tuple[str, int]:
     """
     Build formatted conversation history for tool prompts with embedded file contents.
 
@@ -926,6 +928,17 @@ def build_conversation_history(context: ThreadContext, model_context=None, read_
 
         # Check if adding this turn would exceed history budget
         if file_embedding_tokens + total_turn_tokens + turn_tokens > max_history_tokens:
+            if strict:
+                total_needed = file_embedding_tokens + total_turn_tokens + turn_tokens
+                remaining_turns = turn_num + 1  # turns left to process (0-indexed, iterating backwards)
+                model_name = model_context.model_name if model_context else "unknown"
+                raise ValueError(
+                    f"Context silo history ({total_needed:,} tokens across {len(all_turns)} turns) "
+                    f"exceeds model '{model_name}' history budget ({max_history_tokens:,} tokens). "
+                    f"Would drop {remaining_turns} oldest turn(s). "
+                    f"Context silos require the complete conversation — use a model with a larger "
+                    f"context window or reduce silo layers with a fresh store."
+                )
             # Stop adding turns - we've reached the limit
             logger.debug(f"[HISTORY] Stopping at turn {turn_num} - would exceed history budget")
             logger.debug(f"[HISTORY]   File tokens: {file_embedding_tokens:,}")

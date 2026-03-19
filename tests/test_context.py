@@ -676,9 +676,7 @@ class TestResolveStoreContinuation:
         context_registry._REGISTRY_PATH = str(tmp_path / "context" / "stores.json")
 
         parent_uuid = create_thread("ctxstore", {"prompt": "init"})
-        context_registry.register_store(
-            store_id="myproject", thread_id=parent_uuid, directory="/tmp/proj"
-        )
+        context_registry.register_store(store_id="myproject", thread_id=parent_uuid, directory="/tmp/proj")
 
         args = {"continuation_id": "myproject"}
         result = _resolve_store_continuation("thinkdeep", args)
@@ -705,9 +703,7 @@ class TestResolveStoreContinuation:
         parent_uuid = create_thread("ctxstore", {"prompt": "init"})
         fork_uuid = create_thread("thinkdeep", {"store_fork": "myproject"}, parent_thread_id=parent_uuid)
 
-        context_registry.register_store(
-            store_id="myproject", thread_id=parent_uuid, directory="/tmp/proj"
-        )
+        context_registry.register_store(store_id="myproject", thread_id=parent_uuid, directory="/tmp/proj")
         context_registry.register_store(
             store_id="myproject.thinkdeep0",
             thread_id=fork_uuid,
@@ -737,9 +733,7 @@ class TestResolveStoreContinuation:
         parent_uuid = create_thread("ctxstore", {"prompt": "init"})
         fork_uuid = create_thread("thinkdeep", {"store_fork": "myproject"}, parent_thread_id=parent_uuid)
 
-        context_registry.register_store(
-            store_id="myproject", thread_id=parent_uuid, directory="/tmp/proj"
-        )
+        context_registry.register_store(store_id="myproject", thread_id=parent_uuid, directory="/tmp/proj")
         context_registry.register_store(
             store_id="myproject.thinkdeep0",
             thread_id=fork_uuid,
@@ -773,9 +767,7 @@ class TestResolveStoreContinuation:
         store_uuid = create_thread("ctxstore", {"prompt": "init"})
         query_uuid = create_thread("ctxquery", {"prompt": "ask"}, parent_thread_id=store_uuid)
 
-        context_registry.register_store(
-            store_id="myproject", thread_id=store_uuid, directory="/tmp/proj"
-        )
+        context_registry.register_store(store_id="myproject", thread_id=store_uuid, directory="/tmp/proj")
         context_registry.register_store(
             store_id="myproject.Q0",
             thread_id=query_uuid,
@@ -798,9 +790,7 @@ class TestResolveStoreContinuation:
 
         store_uuid = create_thread("ctxstore", {"prompt": "init"})
 
-        context_registry.register_store(
-            store_id="myproject", thread_id=store_uuid, directory="/tmp/proj"
-        )
+        context_registry.register_store(store_id="myproject", thread_id=store_uuid, directory="/tmp/proj")
         context_registry.register_store(
             store_id="myproject.L1",
             thread_id=store_uuid,
@@ -822,9 +812,7 @@ class TestResolveStoreContinuation:
         context_registry._REGISTRY_PATH = str(tmp_path / "context" / "stores.json")
 
         parent_uuid = create_thread("ctxstore", {"prompt": "init"})
-        context_registry.register_store(
-            store_id="myproject", thread_id=parent_uuid, directory="/tmp/proj"
-        )
+        context_registry.register_store(store_id="myproject", thread_id=parent_uuid, directory="/tmp/proj")
 
         # First fork
         args1 = {"continuation_id": "myproject"}
@@ -845,17 +833,19 @@ class TestInjectStorePathContinuation:
 
         from server import _inject_store_path_continuation
 
-        response_json = json.dumps({
-            "status": "continuation_available",
-            "content": "Analysis complete.",
-            "continuation_offer": {
-                "continuation_id": "some-uuid-value",
-                "note": "Conversation active.",
-                "context_window": 100000,
-                "context_used": 5000,
-                "context_remaining": 95000,
-            },
-        })
+        response_json = json.dumps(
+            {
+                "status": "continuation_available",
+                "content": "Analysis complete.",
+                "continuation_offer": {
+                    "continuation_id": "some-uuid-value",
+                    "note": "Conversation active.",
+                    "context_window": 100000,
+                    "context_used": 5000,
+                    "context_remaining": 95000,
+                },
+            }
+        )
         items = [TextContent(type="text", text=response_json)]
 
         result = _inject_store_path_continuation(items, "myproject.thinkdeep0")

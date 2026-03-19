@@ -140,6 +140,63 @@ class MyTool(BaseTool):
 
 Register in `server.py` TOOLS dict. Tools that bypass model resolution override `requires_model() -> False`.
 
+## Context Revival (ctxarm)
+
+The `ctxarm` tool arms a context store for automatic revival on every Claude session start. When armed, a SessionStart hook fires before the user's first message, forcing Claude to run `ctxlist` + `ctxquery` to restore project context from the silo.
+
+### Usage
+
+```
+# Arm (requires an existing store from ctxinit)
+mcp__pal__ctxarm(store_id="my-project", directory="/path/to/project")
+
+# Disarm
+mcp__pal__ctxarm(store_id="my-project", directory="/path/to/project", disarm=true)
+
+# Or via slash command
+/arm-ctxstore my-project
+```
+
+### How It Works
+
+```
+ctxarm tool ──▶ ~/.claude/pal/context/armed.json
+                { "/path/to/project": "my-project" }
+
+SessionStart hook ──▶ reads armed.json
+                  ──▶ looks up cwd
+                  ──▶ injects revival additionalContext
+```
+
+### Hook Installation
+
+The SessionStart hook must be registered in `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/scripts/ctx-arm.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+The hook script (`ctx-arm.sh`) reads `${PAL_STORAGE_DIR:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/pal}/context/armed.json`, looks up the session's `cwd`, and if armed, emits `additionalContext` with a mandatory revival sequence. Requires `jq`.
+
+### Storage
+
+- Armed state: `~/.claude/pal/context/armed.json` (directory → store_id mapping)
+- Store registry: `~/.claude/pal/context/stores.json`
+- MCP handshake shows `[armed]` marker on armed stores
+
 ## Environment Variables
 
 Key variables (see `.env.example` for full list):

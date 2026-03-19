@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from config import PAL_STORAGE_DIR
 
 _REGISTRY_PATH = os.path.join(PAL_STORAGE_DIR, "context", "stores.json")
+_ARMED_PATH = os.path.join(PAL_STORAGE_DIR, "context", "armed.json")
 
 
 def load_registry() -> dict:
@@ -167,3 +168,55 @@ def list_stores(directory: str | None = None) -> list[dict]:
     if directory is not None:
         return [e for e in registry.values() if e.get("directory") == directory]
     return list(registry.values())
+
+
+# ---------------------------------------------------------------------------
+# Armed store management — {PAL_STORAGE_DIR}/context/armed.json
+# Maps directory paths to store_ids for automatic SessionStart revival.
+# ---------------------------------------------------------------------------
+
+
+def load_armed() -> dict:
+    """Read armed.json, returning {} if missing or corrupt."""
+    if not os.path.exists(_ARMED_PATH):
+        os.makedirs(os.path.dirname(_ARMED_PATH), exist_ok=True)
+        return {}
+    try:
+        with open(_ARMED_PATH) as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def save_armed(data: dict) -> None:
+    """Atomically write armed state to disk."""
+    dir_ = os.path.dirname(_ARMED_PATH)
+    os.makedirs(dir_, exist_ok=True)
+    with tempfile.NamedTemporaryFile(mode="w", dir=dir_, delete=False, suffix=".tmp") as tmp:
+        json.dump(data, tmp, indent=2)
+        tmp_path = tmp.name
+    os.rename(tmp_path, _ARMED_PATH)
+
+
+def arm_store(directory: str, store_id: str) -> None:
+    """Arm a directory for automatic context revival on SessionStart."""
+    armed = load_armed()
+    armed[directory] = store_id
+    save_armed(armed)
+
+
+def disarm_store(directory: str) -> None:
+    """Remove the armed state for a directory."""
+    armed = load_armed()
+    armed.pop(directory, None)
+    save_armed(armed)
+
+
+def get_armed_store(directory: str) -> str | None:
+    """Return the armed store_id for a directory, or None."""
+    return load_armed().get(directory)
+
+
+def list_armed_stores() -> dict:
+    """Return the full directory-to-store_id mapping."""
+    return load_armed()

@@ -612,3 +612,117 @@ class CtxListTool(BaseTool):
             metadata={"store_count": len(stores), "directory_filter": directory},
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]
+
+
+# ---------------------------------------------------------------------------
+# ctxarm
+# ---------------------------------------------------------------------------
+
+
+class CtxArmTool(BaseTool):
+    def get_name(self) -> str:
+        return "ctxarm"
+
+    def get_description(self) -> str:
+        return (
+            "Arm a context store for automatic revival at every session start. "
+            "On each new Claude session for this directory, revival fires automatically "
+            "via SessionStart hook, running ctxlist and ctxquery to restore project context. "
+            "Pass disarm=true to remove the armed state."
+        )
+
+    def get_input_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "store_id": {
+                    "type": "string",
+                    "description": "The store_id to arm for auto-revival. Must exist in the context registry.",
+                },
+                "directory": {
+                    "type": "string",
+                    "description": "Absolute path to the project directory. Must match the store's registered directory.",
+                },
+                "disarm": {
+                    "type": "boolean",
+                    "description": "If true, removes the armed state for this directory.",
+                    "default": False,
+                },
+            },
+            "required": ["store_id", "directory"],
+            "additionalProperties": False,
+        }
+
+    def get_annotations(self) -> dict:
+        return {"readOnlyHint": False}
+
+    def get_system_prompt(self) -> str:
+        return ""
+
+    def get_request_model(self):
+        return ToolRequest
+
+    def requires_model(self) -> bool:
+        return False
+
+    def get_model_category(self):
+        from tools.models import ToolModelCategory
+
+        return ToolModelCategory.FAST_RESPONSE
+
+    async def prepare_prompt(self, request: ToolRequest) -> str:
+        return ""
+
+    def format_response(self, response: str, request: ToolRequest, model_info: Optional[dict] = None) -> str:
+        return response
+
+    async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
+        from tools.models import ToolOutput
+        from utils.context_registry import arm_store, disarm_store, get_store_entry
+
+        store_id = arguments.get("store_id", "")
+        directory = arguments.get("directory", "")
+        disarm = arguments.get("disarm", False)
+
+        if disarm:
+            disarm_store(directory)
+            tool_output = ToolOutput(
+                status="success",
+                content=f"Disarmed: '{directory}'. Revival will no longer fire on SessionStart.",
+                content_type="text",
+                metadata={"store_id": store_id, "directory": directory, "armed": False},
+            )
+            return [TextContent(type="text", text=tool_output.model_dump_json())]
+
+        entry = get_store_entry(store_id)
+        if not entry:
+            tool_output = ToolOutput(
+                status="error",
+                content=f'Store "{store_id}" not found. Use ctxinit to create it first.',
+                content_type="text",
+            )
+            return [TextContent(type="text", text=tool_output.model_dump_json())]
+
+        if entry.get("directory") != directory:
+            tool_output = ToolOutput(
+                status="error",
+                content=(
+                    f'Store "{store_id}" is registered to "{entry.get("directory")}", '
+                    f'not "{directory}". Use the correct directory.'
+                ),
+                content_type="text",
+            )
+            return [TextContent(type="text", text=tool_output.model_dump_json())]
+
+        arm_store(directory, store_id)
+        tool_output = ToolOutput(
+            status="success",
+            content=(
+                f"Armed: store '{store_id}' will auto-revive on every SessionStart for '{directory}'.\n\n"
+                f"Revival sequence fires automatically — no further action needed.\n"
+                f'To disarm: ctxarm(store_id="{store_id}", directory="{directory}", disarm=true)'
+            ),
+            content_type="text",
+            metadata={"store_id": store_id, "directory": directory, "armed": True},
+        )
+        return [TextContent(type="text", text=tool_output.model_dump_json())]

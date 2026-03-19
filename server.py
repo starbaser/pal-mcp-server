@@ -70,7 +70,7 @@ from tools import (  # noqa: E402
     TracerTool,
     VersionTool,
 )
-from tools.context import CtxInitTool, CtxListTool, CtxQueryTool, CtxStoreTool
+from tools.context import CtxArmTool, CtxInitTool, CtxListTool, CtxQueryTool, CtxStoreTool
 from tools.models import ToolOutput  # noqa: E402
 from tools.shared.exceptions import ToolExecutionError  # noqa: E402
 from utils.env import env_override_enabled, get_env  # noqa: E402
@@ -288,6 +288,7 @@ TOOLS = {
     "ctxstore": CtxStoreTool(),  # Store context layers in a persistent silo
     "ctxquery": CtxQueryTool(),  # Query against a context silo
     "ctxlist": CtxListTool(),  # List context stores for a directory
+    "ctxarm": CtxArmTool(),  # Arm/disarm a store for auto-revival on SessionStart
 }
 TOOLS = filter_disabled_tools(TOOLS)
 
@@ -743,13 +744,15 @@ def _build_store_listing() -> str:
     """Build a compact context store snapshot for MCP handshake instructions."""
     import os
 
-    from utils.context_registry import list_stores
+    from utils.context_registry import get_armed_store, list_stores
 
     cwd = os.getcwd()
     stores = list_stores(directory=cwd)
 
     if not stores:
         return ""
+
+    armed_store = get_armed_store(cwd)
 
     lines = [f"\n\nctxStores: Context stores for {cwd}:"]
     for entry in stores:
@@ -759,7 +762,8 @@ def _build_store_listing() -> str:
         follow_ups = entry.get("follow_up_count", 0)
         tool_name_entry = entry.get("tool_name")
 
-        line = f"- {sid} [{etype}]"
+        armed_marker = " [armed]" if (armed_store and sid == armed_store) else ""
+        line = f"- {sid} [{etype}]{armed_marker}"
         if etype == "store" and layers > 0:
             line += f" ({layers} layer{'s' if layers != 1 else ''})"
         if etype == "query" and follow_ups > 0:

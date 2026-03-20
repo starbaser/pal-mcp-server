@@ -32,26 +32,35 @@ def _truncate_label(text: str, max_len: int = 80) -> str:
     return truncated + "…"
 
 
+def _format_entry_line(entry: dict, prefix: str = "- ") -> str:
+    """Format a single registry entry as a display line.
+
+    Shared by ctxlist (flat) and ctxtree (indented) to ensure consistent
+    label truncation, suffix handling, and entry type coverage.
+    """
+    sid = entry.get("store_id", "?")
+    etype = entry.get("entry_type", "?")
+    label = _truncate_label(entry.get("label") or "(none)")
+
+    suffix = ""
+    if etype == "store" and entry.get("layer_count", 0) > 0:
+        n = entry["layer_count"]
+        suffix = f"  ({n} layer{'s' if n != 1 else ''})"
+    elif etype == "query" and entry.get("follow_up_count", 0) > 0:
+        n = entry["follow_up_count"]
+        suffix = f"  ({n} follow-up{'s' if n != 1 else ''})"
+    elif etype == "tool" and entry.get("tool_name"):
+        suffix = f"  (tool: {entry['tool_name']})"
+
+    return f'{prefix}{sid}  [{etype}]  "{label}"{suffix}'
+
+
 def _render_tree(nodes: list[dict], indent: int = 0) -> list[str]:
     """Recursively render tree nodes as indented dash lines."""
     lines: list[str] = []
     prefix = "  " * indent + "- "
     for node in nodes:
-        sid = node.get("store_id", "?")
-        etype = node.get("entry_type", "?")
-        label = _truncate_label(node.get("label") or "(none)")
-
-        suffix = ""
-        if etype == "store" and node.get("layer_count", 0) > 0:
-            n = node["layer_count"]
-            suffix = f"  ({n} layer{'s' if n != 1 else ''})"
-        elif etype == "query" and node.get("follow_up_count", 0) > 0:
-            n = node["follow_up_count"]
-            suffix = f"  ({n} follow-up{'s' if n != 1 else ''})"
-        elif etype == "tool" and node.get("tool_name"):
-            suffix = f"  (tool: {node['tool_name']})"
-
-        lines.append(f'{prefix}{sid}  [{etype}]  "{label}"{suffix}')
+        lines.append(_format_entry_line(node, prefix))
         lines.extend(_render_tree(node.get("children", []), indent + 1))
     return lines
 
@@ -610,27 +619,15 @@ class CtxListTool(BaseTool):
         stores = list_stores(directory)
 
         if stores:
-            content = f"Found {len(stores)} node(s):\n\n"
-            for entry in stores:
-                sid = entry.get("store_id", "?")
-                etype = entry.get("entry_type", "?")
-                label = entry.get("label") or "(none)"
-                layers = entry.get("layer_count", 0)
-                follow_ups = entry.get("follow_up_count", 0)
-
-                line = f'- {sid}  [{etype}]  "{label}"'
-                if etype == "store" and layers > 0:
-                    line += f"  ({layers} layer{'s' if layers != 1 else ''})"
-                if etype == "query" and follow_ups > 0:
-                    line += f"  ({follow_ups} follow-up{'s' if follow_ups != 1 else ''})"
-                content += line + "\n"
+            lines = [_format_entry_line(entry) for entry in stores]
+            content = f"Found {len(stores)} node(s):\n\n" + "\n".join(lines)
         else:
             scope = f" for directory '{directory}'" if directory else ""
             content = f"No context stores found{scope}."
 
         tool_output = ToolOutput(
             status="success",
-            content=content.strip(),
+            content=content,
             content_type="text",
             metadata={"store_count": len(stores), "directory_filter": directory},
         )

@@ -69,10 +69,10 @@ def test_render_basic_tool_output():
     assert "store_id: my-store" in md
     assert "total_pages: 5" in md
     # Content extracted to section
-    assert "## Content" in md
+    assert "# `content`" in md
     assert "## Heading\n\nSome analysis\n\nMore text" in md
     # Placeholder in front matter
-    assert "\u2192 ## Content" in md
+    assert "\u2192 # `content`" in md
 
 
 def test_render_scalar_only():
@@ -83,7 +83,7 @@ def test_render_scalar_only():
     # Short content stays inline
     assert "PAL v9.8.2" in md
     # No extracted sections
-    assert "## Content" not in md.split("---", 2)[-1]
+    assert "# `content`" not in md.split("---", 2)[-1]
 
 
 def test_render_error():
@@ -131,9 +131,9 @@ def test_render_workflow_output():
     md = render_markdown_output(data)
 
     # Both multiline fields extracted
-    assert "## Content" in md
+    assert "# `content`" in md
     assert "Expert analysis here." in md
-    assert "## Work Summary" in md
+    assert "# `complete_investigation.work_summary`" in md
     assert "Bug found." in md
     # Scalar nested fields in front matter
     assert "steps_taken: 2" in md

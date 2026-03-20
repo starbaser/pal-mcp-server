@@ -65,17 +65,6 @@ def _separate_fields(
 # ---------------------------------------------------------------------------
 
 
-def _make_section_title(dotted_key: str) -> str:
-    """Derive a markdown section title from a dotted key path.
-
-    ``content`` → ``Content``
-    ``continuation_offer.note`` → ``Note``
-    ``expert_analysis`` → ``Expert Analysis``
-    """
-    leaf = dotted_key.rsplit(".", 1)[-1]
-    return leaf.replace("_", " ").title()
-
-
 def render_markdown_output(data: dict) -> str:
     """Transform a tool output dict into a markdown document with YAML front matter.
 
@@ -85,40 +74,27 @@ def render_markdown_output(data: dict) -> str:
     """
     inline, formatted = _separate_fields(data)
 
-    # Build reference map: inject "→ ## Title" placeholders for extracted fields
-    section_titles: list[tuple[str, str]] = []
-    for dotted_key, _ in formatted:
-        title = _make_section_title(dotted_key)
-        section_titles.append((dotted_key, title))
-
-    # Patch inline dict with placeholder references for extracted keys
-    _inject_placeholders(inline, section_titles)
+    # Inject placeholder references for extracted keys
+    _inject_placeholders(inline, [key for key, _ in formatted])
 
     # Build YAML front matter
     yaml_body = yaml.dump({"json": inline}, default_flow_style=False, sort_keys=False, allow_unicode=True).rstrip()
     parts = [f"---\n{yaml_body}\n---"]
 
-    # Render extracted sections
-    for (_dotted_key, text), (__, title) in zip(formatted, section_titles):
-        parts.append(f"## {title}\n\n{text}")
+    # Render extracted sections with dotted key path as heading
+    for dotted_key, text in formatted:
+        parts.append(f"# `{dotted_key}`\n\n{text}")
 
     return "\n\n".join(parts)
 
 
-def _inject_placeholders(inline: dict, section_titles: list[tuple[str, str]]) -> None:
-    """Walk *inline* and set placeholder values for keys that were extracted.
-
-    ``section_titles`` is a list of ``(dotted_key, title)`` pairs.  For a
-    top-level key like ``content`` the inline dict gets
-    ``inline["content"] = "→ ## Content"``.  For nested keys like
-    ``continuation_offer.note`` we walk into ``inline["continuation_offer"]``
-    and set ``["note"]``.
-    """
-    for dotted_key, title in section_titles:
+def _inject_placeholders(inline: dict, dotted_keys: list[str]) -> None:
+    """Walk *inline* and set placeholder values for keys that were extracted."""
+    for dotted_key in dotted_keys:
         parts = dotted_key.split(".")
         target = inline
         for part in parts[:-1]:
             if part not in target or not isinstance(target[part], dict):
                 target[part] = {}
             target = target[part]
-        target[parts[-1]] = f"\u2192 ## {title}"
+        target[parts[-1]] = f"\u2192 # `{dotted_key}`"

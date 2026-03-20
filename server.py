@@ -20,6 +20,7 @@ as defined by the MCP protocol.
 
 import asyncio
 import atexit
+import json
 import logging
 import os
 import sys
@@ -731,11 +732,18 @@ async def handle_list_tools() -> list[Tool]:
         annotations = tool.get_annotations()
         tool_annotations = ToolAnnotations(**annotations) if annotations else None
 
+        schema = tool.get_input_schema()
+        # Inject raw parameter into every tool schema at the server boundary
+        schema.setdefault("properties", {})["raw"] = {
+            "type": "boolean",
+            "description": "Return raw JSON instead of rendered markdown. Default: false.",
+        }
+
         tools.append(
             Tool(
                 name=tool.name,
                 description=tool.description,
-                inputSchema=tool.get_input_schema(),
+                inputSchema=schema,
                 annotations=tool_annotations,
             )
         )
@@ -895,6 +903,36 @@ def _save_response_content(tool_name: str, result: list, continuation_id: str | 
         logger.debug(f"Failed to save response content for {tool_name}", exc_info=True)
 
 
+def _apply_output_format(result: list, tool_name: str, raw: bool) -> list:
+    """Route tool results through the appropriate output formatter.
+
+    - ``raw=True``: return JSON as-is (original behaviour)
+    - ``FORMATTED_OUTPUT`` env var: terminal-friendly rich text
+    - default: markdown document with YAML front matter
+    """
+    if raw:
+        return result
+    if config.FORMATTED_OUTPUT:
+        return format_tool_result(result, tool_name)
+
+    from utils.response_formatter import render_markdown_output
+
+    formatted = []
+    for item in result:
+        if item.type != "text":
+            formatted.append(item)
+            continue
+        try:
+            data = json.loads(item.text)
+            if isinstance(data, dict):
+                formatted.append(TextContent(type="text", text=render_markdown_output(data)))
+            else:
+                formatted.append(item)
+        except Exception:
+            formatted.append(item)
+    return formatted
+
+
 @server.call_tool()
 async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
     """
@@ -954,6 +992,9 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
     """
     logger.info(f"MCP tool call: {name}")
     logger.debug(f"MCP tool arguments: {list(arguments.keys())}")
+
+    # Extract raw output flag before tool sees it (tools use additionalProperties: false)
+    raw_output = arguments.pop("raw", False)
 
     # Log to activity file for monitoring
     try:
@@ -1023,8 +1064,7 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
             result = await tool.execute(arguments)
             if _store_path and result:
                 result = _inject_store_path_continuation(result, _store_path)
-            if config.FORMATTED_OUTPUT:
-                result = format_tool_result(result, name)
+            result = _apply_output_format(result, name, raw_output)
             return result
 
         # Handle auto mode at MCP boundary - resolve to specific model
@@ -1089,8 +1129,7 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
 
         _save_response_content(name, result, arguments.get("continuation_id"))
 
-        if config.FORMATTED_OUTPUT:
-            result = format_tool_result(result, name)
+        result = _apply_output_format(result, name, raw_output)
 
         # Log completion to activity file
         try:

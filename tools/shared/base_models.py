@@ -30,6 +30,7 @@ COMMON_FIELD_DESCRIPTIONS = {
     ),
     "media": "Optional absolute media file paths or base64 blobs for visual context.",
     "absolute_file_paths": "Full paths to relevant code",
+    "raw": "Return raw JSON instead of rendered markdown. Default: false.",
 }
 
 # Workflow-specific field descriptions

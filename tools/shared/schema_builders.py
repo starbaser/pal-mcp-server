@@ -41,6 +41,10 @@ class SchemaBuilder:
             "items": {"type": "string"},
             "description": COMMON_FIELD_DESCRIPTIONS["media"],
         },
+        "raw": {
+            "type": "boolean",
+            "description": COMMON_FIELD_DESCRIPTIONS["raw"],
+        },
     }
 
     # Simple tool-specific field schemas (workflow tools use relevant_files instead)

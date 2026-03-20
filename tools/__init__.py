@@ -14,6 +14,7 @@ from .debug import DebugIssueTool
 from .docgen import DocgenTool
 from .imagegen import ImageGenTool
 from .listmodels import ListModelsTool
+from .narrate import NarrateTool
 from .perceive import PerceiveTool
 from .planner import PlannerTool
 from .precommit import PrecommitTool
@@ -52,4 +53,5 @@ __all__ = [
     "CtxTreeTool",
     "CtxReadTool",
     "CtxArmTool",
+    "NarrateTool",
 ]

@@ -11,6 +11,7 @@ from .debug_prompt import DEBUG_ISSUE_PROMPT
 from .docgen_prompt import DOCGEN_PROMPT
 from .generate_code_prompt import GENERATE_CODE_PROMPT
 from .imagegen_prompt import IMAGEGEN_PROMPT
+from .narrate_prompt import NARRATE_PROMPT
 from .perceive_prompt import PERCEIVE_PROMPT
 from .planner_prompt import PLANNER_PROMPT
 from .precommit_prompt import PRECOMMIT_PROMPT
@@ -37,5 +38,6 @@ __all__ = [
     "TESTGEN_PROMPT",
     "IMAGEGEN_PROMPT",
     "PERCEIVE_PROMPT",
+    "NARRATE_PROMPT",
     "TRACER_PROMPT",
 ]

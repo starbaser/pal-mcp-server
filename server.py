@@ -60,6 +60,7 @@ from tools import (  # noqa: E402
     ImageGenTool,
     ListModelsTool,
     LookupTool,
+    NarrateTool,
     PerceiveTool,
     PlannerTool,
     PrecommitTool,
@@ -275,6 +276,7 @@ TOOLS = {
     "secaudit": SecauditTool(),  # Comprehensive security audit with OWASP Top 10 and compliance coverage
     "docgen": DocgenTool(),  # Step-by-step documentation generation with complexity analysis
     "analyze": AnalyzeTool(),  # General-purpose file and code analysis
+    "narrate": NarrateTool(),  # Source-grounded narrative document composition
     "refactor": RefactorTool(),  # Step-by-step refactoring analysis workflow with expert validation
     "tracer": TracerTool(),  # Static call path prediction and control flow analysis
     "testgen": TestGenTool(),  # Step-by-step test generation workflow with expert validation
@@ -350,6 +352,11 @@ PROMPT_TEMPLATES = {
         "name": "analyze",
         "description": "Analyze files and code structure",
         "template": "Analyze these files with {model}",
+    },
+    "narrate": {
+        "name": "narrate",
+        "description": "Compose a polished narrative document grounded in source files",
+        "template": "Narrate a {document_type} document with {model}",
     },
     "refactor": {
         "name": "refactor",

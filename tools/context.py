@@ -574,14 +574,6 @@ class CtxListTool(BaseTool):
                     "type": "string",
                     "description": "Absolute path to filter stores by project directory. Omit to list all stores.",
                 },
-                "view": {
-                    "type": "string",
-                    "enum": ["flat", "tree"],
-                    "description": (
-                        "Output format. 'flat' (default) lists each node on one line. "
-                        "'tree' renders the parent-child hierarchy with indentation."
-                    ),
-                },
             },
             "required": [],
             "additionalProperties": False,
@@ -612,32 +604,26 @@ class CtxListTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
-        from utils.context_registry import build_store_tree, list_stores
+        from utils.context_registry import list_stores
 
         directory = arguments.get("directory")
-        view = arguments.get("view", "flat")
         stores = list_stores(directory)
 
         if stores:
             content = f"Found {len(stores)} node(s):\n\n"
+            for entry in stores:
+                sid = entry.get("store_id", "?")
+                etype = entry.get("entry_type", "?")
+                label = entry.get("label") or "(none)"
+                layers = entry.get("layer_count", 0)
+                follow_ups = entry.get("follow_up_count", 0)
 
-            if view == "tree":
-                roots = build_store_tree(stores)
-                content += "\n".join(_render_tree(roots))
-            else:
-                for entry in stores:
-                    sid = entry.get("store_id", "?")
-                    etype = entry.get("entry_type", "?")
-                    label = entry.get("label") or "(none)"
-                    layers = entry.get("layer_count", 0)
-                    follow_ups = entry.get("follow_up_count", 0)
-
-                    line = f'- {sid}  [{etype}]  "{label}"'
-                    if etype == "store" and layers > 0:
-                        line += f"  ({layers} layer{'s' if layers != 1 else ''})"
-                    if etype == "query" and follow_ups > 0:
-                        line += f"  ({follow_ups} follow-up{'s' if follow_ups != 1 else ''})"
-                    content += line + "\n"
+                line = f'- {sid}  [{etype}]  "{label}"'
+                if etype == "store" and layers > 0:
+                    line += f"  ({layers} layer{'s' if layers != 1 else ''})"
+                if etype == "query" and follow_ups > 0:
+                    line += f"  ({follow_ups} follow-up{'s' if follow_ups != 1 else ''})"
+                content += line + "\n"
         else:
             scope = f" for directory '{directory}'" if directory else ""
             content = f"No context stores found{scope}."
@@ -645,6 +631,77 @@ class CtxListTool(BaseTool):
         tool_output = ToolOutput(
             status="success",
             content=content.strip(),
+            content_type="text",
+            metadata={"store_count": len(stores), "directory_filter": directory},
+        )
+        return [TextContent(type="text", text=tool_output.model_dump_json())]
+
+
+# ---------------------------------------------------------------------------
+# ctxtree
+# ---------------------------------------------------------------------------
+
+
+class CtxTreeTool(BaseTool):
+    def get_name(self) -> str:
+        return "ctxtree"
+
+    def get_description(self) -> str:
+        return "Show context stores as an indented tree, grouped by parent-child relationships."
+
+    def get_input_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "directory": {
+                    "type": "string",
+                    "description": "Absolute path to filter stores by project directory. Omit to show all stores.",
+                },
+            },
+            "required": [],
+            "additionalProperties": False,
+        }
+
+    def get_annotations(self) -> dict:
+        return {"readOnlyHint": True}
+
+    def get_system_prompt(self) -> str:
+        return ""
+
+    def get_request_model(self):
+        return ToolRequest
+
+    def requires_model(self) -> bool:
+        return False
+
+    def get_model_category(self):
+        from tools.models import ToolModelCategory
+
+        return ToolModelCategory.FAST_RESPONSE
+
+    async def prepare_prompt(self, request: ToolRequest) -> str:
+        return ""
+
+    def format_response(self, response: str, request: ToolRequest, model_info: Optional[dict] = None) -> str:
+        return response
+
+    async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
+        from tools.models import ToolOutput
+        from utils.context_registry import build_store_tree, list_stores
+
+        directory = arguments.get("directory")
+        stores = list_stores(directory)
+
+        if stores:
+            roots = build_store_tree(stores)
+            content = f"Found {len(stores)} node(s):\n\n" + "\n".join(_render_tree(roots))
+        else:
+            scope = f" for directory '{directory}'" if directory else ""
+            content = f"No context stores found{scope}."
+
+        tool_output = ToolOutput(
+            status="success",
+            content=content,
             content_type="text",
             metadata={"store_count": len(stores), "directory_filter": directory},
         )

@@ -70,7 +70,7 @@ from tools import (  # noqa: E402
     TracerTool,
     VersionTool,
 )
-from tools.context import CtxArmTool, CtxInitTool, CtxListTool, CtxQueryTool, CtxReadTool, CtxStoreTool
+from tools.context import CtxArmTool, CtxInitTool, CtxListTool, CtxQueryTool, CtxReadTool, CtxStoreTool, CtxTreeTool
 from tools.models import ToolOutput  # noqa: E402
 from tools.shared.exceptions import ToolExecutionError  # noqa: E402
 from utils.env import env_override_enabled, get_env  # noqa: E402
@@ -288,6 +288,7 @@ TOOLS = {
     "ctxstore": CtxStoreTool(),  # Store context layers in a persistent silo
     "ctxquery": CtxQueryTool(),  # Query against a context silo
     "ctxlist": CtxListTool(),  # List context stores for a directory
+    "ctxtree": CtxTreeTool(),  # Show context stores as an indented hierarchy tree
     "ctxread": CtxReadTool(),  # Read content of a specific context store node
     "ctxarm": CtxArmTool(),  # Arm/disarm a store for auto-revival on SessionStart
 }

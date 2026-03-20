@@ -9,7 +9,7 @@ from .chat import ChatTool
 from .clink import CLinkTool
 from .codereview import CodeReviewTool
 from .consensus import ConsensusTool
-from .context import CtxArmTool, CtxInitTool, CtxListTool, CtxQueryTool, CtxReadTool, CtxStoreTool
+from .context import CtxArmTool, CtxInitTool, CtxListTool, CtxQueryTool, CtxReadTool, CtxStoreTool, CtxTreeTool
 from .debug import DebugIssueTool
 from .docgen import DocgenTool
 from .imagegen import ImageGenTool
@@ -49,6 +49,7 @@ __all__ = [
     "CtxQueryTool",
     "CtxInitTool",
     "CtxListTool",
+    "CtxTreeTool",
     "CtxReadTool",
     "CtxArmTool",
 ]

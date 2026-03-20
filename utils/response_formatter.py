@@ -1,48 +1,10 @@
-import json
 import logging
 
 import yaml
-from mcp.types import TextContent
 
 logger = logging.getLogger("pal_mcp")
 
 _NEWLINE_THRESHOLD = 2
-
-
-def format_tool_result(result: list, tool_name: str) -> list:
-    """Format a list of MCP content items into human-readable text.
-
-    Iterates over result items and reformats any TextContent items that contain
-    recognizable JSON shapes. Non-TextContent items and items that fail parsing
-    are returned unchanged.
-    """
-    formatted = []
-    for item in result:
-        if item.type != "text":
-            formatted.append(item)
-            continue
-
-        try:
-            data = json.loads(item.text)
-            if not isinstance(data, dict):
-                formatted.append(item)
-                continue
-
-            if (
-                ("step_number" in data and "total_steps" in data)
-                or ("status" in data and isinstance(data.get("content"), str))
-                or isinstance(data.get("content"), str)
-            ):
-                text = _format_tool_output(data, tool_name)
-            else:
-                text = json.dumps(data, indent=2)
-
-            formatted.append(TextContent(type="text", text=text))
-        except Exception:
-            logger.debug("response_formatter: could not reformat item for tool %r", tool_name, exc_info=True)
-            formatted.append(item)
-
-    return formatted
 
 
 def _is_formatted_text(value: object) -> bool:
@@ -96,71 +58,6 @@ def _separate_fields(
             inline[key] = value
 
     return inline, formatted
-
-
-def _format_tool_output(data: dict, tool_name: str) -> str:
-    """Unified formatter for all PAL tool output shapes.
-
-    Renders: header, JSON blob of inline metadata, then formatted text
-    sections in insertion order.
-    """
-    model, provider = _extract_model_provider(data)
-    status = data.get("status", "")
-
-    step_number = data.get("step_number")
-    total_steps = data.get("total_steps")
-    step_info = f" [{step_number}/{total_steps}]" if step_number and total_steps else None
-
-    if status == "error":
-        header = _format_header(tool_name, "ERROR", "")
-    else:
-        header = _format_header(tool_name, model, provider, step_info=step_info)
-
-    lines = [header, ""]
-
-    inline, formatted = _separate_fields(data)
-
-    if inline:
-        lines.append(json.dumps(inline, indent=2, ensure_ascii=False))
-        lines.append("")
-
-    for key, text in formatted:
-        lines.append("---")
-        lines.append(f"key: {key}")
-        lines.append("---")
-        lines.append("")
-        lines.append(text)
-        lines.append("")
-
-    return "\n".join(lines)
-
-
-def _extract_model_provider(data: dict) -> tuple[str, str]:
-    """Extract model and provider from either top-level or nested metadata."""
-    metadata = data.get("metadata") or {}
-    model = metadata.get("model_used", "") or data.get("model_used", "")
-    provider = metadata.get("provider_used", "") or data.get("provider_used", "")
-    return model, provider
-
-
-def _format_header(
-    tool_name: str,
-    model: str,
-    provider: str,
-    step_info: str | None = None,
-) -> str:
-    """Build a heavy-line header string for tool output."""
-    name_part = f"━━━ {tool_name}"
-    if step_info:
-        name_part += step_info
-    name_part += " ━━━"
-
-    if model or provider:
-        model_str = model if model else ""
-        provider_str = f" ({provider})" if provider else ""
-        return f"{name_part} {model_str}{provider_str} ━━━"
-
-    return name_part
 
 
 # ---------------------------------------------------------------------------

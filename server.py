@@ -44,7 +44,6 @@ from mcp.types import (  # noqa: E402
     ToolsCapability,
 )
 
-import config  # noqa: E402
 from config import (  # noqa: E402
     DEFAULT_MODEL,
     __version__,
@@ -76,7 +75,6 @@ from tools.context import CtxArmTool, CtxInitTool, CtxListTool, CtxQueryTool, Ct
 from tools.models import ToolOutput  # noqa: E402
 from tools.shared.exceptions import ToolExecutionError  # noqa: E402
 from utils.env import env_override_enabled, get_env  # noqa: E402
-from utils.response_formatter import format_tool_result  # noqa: E402
 
 # Configure logging for server operations
 # Can be controlled via LOG_LEVEL environment variable (DEBUG, INFO, WARNING, ERROR)
@@ -903,17 +901,14 @@ def _save_response_content(tool_name: str, result: list, continuation_id: str | 
         logger.debug(f"Failed to save response content for {tool_name}", exc_info=True)
 
 
-def _apply_output_format(result: list, tool_name: str, raw: bool) -> list:
+def _apply_output_format(result: list, raw: bool) -> list:
     """Route tool results through the appropriate output formatter.
 
-    - ``raw=True``: return JSON as-is (original behaviour)
-    - ``FORMATTED_OUTPUT`` env var: terminal-friendly rich text
+    - ``raw=True``: return JSON as-is
     - default: markdown document with YAML front matter
     """
     if raw:
         return result
-    if config.FORMATTED_OUTPUT:
-        return format_tool_result(result, tool_name)
 
     from utils.response_formatter import render_markdown_output
 
@@ -1064,7 +1059,7 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
             result = await tool.execute(arguments)
             if _store_path and result:
                 result = _inject_store_path_continuation(result, _store_path)
-            result = _apply_output_format(result, name, raw_output)
+            result = _apply_output_format(result, raw_output)
             return result
 
         # Handle auto mode at MCP boundary - resolve to specific model
@@ -1129,7 +1124,7 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
 
         _save_response_content(name, result, arguments.get("continuation_id"))
 
-        result = _apply_output_format(result, name, raw_output)
+        result = _apply_output_format(result, raw_output)
 
         # Log completion to activity file
         try:

@@ -32,10 +32,6 @@ DEFAULT_MODEL = get_env("DEFAULT_MODEL", "auto") or "auto"
 # Auto mode detection - when DEFAULT_MODEL is "auto", Claude picks the model
 IS_AUTO_MODE = DEFAULT_MODEL.lower() == "auto"
 
-# Output formatting
-# When True, tool results are formatted as readable text instead of compact JSON
-# Set PAL_OUTPUT_FORMAT=json to get legacy JSON output
-FORMATTED_OUTPUT = get_env("PAL_OUTPUT_FORMAT", "formatted") != "json"
 
 # Each provider (gemini.py, openai.py, xai.py, dial.py, openrouter.py, custom.py, azure_openai.py)
 # defines its own MODEL_CAPABILITIES

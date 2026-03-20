@@ -1,10 +1,9 @@
 """
-Context silo tools — init, store, query, and list context stores.
-
-Four tools: ctxinit, ctxstore, ctxquery, ctxlist.
+Context silo tools — init, store, query, list, read, and arm context stores.
 """
 
 import logging
+import os
 from typing import Any, Optional
 
 from mcp.types import TextContent
@@ -31,6 +30,30 @@ def _truncate_label(text: str, max_len: int = 80) -> str:
         return text
     truncated = text[:max_len].rsplit(" ", 1)[0]
     return truncated + "…"
+
+
+def _render_tree(nodes: list[dict], indent: int = 0) -> list[str]:
+    """Recursively render tree nodes as indented dash lines."""
+    lines: list[str] = []
+    prefix = "  " * indent + "- "
+    for node in nodes:
+        sid = node.get("store_id", "?")
+        etype = node.get("entry_type", "?")
+        label = _truncate_label(node.get("label") or "(none)")
+
+        suffix = ""
+        if etype == "store" and node.get("layer_count", 0) > 0:
+            n = node["layer_count"]
+            suffix = f"  ({n} layer{'s' if n != 1 else ''})"
+        elif etype == "query" and node.get("follow_up_count", 0) > 0:
+            n = node["follow_up_count"]
+            suffix = f"  ({n} follow-up{'s' if n != 1 else ''})"
+        elif etype == "tool" and node.get("tool_name"):
+            suffix = f"  (tool: {node['tool_name']})"
+
+        lines.append(f'{prefix}{sid}  [{etype}]  "{label}"{suffix}')
+        lines.extend(_render_tree(node.get("children", []), indent + 1))
+    return lines
 
 
 # ---------------------------------------------------------------------------
@@ -551,6 +574,14 @@ class CtxListTool(BaseTool):
                     "type": "string",
                     "description": "Absolute path to filter stores by project directory. Omit to list all stores.",
                 },
+                "view": {
+                    "type": "string",
+                    "enum": ["flat", "tree"],
+                    "description": (
+                        "Output format. 'flat' (default) lists each node on one line. "
+                        "'tree' renders the parent-child hierarchy with indentation."
+                    ),
+                },
             },
             "required": [],
             "additionalProperties": False,
@@ -581,26 +612,32 @@ class CtxListTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
-        from utils.context_registry import list_stores
+        from utils.context_registry import build_store_tree, list_stores
 
         directory = arguments.get("directory")
+        view = arguments.get("view", "flat")
         stores = list_stores(directory)
 
         if stores:
             content = f"Found {len(stores)} node(s):\n\n"
-            for entry in stores:
-                sid = entry.get("store_id", "?")
-                etype = entry.get("entry_type", "?")
-                label = entry.get("label") or "(none)"
-                layers = entry.get("layer_count", 0)
-                follow_ups = entry.get("follow_up_count", 0)
 
-                line = f'- {sid}  [{etype}]  "{label}"'
-                if etype == "store" and layers > 0:
-                    line += f"  ({layers} layer{'s' if layers != 1 else ''})"
-                if etype == "query" and follow_ups > 0:
-                    line += f"  ({follow_ups} follow-up{'s' if follow_ups != 1 else ''})"
-                content += line + "\n"
+            if view == "tree":
+                roots = build_store_tree(stores)
+                content += "\n".join(_render_tree(roots))
+            else:
+                for entry in stores:
+                    sid = entry.get("store_id", "?")
+                    etype = entry.get("entry_type", "?")
+                    label = entry.get("label") or "(none)"
+                    layers = entry.get("layer_count", 0)
+                    follow_ups = entry.get("follow_up_count", 0)
+
+                    line = f'- {sid}  [{etype}]  "{label}"'
+                    if etype == "store" and layers > 0:
+                        line += f"  ({layers} layer{'s' if layers != 1 else ''})"
+                    if etype == "query" and follow_ups > 0:
+                        line += f"  ({follow_ups} follow-up{'s' if follow_ups != 1 else ''})"
+                    content += line + "\n"
         else:
             scope = f" for directory '{directory}'" if directory else ""
             content = f"No context stores found{scope}."
@@ -610,6 +647,220 @@ class CtxListTool(BaseTool):
             content=content.strip(),
             content_type="text",
             metadata={"store_count": len(stores), "directory_filter": directory},
+        )
+        return [TextContent(type="text", text=tool_output.model_dump_json())]
+
+
+# ---------------------------------------------------------------------------
+# ctxread
+# ---------------------------------------------------------------------------
+
+
+class CtxReadTool(BaseTool):
+    def get_name(self) -> str:
+        return "ctxread"
+
+    def get_description(self) -> str:
+        return (
+            "Read the content of a context store node. Without a page number, returns a table of contents. "
+            "With a page number, returns the full prompt and response for that layer."
+        )
+
+    def get_input_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "store_id": {
+                    "type": "string",
+                    "description": "The store_id to read. Must exist in the context registry.",
+                },
+                "page": {
+                    "type": "integer",
+                    "description": "1-indexed page number. Each page is one prompt+response pair. Omit for table of contents.",
+                    "minimum": 1,
+                },
+            },
+            "required": ["store_id"],
+            "additionalProperties": False,
+        }
+
+    def get_annotations(self) -> dict:
+        return {"readOnlyHint": True}
+
+    def get_system_prompt(self) -> str:
+        return ""
+
+    def get_request_model(self):
+        return ToolRequest
+
+    def requires_model(self) -> bool:
+        return False
+
+    def get_model_category(self):
+        from tools.models import ToolModelCategory
+
+        return ToolModelCategory.FAST_RESPONSE
+
+    async def prepare_prompt(self, request: ToolRequest) -> str:
+        return ""
+
+    def format_response(self, response: str, request: ToolRequest, model_info: Optional[dict] = None) -> str:
+        return response
+
+    def _get_page_label(self, page_turns: list, entry_label: str | None) -> str:
+        """Extract the label for a page from the assistant turn's metadata, falling back to entry label."""
+        if len(page_turns) >= 2:
+            meta = page_turns[1].model_metadata or {}
+            label = meta.get("context_label")
+            if label:
+                return label
+        return entry_label or "(none)"
+
+    def _get_page_date(self, page_turns: list) -> str:
+        """Extract a short date string from the user turn's timestamp."""
+        if page_turns:
+            ts = page_turns[0].timestamp or ""
+            return ts[:10] if len(ts) >= 10 else ts
+        return "unknown"
+
+    def _get_page_model(self, page_turns: list) -> str:
+        """Get the model name from the assistant turn."""
+        if len(page_turns) >= 2:
+            return page_turns[1].model_name or "unknown"
+        return "unknown"
+
+    def _get_page_files(self, page_turns: list) -> list[str]:
+        """Get file paths from the user turn."""
+        if page_turns and page_turns[0].files:
+            return page_turns[0].files
+        return []
+
+    def _render_toc(self, store_id: str, entry: dict, pages: list) -> str:
+        """Render the table of contents in markdown TOC format."""
+        total = len(pages)
+        etype = entry.get("entry_type", "?")
+        directory = entry.get("directory", "")
+
+        lines = [
+            f"## {store_id}",
+            "",
+            f"**Type:** {etype} | **Pages:** {total}  ",
+            f"**Directory:** {directory}",
+            "",
+            "## Table of Contents",
+            "",
+        ]
+
+        for i, page_turns in enumerate(pages, 1):
+            label = _truncate_label(self._get_page_label(page_turns, entry.get("label")))
+            date = self._get_page_date(page_turns)
+            model = self._get_page_model(page_turns)
+            files = self._get_page_files(page_turns)
+
+            anchor = f"{store_id}.p{i}"
+            lines.append(f"- [{i}. {label}](#{anchor}) — {date}, {model}")
+            if files:
+                basenames = ", ".join(os.path.basename(f) for f in files)
+                lines.append(f"  - Files: {basenames}")
+
+        return "\n".join(lines)
+
+    def _render_page(self, store_id: str, page_num: int, total: int, page_turns: list, entry_label: str | None) -> str:
+        """Render a single page with full prompt and response in markdown format."""
+        label = self._get_page_label(page_turns, entry_label)
+        model = self._get_page_model(page_turns)
+        date = self._get_page_date(page_turns)
+        files = self._get_page_files(page_turns)
+
+        lines = [
+            f"# Page {page_num} of {total} — {store_id}",
+            "",
+            f"**Label:** {label}",
+            f"**Model:** {model}",
+            f"**Timestamp:** {date}",
+        ]
+
+        if files:
+            lines.append("")
+            lines.append("**Files:**")
+            for f in files:
+                lines.append(f"- {f}")
+
+        user_turn = page_turns[0]
+        lines.append("")
+        lines.append("## Prompt")
+        lines.append("")
+        lines.append(user_turn.content)
+
+        if len(page_turns) >= 2:
+            lines.append("")
+            lines.append("## Response")
+            lines.append("")
+            lines.append(page_turns[1].content)
+        else:
+            lines.append("")
+            lines.append("*(response pending or incomplete)*")
+
+        return "\n".join(lines)
+
+    async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
+        from tools.models import ToolOutput
+        from utils.context_registry import get_store_entry, resolve_thread_id
+        from utils.conversation_memory import get_thread
+
+        store_id = arguments.get("store_id", "")
+        page = arguments.get("page")
+
+        thread_id = resolve_thread_id(store_id)
+        if not thread_id:
+            error = ToolOutput(status="error", content=f'Store "{store_id}" not found.', content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        entry = get_store_entry(store_id) or {}
+
+        thread = get_thread(thread_id)
+        if not thread:
+            error = ToolOutput(
+                status="error",
+                content=(
+                    f'Thread data unavailable for "{store_id}". '
+                    "The store exists in the registry but the thread was not found in memory."
+                ),
+                content_type="text",
+            )
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        if not thread.turns:
+            error = ToolOutput(
+                status="error",
+                content=f'Store "{store_id}" exists but has no recorded turns.',
+                content_type="text",
+            )
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        # Group turns into pages (each user+assistant pair = 1 page)
+        pages: list[list] = []
+        for i in range(0, len(thread.turns), 2):
+            pages.append(thread.turns[i : i + 2])
+        total_pages = len(pages)
+
+        if page is None:
+            content = self._render_toc(store_id, entry, pages)
+        else:
+            if page < 1 or page > total_pages:
+                error = ToolOutput(
+                    status="error",
+                    content=f"Page {page} does not exist. Store has {total_pages} page(s).",
+                    content_type="text",
+                )
+                return [TextContent(type="text", text=error.model_dump_json())]
+            content = self._render_page(store_id, page, total_pages, pages[page - 1], entry.get("label"))
+
+        tool_output = ToolOutput(
+            status="success",
+            content=content,
+            content_type="text",
+            metadata={"store_id": store_id, "total_pages": total_pages, "page": page},
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]
 

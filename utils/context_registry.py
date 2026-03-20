@@ -170,6 +170,35 @@ def list_stores(directory: str | None = None) -> list[dict]:
     return list(registry.values())
 
 
+def build_store_tree(entries: list[dict]) -> list[dict]:
+    """Build a tree from flat registry entries using parent_store_id relationships.
+
+    Returns root nodes, each augmented with a sorted ``children`` list.
+    Orphans (parent not in the entry set) are promoted to roots.
+    """
+    by_id: dict[str, dict] = {}
+    for entry in entries:
+        node = {**entry, "children": []}
+        by_id[node["store_id"]] = node
+
+    roots: list[dict] = []
+    for node in by_id.values():
+        parent_sid = node.get("parent_store_id")
+        parent = by_id.get(parent_sid) if parent_sid else None
+        if parent is not None:
+            parent["children"].append(node)
+        else:
+            roots.append(node)
+
+    def _sort(nodes: list[dict]) -> None:
+        nodes.sort(key=lambda n: n["store_id"])
+        for n in nodes:
+            _sort(n["children"])
+
+    _sort(roots)
+    return roots
+
+
 # ---------------------------------------------------------------------------
 # Armed store management — {PAL_STORAGE_DIR}/context/armed.json
 # Maps directory paths to store_ids for automatic SessionStart revival.

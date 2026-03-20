@@ -1,17 +1,18 @@
 """
-NarrateWorkflow tool - Step-by-step document composition grounded in source files and context store content
+NarrateWorkflow tool - Collaborative document composition grounded in source files and context store content
 
 This tool provides a structured workflow for composing polished, human-readable documents from
-source code, context store pages, and structured investigation notes. It guides the CLI agent
-through systematic source-gathering steps with forced pauses between each step to ensure
-thorough file examination and observation capture before the expert model writes the document.
+source code, context store pages, and structured investigation notes. The CLI agent and expert
+model collaborate as co-authors: the CLI reads source files, designs document structure, and
+drafts prose sections across workflow steps. The expert model then refines, synthesizes, and
+polishes the draft into a final document grounded in the full source file content.
 
 Key features:
-- Step-by-step source-gathering workflow with progress tracking
+- Collaborative multi-step authoring with CLI drafting and expert refinement
 - Context store integration (resolve store_id to thread turns, select specific pages)
-- Context-aware file embedding (references during investigation, full content for writing)
-- Automatic structural observation tracking
-- Expert writing integration with external models
+- Context-aware file embedding (references during investigation, full content for expert)
+- Progressive document structure development across steps
+- Expert refinement integration with external models
 - Support for multiple document types (overview, deep_dive, rationale, reference, general)
 """
 
@@ -34,28 +35,29 @@ logger = logging.getLogger(__name__)
 # Tool-specific field descriptions for narrate workflow
 NARRATE_WORKFLOW_FIELD_DESCRIPTIONS = {
     "step": (
-        "The source-gathering plan. Step 1: State your strategy, including which files and directories to map, "
-        "which context store pages to read, and how you will structure your investigation to cover all source "
-        "material needed for the document. Later steps: Report structural observations and adapt the plan as "
-        "new source content is examined."
+        "The document composition plan. Step 1: State your strategy — which files and directories to read, "
+        "which context store pages to consult, and your proposed document outline (sections, narrative arc). "
+        "Later steps: Report what you read, refine the outline, and draft prose sections in the findings field. "
+        "You are co-authoring this document — the expert model refines your draft, not writes from scratch."
     ),
     "step_number": (
-        "The index of the current step in the source-gathering sequence, beginning at 1. Each step should build "
+        "The index of the current step in the composition sequence, beginning at 1. Each step should build "
         "upon or revise the previous one."
     ),
     "total_steps": (
-        "Your current estimate for how many steps will be needed to gather all source material. "
-        "Adjust as new content is discovered."
+        "Your current estimate for how many steps will be needed to complete your draft. "
+        "Adjust as the document takes shape."
     ),
     "next_step_required": (
-        "Set to true if you plan to continue gathering source material with another step. False means you believe "
-        "all necessary source content has been collected and is ready for the expert writer."
+        "Set to true if you plan to continue drafting with another step. False means your draft and source "
+        "material are ready for the expert model to refine into the final document."
     ),
     "findings": (
-        "Structural observations extracted from this step — component responsibilities, data flows, key abstractions, "
-        "design patterns, and notable implementation details. These observations are the writer's raw material. "
-        "IMPORTANT: Be precise and concrete; cite specific file paths, class names, and function names. "
-        "In later steps, confirm or supplement past observations with additional evidence."
+        "Your draft prose and structural observations for this step. IMPORTANT: This is not raw notes — write "
+        "actual draft paragraphs the expert model can refine. Include proposed section headings, narrative "
+        "transitions, and concrete observations citing specific file paths, class names, and function names. "
+        "Step 1: propose a document outline with section headings. Steps 2+: draft prose for each section, "
+        "building on previous steps. The expert model refines your draft — give it quality material to work with."
     ),
     "files_checked": (
         "List all files examined (absolute paths). Include even ruled-out files to track exploration path."
@@ -128,11 +130,11 @@ class NarrateTool(WorkflowTool):
     """
     Narrate workflow tool for composing polished documents grounded in source files and context stores.
 
-    This tool implements a structured source-gathering workflow that guides the agent through
-    methodical investigation steps, ensuring thorough file examination and observation capture
-    before the expert model writes the final document. It supports multiple document types
-    (overview, deep_dive, rationale, reference, general) and can incorporate context store
-    pages as additional authoritative background material.
+    This tool implements a collaborative authoring workflow where the CLI agent reads source
+    files, designs document structure, and drafts prose across workflow steps. The expert model
+    then refines and polishes the draft into a final document. Supports multiple document types
+    (overview, deep_dive, rationale, reference, general) and context store pages as additional
+    authoritative background material.
     """
 
     def __init__(self):
@@ -147,7 +149,7 @@ class NarrateTool(WorkflowTool):
         return (
             "Composes polished, human-readable documents grounded in source files and context store content. "
             "Use for overviews, deep dives, design rationale, and reference documentation. "
-            "Guides systematic source gathering before handing off to an expert technical writer."
+            "You co-author the document by reading source files and drafting prose; an expert model refines it."
         )
 
     def get_system_prompt(self) -> str:
@@ -235,7 +237,7 @@ class NarrateTool(WorkflowTool):
     def get_required_actions(
         self, step_number: int, confidence: str, findings: str, total_steps: int, request=None
     ) -> list[str]:
-        """Define required actions for each source-gathering phase."""
+        """Define required actions for each composition phase."""
         if step_number == 1:
             store_id = getattr(request, "store_id", None) if request else None
             store_note = (
@@ -244,27 +246,25 @@ class NarrateTool(WorkflowTool):
                 else ""
             )
             return [
-                "Map the file structure of all relevant_files — list directories, modules, and key files",
-                "Identify the major components, classes, and interfaces involved in the topic" + store_note,
-                "Note entry points, public APIs, and primary data flows at a high level",
-                "Do NOT read full file bodies yet — map scope first",
-                "Identify which specific files and store pages will be needed in subsequent steps",
+                "Map the file structure of all relevant_files — list directories, modules, and key files" + store_note,
+                "Read key entry points to understand the high-level architecture",
+                "Propose a document outline: section headings, narrative arc, what each section will cover",
+                "Report the outline and initial observations in findings as draft prose, not raw notes",
             ]
         elif step_number < total_steps:
             return [
-                "Read the identified source files in full — extract concrete structural observations",
-                "Document specific class names, function signatures, and module relationships",
-                "Trace primary execution paths and data transformations through the code",
-                "Read any specified store pages and note relevant background context",
-                "Record all observations with precise file references for the expert writer",
+                "Read source files in full — understand the components, interfaces, and code paths",
+                "Draft prose sections for the document — write actual paragraphs, not bullet summaries",
+                "Cite specific file paths, class names, and function signatures in your draft",
+                "Read any specified store pages and weave relevant context into your draft",
+                "Refine the document outline based on what you learned — add or reorganize sections as needed",
             ]
         else:
             return [
-                "Verify all source files directly relevant to the document topic have been examined",
-                "Confirm that structural observations cover the components, flows, and patterns to be documented",
-                "Ensure store pages with relevant background context have been read if store_id is set",
-                "Check that relevant_files and relevant_context are complete and accurate",
-                "Confirm findings contain sufficient concrete detail for the expert writer to proceed",
+                "Review your accumulated draft for completeness — are all sections covered?",
+                "Verify source coverage: have all files needed for accurate claims been read?",
+                "Polish your draft prose — the expert model will refine it, so give it quality material",
+                "Ensure relevant_files and relevant_context are complete and accurate",
             ]
 
     def should_call_expert_analysis(self, consolidated_findings, request=None) -> bool:
@@ -367,15 +367,15 @@ class NarrateTool(WorkflowTool):
             return ""
 
     def _build_narrate_summary(self, consolidated_findings) -> str:
-        """Prepare a comprehensive summary of the source-gathering investigation."""
+        """Prepare a comprehensive summary of the agent's draft and investigation."""
         summary_parts = [
-            "=== SYSTEMATIC SOURCE-GATHERING INVESTIGATION SUMMARY ===",
-            f"Total steps: {len(consolidated_findings.findings)}",
+            "=== AGENT'S DRAFT AND INVESTIGATION SUMMARY ===",
+            f"Total composition steps: {len(consolidated_findings.findings)}",
             f"Files examined: {len(consolidated_findings.files_checked)}",
             f"Relevant files identified: {len(consolidated_findings.relevant_files)}",
             f"Code elements identified: {len(consolidated_findings.relevant_context)}",
             "",
-            "=== INVESTIGATION PROGRESSION ===",
+            "=== DRAFT PROGRESSION (refine this into the final document) ===",
         ]
 
         for finding in consolidated_findings.findings:
@@ -400,11 +400,14 @@ class NarrateTool(WorkflowTool):
         return False
 
     def get_expert_analysis_instruction(self) -> str:
-        """Get specific instruction for the narrate expert writing pass."""
+        """Get specific instruction for the narrate expert refinement pass."""
         document_type = self.narrate_config.get("document_type", "general")
         return (
-            f"Compose a complete, polished {document_type} document. Write it as genuine narrative grounded entirely "
-            "in the source files and context provided. Follow the structure and quality directives in your system prompt."
+            f"The agent has drafted a {document_type} document in the investigation notes below. Your job is to "
+            "refine, restructure, and polish this draft into a complete, publication-quality document. Preserve the "
+            "agent's structural insights and concrete code references. Improve prose quality, narrative flow, and "
+            "document structure. Fill gaps where the draft is thin, but never fabricate claims not supported by the "
+            "source files. Follow the writing standards and document type guidance in your system prompt."
         )
 
     # Hook method overrides for narrate-specific behavior
@@ -471,8 +474,8 @@ class NarrateTool(WorkflowTool):
             store_note = " and context store content"
 
         base_message = (
-            f"NARRATION IS COMPLETE. The document above was composed by the expert model grounded in source files"
-            f"{store_note}. Present it to the user verbatim without summarizing or reformatting."
+            f"NARRATION IS COMPLETE. The expert model refined your draft into the final document above, grounded "
+            f"in source files{store_note}. Present it to the user verbatim without summarizing or reformatting."
         )
 
         if expert_analysis_used:
@@ -505,32 +508,31 @@ class NarrateTool(WorkflowTool):
             if getattr(request, "store_id", None):
                 store_clause = (
                     " If a store_id was provided, use ctxread to explore the store and identify which pages "
-                    "contain relevant background context — do not include pages yet, just identify them."
+                    "contain relevant background context."
                 )
             next_steps = (
-                f"MANDATORY: DO NOT call the {self.get_name()} tool again immediately. You MUST first map "
+                f"MANDATORY: DO NOT call the {self.get_name()} tool again immediately. You MUST first read "
                 f"the source files specified in relevant_files using appropriate tools.{store_clause} "
-                f"CRITICAL AWARENESS: At this stage you are mapping scope only — identify the major components, "
-                f"key files, and overall structure without reading full file bodies yet. "
-                f"Only call {self.get_name()} again AFTER completing your scope mapping. When you call "
-                f"{self.get_name()} next time, use step_number: {step_number + 1} and report the structure "
-                f"you mapped, files you identified for deep reading, and any store pages you flagged."
+                f"You are CO-AUTHORING this document — read the source material, then propose a document "
+                f"outline and begin drafting prose. The expert model will refine your draft, not write from "
+                f"scratch. When you call {self.get_name()} next time, use step_number: {step_number + 1} and "
+                f"include your proposed outline and initial draft prose in the findings field."
             )
         elif step_number < request.total_steps:
             next_steps = (
-                f"STOP! Do NOT call {self.get_name()} again yet. Based on your scope map, you need to read "
-                f"the source files and store pages in detail. MANDATORY ACTIONS before calling "
+                f"STOP! Do NOT call {self.get_name()} again yet. Continue reading source files and drafting "
+                f"document sections. MANDATORY ACTIONS before calling "
                 f"{self.get_name()} step {step_number + 1}:\n"
                 + "\n".join(f"{i + 1}. {action}" for i, action in enumerate(required_actions))
-                + f"\n\nOnly call {self.get_name()} again with step_number: {step_number + 1} AFTER "
-                + "completing these source-gathering tasks."
+                + "\n\nYou are co-authoring — write actual prose paragraphs in your findings, not raw notes. "
+                + f"Only call {self.get_name()} again with step_number: {step_number + 1} AFTER drafting."
             )
         else:
             next_steps = (
-                f"WAIT! Your source gathering needs final verification. DO NOT call {self.get_name()} immediately. REQUIRED ACTIONS:\n"
+                f"WAIT! Review your draft before submitting. DO NOT call {self.get_name()} immediately. REQUIRED ACTIONS:\n"
                 + "\n".join(f"{i + 1}. {action}" for i, action in enumerate(required_actions))
-                + f"\n\nREMEMBER: Ensure all source files and relevant context store pages have been examined. "
-                f"Findings must contain sufficient concrete detail for the expert writer. "
+                + f"\n\nYour draft in findings is what the expert model will refine into the final document. "
+                f"Make it as complete and well-written as you can. "
                 f"Then call {self.get_name()} with step_number: {step_number + 1}."
             )
 

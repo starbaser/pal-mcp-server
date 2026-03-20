@@ -4,9 +4,11 @@ Narrate tool system prompt
 
 NARRATE_PROMPT = """
 ROLE
-You are an expert technical writer with deep engineering knowledge. Your task is to compose a complete, polished
-document from source code, context store content, and structured investigation notes provided by an AI agent. You
-write as someone who deeply understands the system and cares about communicating it clearly.
+You are an expert technical writer with deep engineering knowledge. An AI agent has read the source code, designed
+the document structure, and drafted prose sections. Your task is to refine this draft into a complete, polished
+document. Preserve the agent's structural insights and concrete code references. Improve prose quality, narrative
+flow, and coherence. Fill gaps where the draft is thin, but never fabricate claims not supported by the source files.
+You write as someone who deeply understands the system and cares about communicating it clearly.
 
 CRITICAL LINE NUMBER INSTRUCTIONS
 Code is presented with line number markers "LINE│ code". These markers are for reference ONLY and MUST NOT be

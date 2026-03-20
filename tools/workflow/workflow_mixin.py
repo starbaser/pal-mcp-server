@@ -537,13 +537,15 @@ class BaseWorkflowMixin(ABC):
                     self._model_context = ModelContext(model_name)
                     self._current_model_name = model_name
 
-            # Use the same file preparation logic as BaseTool with token budgeting
-            continuation_id = self.get_request_continuation_id(request)
+            # Use the same file preparation logic as BaseTool with token budgeting.
+            # Pass continuation_id=None to bypass filter_new_files deduplication — intermediate
+            # steps store file paths via add_turn(files=...) even though they only reference
+            # (not embed) content, so the filter would incorrectly skip all files on the final step.
             remaining_tokens = arguments.get("_remaining_tokens")
 
             file_content, processed_files = self._prepare_file_content_for_prompt(
                 request_files,
-                continuation_id,
+                None,
                 "Workflow files for analysis",
                 remaining_budget=remaining_tokens,
                 arguments=arguments,

@@ -2,17 +2,17 @@
 NarrateWorkflow tool - Collaborative document composition grounded in source files and context store content
 
 This tool provides a structured workflow for composing polished, human-readable documents from
-source code, context store pages, and structured investigation notes. The CLI agent and expert
-model collaborate as co-authors: the CLI reads source files, designs document structure, and
-drafts prose sections across workflow steps. The expert model then refines, synthesizes, and
-polishes the draft into a final document grounded in the full source file content.
+source code, context store pages, and structured investigation notes. Two models collaborate:
+the investigating model reads source files, designs document structure, and builds up prose
+and observations across workflow steps. The expert model receives the full source files alongside
+the investigation notes and synthesizes everything into a polished final document.
 
 Key features:
-- Collaborative multi-step authoring with CLI drafting and expert refinement
+- Two-model collaborative authoring workflow
 - Context store integration (resolve store_id to thread turns, select specific pages)
 - Context-aware file embedding (references during investigation, full content for expert)
 - Progressive document structure development across steps
-- Expert refinement integration with external models
+- Expert synthesis with external models
 - Support for multiple document types (overview, deep_dive, rationale, reference, general)
 """
 
@@ -37,8 +37,8 @@ NARRATE_WORKFLOW_FIELD_DESCRIPTIONS = {
     "step": (
         "The document composition plan. Step 1: State your strategy — which files and directories to read, "
         "which context store pages to consult, and your proposed document outline (sections, narrative arc). "
-        "Later steps: Report what you read, refine the outline, and draft prose sections in the findings field. "
-        "You are co-authoring this document — the expert model refines your draft, not writes from scratch."
+        "Later steps: Report what you read, refine the outline, and contribute draft prose in the findings field. "
+        "You and the expert model are collaborating — your investigation and prose inform the final document."
     ),
     "step_number": (
         "The index of the current step in the composition sequence, beginning at 1. Each step should build "
@@ -49,15 +49,15 @@ NARRATE_WORKFLOW_FIELD_DESCRIPTIONS = {
         "Adjust as the document takes shape."
     ),
     "next_step_required": (
-        "Set to true if you plan to continue drafting with another step. False means your draft and source "
-        "material are ready for the expert model to refine into the final document."
+        "Set to true if you plan to continue with another step. False means your investigation and prose "
+        "contributions are ready to hand off to the expert model for final synthesis."
     ),
     "findings": (
-        "Your draft prose and structural observations for this step. IMPORTANT: This is not raw notes — write "
-        "actual draft paragraphs the expert model can refine. Include proposed section headings, narrative "
-        "transitions, and concrete observations citing specific file paths, class names, and function names. "
-        "Step 1: propose a document outline with section headings. Steps 2+: draft prose for each section, "
-        "building on previous steps. The expert model refines your draft — give it quality material to work with."
+        "Your prose contributions and structural observations for this step. Write substantive content — "
+        "proposed section headings, narrative prose, and concrete observations citing specific file paths, "
+        "class names, and function names. Step 1: propose a document outline with section headings. "
+        "Steps 2+: write prose for each section, building on previous steps. The expert model will "
+        "synthesize your contributions with its own reading of the source files into the final document."
     ),
     "files_checked": (
         "List all files examined (absolute paths). Include even ruled-out files to track exploration path."
@@ -130,11 +130,11 @@ class NarrateTool(WorkflowTool):
     """
     Narrate workflow tool for composing polished documents grounded in source files and context stores.
 
-    This tool implements a collaborative authoring workflow where the CLI agent reads source
-    files, designs document structure, and drafts prose across workflow steps. The expert model
-    then refines and polishes the draft into a final document. Supports multiple document types
-    (overview, deep_dive, rationale, reference, general) and context store pages as additional
-    authoritative background material.
+    Two models collaborate: the investigating model reads source files, designs document
+    structure, and contributes prose across workflow steps. The expert model receives the full
+    source files and investigation notes, then synthesizes everything into a polished final
+    document. Supports multiple document types (overview, deep_dive, rationale, reference,
+    general) and context store pages as additional authoritative background material.
     """
 
     def __init__(self):
@@ -149,7 +149,7 @@ class NarrateTool(WorkflowTool):
         return (
             "Composes polished, human-readable documents grounded in source files and context store content. "
             "Use for overviews, deep dives, design rationale, and reference documentation. "
-            "You co-author the document by reading source files and drafting prose; an expert model refines it."
+            "Two models collaborate: you investigate and contribute prose, the expert synthesizes the final document."
         )
 
     def get_system_prompt(self) -> str:
@@ -369,13 +369,13 @@ class NarrateTool(WorkflowTool):
     def _build_narrate_summary(self, consolidated_findings) -> str:
         """Prepare a comprehensive summary of the agent's draft and investigation."""
         summary_parts = [
-            "=== AGENT'S DRAFT AND INVESTIGATION SUMMARY ===",
+            "=== INVESTIGATION AND PROSE CONTRIBUTIONS ===",
             f"Total composition steps: {len(consolidated_findings.findings)}",
             f"Files examined: {len(consolidated_findings.files_checked)}",
             f"Relevant files identified: {len(consolidated_findings.relevant_files)}",
             f"Code elements identified: {len(consolidated_findings.relevant_context)}",
             "",
-            "=== DRAFT PROGRESSION (refine this into the final document) ===",
+            "=== COMPOSITION PROGRESSION ===",
         ]
 
         for finding in consolidated_findings.findings:
@@ -400,14 +400,15 @@ class NarrateTool(WorkflowTool):
         return False
 
     def get_expert_analysis_instruction(self) -> str:
-        """Get specific instruction for the narrate expert refinement pass."""
+        """Get specific instruction for the narrate expert synthesis pass."""
         document_type = self.narrate_config.get("document_type", "general")
         return (
-            f"The agent has drafted a {document_type} document in the investigation notes below. Your job is to "
-            "refine, restructure, and polish this draft into a complete, publication-quality document. Preserve the "
-            "agent's structural insights and concrete code references. Improve prose quality, narrative flow, and "
-            "document structure. Fill gaps where the draft is thin, but never fabricate claims not supported by the "
-            "source files. Follow the writing standards and document type guidance in your system prompt."
+            f"You are collaborating on a {document_type} document. The investigating model has contributed prose, "
+            "structural observations, and a document outline in the notes below. You also have the full source files. "
+            "Synthesize both — the investigation notes and your own reading of the code — into a complete, "
+            "publication-quality document. Build on the investigating model's insights, add depth from your own "
+            "reading, and shape everything into polished prose. Never fabricate claims not supported by the source "
+            "files. Follow the writing standards and document type guidance in your system prompt."
         )
 
     # Hook method overrides for narrate-specific behavior
@@ -474,7 +475,7 @@ class NarrateTool(WorkflowTool):
             store_note = " and context store content"
 
         base_message = (
-            f"NARRATION IS COMPLETE. The expert model refined your draft into the final document above, grounded "
+            f"NARRATION IS COMPLETE. The final document above was produced collaboratively, grounded "
             f"in source files{store_note}. Present it to the user verbatim without summarizing or reformatting."
         )
 
@@ -513,10 +514,11 @@ class NarrateTool(WorkflowTool):
             next_steps = (
                 f"MANDATORY: DO NOT call the {self.get_name()} tool again immediately. You MUST first read "
                 f"the source files specified in relevant_files using appropriate tools.{store_clause} "
-                f"You are CO-AUTHORING this document — read the source material, then propose a document "
-                f"outline and begin drafting prose. The expert model will refine your draft, not write from "
-                f"scratch. When you call {self.get_name()} next time, use step_number: {step_number + 1} and "
-                f"include your proposed outline and initial draft prose in the findings field."
+                f"You are collaborating with the expert model on this document — read the source material, "
+                f"propose a document outline, and begin writing prose. Your contributions matter: the expert "
+                f"model will synthesize your work with its own source reading. When you call {self.get_name()} "
+                f"next time, use step_number: {step_number + 1} and include your proposed outline and "
+                f"prose contributions in the findings field."
             )
         elif step_number < request.total_steps:
             next_steps = (
@@ -524,15 +526,15 @@ class NarrateTool(WorkflowTool):
                 f"document sections. MANDATORY ACTIONS before calling "
                 f"{self.get_name()} step {step_number + 1}:\n"
                 + "\n".join(f"{i + 1}. {action}" for i, action in enumerate(required_actions))
-                + "\n\nYou are co-authoring — write actual prose paragraphs in your findings, not raw notes. "
-                + f"Only call {self.get_name()} again with step_number: {step_number + 1} AFTER drafting."
+                + "\n\nWrite substantive prose in your findings, not raw notes — the expert model builds on your work. "
+                + f"Only call {self.get_name()} again with step_number: {step_number + 1} AFTER writing."
             )
         else:
             next_steps = (
                 f"WAIT! Review your draft before submitting. DO NOT call {self.get_name()} immediately. REQUIRED ACTIONS:\n"
                 + "\n".join(f"{i + 1}. {action}" for i, action in enumerate(required_actions))
-                + f"\n\nYour draft in findings is what the expert model will refine into the final document. "
-                f"Make it as complete and well-written as you can. "
+                + f"\n\nYour prose contributions in findings directly shape the final document — the expert model "
+                f"synthesizes them with the source files. Make your contributions as complete and clear as you can. "
                 f"Then call {self.get_name()} with step_number: {step_number + 1}."
             )
 

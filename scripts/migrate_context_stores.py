@@ -8,6 +8,7 @@ existing new-format store file is overwritten with an identical result.
 import argparse
 import json
 import os
+import re
 import sys
 from datetime import datetime, timezone
 
@@ -95,6 +96,12 @@ def _extract_turn_pair(turns: list[dict], pair_index: int) -> tuple[str, str, st
         timestamp = user_turn.get("timestamp") or ""
 
     return prompt, response, label, model, timestamp
+
+
+def _natural_key(key: str) -> tuple:
+    """Sort key for natural ordering: L1, L2, ..., L10, Q0, Q1, ..."""
+    parts = re.split(r"(\d+)", key)
+    return tuple(int(p) if p.isdigit() else p for p in parts)
 
 
 def _now_iso() -> str:
@@ -349,27 +356,39 @@ def build_tree_for_root(root_entry: dict, all_entries: dict[str, dict]) -> Store
     # Q and tool children from registry
     descendant_children = _build_children(root_entry["store_id"], all_entries)
 
-    # Merge: L-layers first (sorted), then Q/tool children (sorted)
-    all_children: dict[str, StoreNode] = {}
-    for key in sorted(layer_nodes.keys()):
-        all_children[key] = layer_nodes[key]
-    for key in sorted(descendant_children.keys()):
-        all_children[key] = descendant_children[key]
+    # Attach Q/tool children to the latest L-layer whose timestamp precedes
+    # the child's timestamp, so queries sit next to the layer they were made
+    # against rather than all clustering on the root.
+    l_keys_sorted = sorted(
+        ((k, v) for k, v in layer_nodes.items()),
+        key=lambda kv: _natural_key(kv[0]),
+    )
+
+    root_children: dict[str, StoreNode] = {}
+    for key in sorted(layer_nodes.keys(), key=_natural_key):
+        root_children[key] = layer_nodes[key]
+
+    for q_key, q_node in sorted(descendant_children.items(), key=lambda kv: _natural_key(kv[0])):
+        q_ts = q_node.timestamp or ""
+        # Find the latest L-layer created before this Q
+        target_l_key = None
+        for l_key, l_node in l_keys_sorted:
+            if (l_node.timestamp or "") <= q_ts:
+                target_l_key = l_key
+            else:
+                break
+        if target_l_key and target_l_key in root_children:
+            root_children[target_l_key].children[q_key] = q_node
+        else:
+            root_children[q_key] = q_node
 
     store = StoreRoot(
         store_id=root_entry["store_id"],
         directory=root_entry["directory"],
         label=root_label,
         created_at=_entry_timestamp(root_entry),
-        children=all_children,
+        children=root_children,
     )
-
-    # Attach root's own content as metadata — StoreRoot has no prompt/response
-    # fields, so we park the pair-0 content on the first L-child if none exists,
-    # or leave it for the caller to handle.  The new format stores root content
-    # implicitly in the L1 node if present; if there are no layers at all the
-    # root itself has no body — this matches the new model where StoreRoot is
-    # a container only.
 
     _stats["stores_created"] += 1
     return store
@@ -405,8 +424,6 @@ def migrate(dry_run: bool = False) -> None:
     # Identify root entries (no parent, entry_type == "store", no .LN suffix)
     # L-layer siblings (e.g. "foo.L1") share their root thread so they are
     # folded into the root tree rather than treated as independent roots.
-    import re
-
     root_entries: list[dict] = []
     for sid, entry in registry.items():
         if entry.get("parent_store_id") is not None:

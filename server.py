@@ -71,7 +71,7 @@ from tools import (  # noqa: E402
     TracerTool,
     VersionTool,
 )
-from tools.context import CtxArmTool, CtxInitTool, CtxListTool, CtxQueryTool, CtxReadTool, CtxStoreTool, CtxTreeTool
+from tools.context import CtxArmTool, CtxForkTool, CtxInitTool, CtxListTool, CtxQueryTool, CtxReadTool, CtxStoreTool
 from tools.models import ToolOutput  # noqa: E402
 from tools.shared.exceptions import ToolExecutionError  # noqa: E402
 from utils.env import env_override_enabled, get_env  # noqa: E402
@@ -288,8 +288,8 @@ TOOLS = {
     "ctxinit": CtxInitTool(),  # Create a named context store
     "ctxstore": CtxStoreTool(),  # Store context layers in a persistent silo
     "ctxquery": CtxQueryTool(),  # Query against a context silo
-    "ctxlist": CtxListTool(),  # List context stores for a directory
-    "ctxtree": CtxTreeTool(),  # Show context stores as an indented hierarchy tree
+    "ctxlist": CtxListTool(),  # List context stores and their full node trees
+    "ctxfork": CtxForkTool(),  # Create a fork point in a context store tree
     "ctxread": CtxReadTool(),  # Read content of a specific context store node
     "ctxarm": CtxArmTool(),  # Arm/disarm a store for auto-revival on SessionStart
 }
@@ -759,7 +759,7 @@ def _build_store_listing() -> str:
     """Build a compact context store snapshot for MCP handshake instructions."""
     import os
 
-    from utils.context_registry import get_armed_store, list_stores
+    from utils.context_store import get_armed_store, list_stores
 
     cwd = os.getcwd()
     stores = list_stores(directory=cwd)
@@ -770,100 +770,120 @@ def _build_store_listing() -> str:
     armed_store = get_armed_store(cwd)
 
     lines = [f"\n\nctxStores: Context stores for {cwd}:"]
-    for entry in stores:
-        sid = entry.get("store_id", "?")
-        etype = entry.get("entry_type", "?")
-        layers = entry.get("layer_count", 0)
-        follow_ups = entry.get("follow_up_count", 0)
-        tool_name_entry = entry.get("tool_name")
-
+    for store in stores:
+        sid = store.store_id
         armed_marker = " [armed]" if (armed_store and sid == armed_store) else ""
-        line = f"- {sid} [{etype}]{armed_marker}"
-        if etype == "store" and layers > 0:
-            line += f" ({layers} layer{'s' if layers != 1 else ''})"
-        if etype == "query" and follow_ups > 0:
-            line += f" ({follow_ups} follow-up{'s' if follow_ups != 1 else ''})"
-        if etype == "tool" and tool_name_entry:
-            line += f" (tool: {tool_name_entry})"
+        layer_count = sum(1 for n in store.children.values() if n.entry_type == "store")
+        query_count = sum(1 for n in store.children.values() if n.entry_type == "query")
+
+        line = f"- {sid} [store]{armed_marker}"
+        if layer_count > 0:
+            line += f" ({layer_count} layer{'s' if layer_count != 1 else ''})"
+        if query_count > 0:
+            line += f" ({query_count} quer{'ies' if query_count != 1 else 'y'})"
         lines.append(line)
 
     return "\n".join(lines)
 
 
 def _resolve_store_continuation(tool_name: str, arguments: dict) -> str | None:
-    """If continuation_id is a registered store_id, handle fork/continue.
+    """If continuation_id is a store path, hydrate a thread for non-ctx tool bridging.
 
     Returns the path-based store_id for response injection, or None if
-    continuation_id is a regular UUID (not in registry).
+    continuation_id is a regular UUID (not a store path).
     """
-    from utils.context_registry import (
-        get_next_tool_index,
-        get_store_entry,
-        increment_follow_up_count,
-        register_store,
+    from utils.context_builder import hydrate_thread_context
+    from utils.context_store import (
+        get_next_key,
+        load_store,
+        resolve_node,
+        resolve_store_location,
     )
-    from utils.conversation_memory import create_thread
 
     continuation_id = arguments.get("continuation_id", "")
     if not continuation_id:
         return None
 
-    entry = get_store_entry(continuation_id)
-    if not entry:
+    location = resolve_store_location(continuation_id)
+    if not location:
         return None
 
-    # CONTINUE: same tool on same tool-fork entry
-    if entry["entry_type"] == "tool" and entry.get("tool_name") == tool_name:
-        thread_id = entry["thread_id"]
-        increment_follow_up_count(continuation_id)
-        arguments["continuation_id"] = thread_id
-        logger.info(f"Store continuation: CONTINUE {continuation_id} (follow_up incremented)")
-        return continuation_id
+    directory, root_id = location
+    store = load_store(directory, root_id)
+    if not store:
+        return None
 
-    # FORK: any other case (store, query, layer, or different tool)
-    parent_thread_id = entry["thread_id"]
-    parent_directory = entry.get("directory", "")
-    index = get_next_tool_index(continuation_id, tool_name)
-    new_path = f"{continuation_id}.{tool_name}{index}"
+    node = resolve_node(store, continuation_id)
 
-    new_thread_id = create_thread(
-        parent_thread_id=parent_thread_id,
-        tool_name=tool_name,
-        initial_request={"store_fork": continuation_id},
-        model_name="",
-    )
+    # Determine fork vs continue
+    if node and node.entry_type == "tool" and node.tool_name == tool_name:
+        # CONTINUE: same tool on same tool node → numbered child
+        child_prefix = ""
+    else:
+        # FORK: create new tool node as child
+        child_prefix = tool_name
 
-    register_store(
-        store_id=new_path,
-        thread_id=new_thread_id,
-        directory=parent_directory,
-        label=None,
-        model="",
-        entry_type="tool",
-        parent_store_id=continuation_id,
-        tool_name=tool_name,
-    )
+    next_key = get_next_key(store, continuation_id, child_prefix)
+    new_path = f"{continuation_id}.{next_key}"
 
-    arguments["continuation_id"] = new_thread_id
-    logger.info(f"Store continuation: FORK {continuation_id} → {new_path}")
+    # Hydrate thread from tree ancestry for reconstruct_thread_context
+    thread_context = hydrate_thread_context(store, continuation_id)
+    arguments["continuation_id"] = thread_context.thread_id
+
+    # Stash bridge metadata for post-processing
+    arguments["_store_bridge"] = {
+        "store": store,
+        "parent_path": continuation_id,
+        "new_path": new_path,
+        "child_key": next_key,
+        "tool_name": tool_name,
+    }
+
+    logger.info(f"Store continuation: {continuation_id} → {new_path} (hydrated thread {thread_context.thread_id})")
     return new_path
 
 
-def _inject_store_path_continuation(result: list, store_path: str) -> list:
-    """Replace UUID continuation_id with store path in tool response."""
+def _inject_store_path_continuation(result: list, store_path: str, arguments: dict | None = None) -> list:
+    """Replace UUID continuation_id with store path in tool response.
+
+    If _store_bridge metadata is present, also persists the tool response back to the store tree.
+    """
     import json
+    from datetime import datetime, timezone
 
     processed = []
+    response_text = None
     for item in result:
         try:
             data = json.loads(item.text)
             if "continuation_offer" in data and data["continuation_offer"]:
                 data["continuation_offer"]["continuation_id"] = store_path
                 processed.append(TextContent(type="text", text=json.dumps(data)))
+                response_text = data.get("content", "")
             else:
                 processed.append(item)
         except (json.JSONDecodeError, AttributeError):
             processed.append(item)
+
+    # Persist tool response back to store tree if bridge metadata exists
+    if arguments and "_store_bridge" in arguments and response_text is not None:
+        from utils.context_store import StoreNode, add_child, save_store
+
+        bridge = arguments["_store_bridge"]
+        node = StoreNode(
+            entry_type="tool",
+            tool_name=bridge["tool_name"],
+            timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            prompt=arguments.get("prompt", ""),
+            response=response_text,
+        )
+        try:
+            add_child(bridge["store"], bridge["parent_path"], bridge["child_key"], node)
+            save_store(bridge["store"])
+            logger.info(f"Persisted tool response to store tree at {bridge['new_path']}")
+        except Exception as exc:
+            logger.warning(f"Failed to persist tool response to store tree: {exc}")
+
     return processed
 
 
@@ -1058,7 +1078,7 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
             logger.debug(f"Tool {name} doesn't require model resolution - skipping model validation")
             result = await tool.execute(arguments)
             if _store_path and result:
-                result = _inject_store_path_continuation(result, _store_path)
+                result = _inject_store_path_continuation(result, _store_path, arguments)
             result = _apply_output_format(result, raw_output)
             return result
 

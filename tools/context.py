@@ -1,9 +1,10 @@
 """
-Context silo tools — init, store, query, list, read, and arm context stores.
+Context silo tools — init, store, query, fork, list, read, and arm context stores.
 """
 
 import logging
 import os
+from datetime import datetime, timezone
 from typing import Any, Optional
 
 from mcp.types import TextContent
@@ -33,36 +34,49 @@ def _truncate_label(text: str, max_len: int = 80) -> str:
     return truncated + "…"
 
 
-def _format_entry_line(entry: dict, prefix: str = "- ") -> str:
-    """Format a single registry entry as a display line.
+def _render_store_tree(store, root_path: str = "", indent: int = 0) -> list[str]:
+    """Render a store's node dict as indented markdown link lines."""
+    from utils.context_store import StoreNode
 
-    Shared by ctxlist (flat) and ctxtree (indented) to ensure consistent
-    label truncation, suffix handling, and entry type coverage.
-    """
-    sid = entry.get("store_id", "?")
-    etype = entry.get("entry_type", "?")
-    label = _truncate_label(entry.get("label") or "(none)")
-
-    suffix = ""
-    if etype == "store" and entry.get("layer_count", 0) > 0:
-        n = entry["layer_count"]
-        suffix = f"  ({n} layer{'s' if n != 1 else ''})"
-    elif etype == "query" and entry.get("follow_up_count", 0) > 0:
-        n = entry["follow_up_count"]
-        suffix = f"  ({n} follow-up{'s' if n != 1 else ''})"
-    elif etype == "tool" and entry.get("tool_name"):
-        suffix = f"  (tool: {entry['tool_name']})"
-
-    return f'{prefix}{sid}  [{etype}]  "{label}"{suffix}'
-
-
-def _render_tree(nodes: list[dict], indent: int = 0) -> list[str]:
-    """Recursively render tree nodes as indented dash lines."""
     lines: list[str] = []
-    prefix = "  " * indent + "- "
-    for node in nodes:
-        lines.append(_format_entry_line(node, prefix))
-        lines.extend(_render_tree(node.get("children", []), indent + 1))
+
+    def _render_nodes(nodes: dict[str, StoreNode], parent_path: str, depth: int) -> None:
+        p = "  " * depth
+        for key, node in nodes.items():
+            full_path = f"{parent_path}.{key}"
+            etype = node.entry_type
+            ts = (node.timestamp or "")[:10]
+
+            if etype == "store":
+                label_part = f"{key}. {node.label}" if node.label else key
+                date_part = f" — {ts}" if ts else ""
+                files_part = ""
+                if node.files:
+                    basenames = ", ".join(os.path.basename(f) for f in node.files)
+                    files_part = f" — {basenames}"
+                lines.append(f"{p}- [{label_part}](#{full_path}){date_part}{files_part}")
+            elif etype == "query":
+                prompt_part = f'  "{_truncate_label(node.prompt, 60)}"' if node.prompt else ""
+                date_part = f" — {ts}" if ts else ""
+                lines.append(f"{p}- [{key}](#{full_path}){prompt_part}{date_part}")
+            elif etype == "fork":
+                label_part = f"{key}. {node.label}" if node.label else key
+                date_part = f" — {ts}" if ts else ""
+                lines.append(f"{p}- [{label_part}](#{full_path}){date_part}")
+            elif etype == "tool":
+                tool_name = node.tool_name or key
+                lines.append(f"{p}- [.{tool_name}](#{full_path})")
+            else:
+                lines.append(f"{p}- [{key}](#{full_path})")
+
+            if node.children:
+                _render_nodes(node.children, full_path, depth + 1)
+
+    if isinstance(store, dict):
+        _render_nodes(store, root_path, indent)
+    else:
+        _render_nodes(store.children, store.store_id, indent)
+
     return lines
 
 
@@ -90,9 +104,7 @@ class CtxQueryRequest(ToolRequest):
 
 
 class ContextBaseTool(SimpleTool):
-    """Shared base for all context silo tools."""
-
-    ephemeral: bool = False
+    """Shared base for context silo tools that call external models."""
 
     def get_model_category(self):
         from tools.models import ToolModelCategory
@@ -114,18 +126,21 @@ class ContextBaseTool(SimpleTool):
     def get_annotations(self) -> dict:
         return {"readOnlyHint": False}
 
-    def _map_store_id(self, arguments: dict) -> dict:
-        """Resolve path-based store_id to thread UUID via registry lookup."""
-        store_id = arguments.get("store_id")
-        if store_id:
-            from utils.context_registry import resolve_thread_id
+    def _resolve_store(self, store_id: str):
+        """Load store for a given store_id path. Returns (store, root_store_id).
 
-            thread_id = resolve_thread_id(store_id)
-            if thread_id:
-                arguments["continuation_id"] = thread_id
-            else:
-                arguments["_store_id_not_found"] = True
-        return arguments
+        Raises KeyError if store not found.
+        """
+        from utils.context_store import load_store, resolve_store_location
+
+        location = resolve_store_location(store_id)
+        if location is None:
+            raise KeyError(f"Store not found for: {store_id}")
+        directory, root_id = location
+        store = load_store(directory, root_id)
+        if store is None:
+            raise KeyError(f"Store file not found: {root_id} in {directory}")
+        return store, root_id
 
 
 # ---------------------------------------------------------------------------
@@ -146,7 +161,7 @@ class CtxInitTool(BaseTool):
             "properties": {
                 "store_name": {
                     "type": "string",
-                    "description": "Name for the context store. Used as the store_id path.",
+                    "description": "Name for the context store. No dots allowed. Used as the store_id.",
                 },
                 "directory": {
                     "type": "string",
@@ -182,23 +197,37 @@ class CtxInitTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
-        from utils.context_registry import get_store_entry, register_store
-        from utils.conversation_memory import create_thread
+        from utils.context_store import StoreRoot, save_store, update_index
 
         store_name = arguments.get("store_name", "")
         directory = arguments.get("directory", "")
 
-        existing = get_store_entry(store_name)
-        if existing and existing.get("directory") == directory:
+        if "." in store_name:
             error = ToolOutput(
                 status="error",
-                content=f'Store "{store_name}" already exists in this directory.',
+                content="store_name must not contain dots. Dots are reserved for path notation.",
                 content_type="text",
             )
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        thread_id = create_thread("ctxinit", {}, model_name=None)
-        register_store(store_id=store_name, thread_id=thread_id, directory=directory, entry_type="store")
+        from utils.context_store import resolve_store_location
+
+        existing = resolve_store_location(store_name)
+        if existing is not None:
+            error = ToolOutput(
+                status="error",
+                content=f'Store "{store_name}" already exists.',
+                content_type="text",
+            )
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        store = StoreRoot(
+            store_id=store_name,
+            directory=directory,
+            created_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        )
+        save_store(store)
+        update_index(directory, store_name)
 
         tool_output = ToolOutput(
             status="success",
@@ -220,8 +249,6 @@ class CtxInitTool(BaseTool):
 
 
 class CtxStoreTool(ContextBaseTool):
-    ephemeral: bool = False
-
     def get_name(self) -> str:
         return "ctxstore"
 
@@ -290,7 +317,8 @@ class CtxStoreTool(ContextBaseTool):
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
 
-        if not arguments.get("store_id"):
+        store_id = arguments.get("store_id", "")
+        if not store_id:
             error = ToolOutput(
                 status="error",
                 content="ctxstore requires a store_id. Use ctxinit to create a store first.",
@@ -298,32 +326,24 @@ class CtxStoreTool(ContextBaseTool):
             )
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        self._map_store_id(arguments)
-
-        if arguments.get("_store_id_not_found"):
-            error = ToolOutput(
-                status="error",
-                content="Store not found. Use ctxinit to create a store first.",
-                content_type="text",
-            )
+        try:
+            store, _ = self._resolve_store(store_id)
+        except KeyError as exc:
+            error = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
+        from utils.context_builder import build_context_from_ancestry
+        from utils.context_store import walk_ancestry
+
+        ancestors = walk_ancestry(store, store_id)
+        self._injected_history = build_context_from_ancestry(ancestors)
+        self._store = store
+        self._store_id = store_id
+
+        arguments.pop("continuation_id", None)
         arguments["thinking_mode"] = "max"
-        self._store_id = arguments.get("store_id")
 
         return await super().execute(arguments)
-
-    def _create_continuation_offer(self, request, model_info: Optional[dict] = None):
-        continuation_data = super()._create_continuation_offer(request, model_info)
-        if continuation_data:
-            try:
-                from utils.context_registry import increment_layer_count
-
-                new_store_id = increment_layer_count(self._store_id)
-                continuation_data["continuation_id"] = new_store_id
-            except Exception as exc:
-                logger.warning("Failed to increment layer count for store %s: %s", self._store_id, exc)
-        return continuation_data
 
     async def prepare_prompt(self, request: CtxStoreRequest) -> str:
         user_content = self.handle_prompt_file_with_fallback(request)
@@ -333,7 +353,7 @@ class CtxStoreTool(ContextBaseTool):
         if files:
             file_content, processed = self._prepare_file_content_for_prompt(
                 files,
-                self.get_request_continuation_id(request),
+                None,
                 "Context files",
                 model_context=getattr(self, "_model_context", None),
             )
@@ -342,50 +362,66 @@ class CtxStoreTool(ContextBaseTool):
                 file_section = f"\n\n=== CONTEXT FILES ===\n{file_content}\n=== END CONTEXT FILES ==="
 
         label_line = f"\n[Label: {request.context_label}]" if request.context_label else ""
-        return f"=== CONTEXT LAYER SUBMISSION ==={label_line}\n\n{user_content}{file_section}"
+        base = f"=== CONTEXT LAYER SUBMISSION ==={label_line}\n\n{user_content}{file_section}"
+
+        injected = getattr(self, "_injected_history", "")
+        if injected:
+            return f"{injected}\n\n{base}"
+        return base
 
     def format_response(self, response: str, request: CtxStoreRequest, model_info: Optional[dict] = None) -> str:
+        self._last_raw_response = response
         return f"{response}\n\n---\n\nAGENT'S TURN: Context layer stored. Use the store_id to add more layers or query this silo."
+
+    def _create_continuation_offer(self, request, model_info: Optional[dict] = None):
+        from utils.context_store import get_next_key
+
+        store = getattr(self, "_store", None)
+        store_id = getattr(self, "_store_id", None)
+        if store is None or store_id is None:
+            return None
+
+        self._next_key = get_next_key(store, store_id, "L")
+        root_id = store.store_id
+        if store_id == root_id:
+            self._new_store_path = f"{root_id}.{self._next_key}"
+        else:
+            self._new_store_path = f"{store_id}.{self._next_key}"
+
+        return {
+            "continuation_id": self._new_store_path,
+            "context_window": 0,
+            "context_used": 0,
+            "note": f"Layer stored at {self._new_store_path}.",
+        }
 
     def _record_assistant_turn(
         self, continuation_id: str, response_text: str, request, model_info: Optional[dict]
     ) -> None:
-        from utils.conversation_memory import add_turn
+        from utils.context_store import StoreNode, add_child, save_store
 
-        model_provider = None
-        model_name = None
-        model_metadata: dict[str, Any] = {}
+        store = getattr(self, "_store", None)
+        store_id = getattr(self, "_store_id", None)
+        next_key = getattr(self, "_next_key", None)
+        if store is None or store_id is None or next_key is None:
+            logger.warning("ctxstore: missing store state in _record_assistant_turn, skipping write")
+            return
 
-        if model_info:
-            provider = model_info.get("provider")
-            if provider:
-                if isinstance(provider, str):
-                    model_provider = provider
-                else:
-                    try:
-                        model_provider = provider.get_provider_type().value
-                    except AttributeError:
-                        model_provider = str(provider)
-            model_name = model_info.get("model_name")
-            model_response = model_info.get("model_response")
-            if model_response:
-                model_metadata = {"usage": model_response.usage, "metadata": model_response.metadata}
+        raw = getattr(self, "_last_raw_response", response_text)
+        model_name = model_info.get("model_name") if model_info else None
 
-        label = getattr(request, "context_label", None)
-        if label:
-            model_metadata["context_label"] = label
-
-        add_turn(
-            continuation_id,
-            "assistant",
-            response_text,
+        node = StoreNode(
+            entry_type="store",
+            label=getattr(request, "context_label", None),
+            timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            model=model_name,
             files=self.get_request_files(request),
-            media=self.get_request_media(request),
-            tool_name=self.get_name(),
-            model_provider=model_provider,
-            model_name=model_name,
-            model_metadata=model_metadata if model_metadata else None,
+            prompt=self.get_request_prompt(request),
+            response=raw,
         )
+
+        add_child(store, store_id, next_key, node)
+        save_store(store)
 
 
 # ---------------------------------------------------------------------------
@@ -394,13 +430,14 @@ class CtxStoreTool(ContextBaseTool):
 
 
 class CtxQueryTool(ContextBaseTool):
-    ephemeral: bool = True
-
     def get_name(self) -> str:
         return "ctxquery"
 
     def get_description(self) -> str:
-        return "Query a context store. Forks on store nodes, continues on query nodes. Returns a new store_id reflecting the operation."
+        return (
+            "Query a context store. Forks on store/fork nodes, continues on query nodes. "
+            "Returns a new store_id reflecting the operation."
+        )
 
     def get_request_model(self):
         return CtxQueryRequest
@@ -439,7 +476,8 @@ class CtxQueryTool(ContextBaseTool):
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
 
-        if not arguments.get("store_id"):
+        store_id = arguments.get("store_id", "")
+        if not store_id:
             error = ToolOutput(
                 status="error",
                 content="ctxquery requires a store_id. Create a store with ctxinit first.",
@@ -447,150 +485,141 @@ class CtxQueryTool(ContextBaseTool):
             )
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        self._map_store_id(arguments)
+        try:
+            store, _ = self._resolve_store(store_id)
+        except KeyError as exc:
+            error = ToolOutput(status="error", content=str(exc), content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
 
-        if arguments.get("_store_id_not_found"):
+        from utils.context_store import resolve_node
+
+        node = resolve_node(store, store_id)
+
+        if node is None and store_id == store.store_id:
+            self._parent_path = store_id
+            self._child_prefix = "Q"
+            self._child_entry_type = "query"
+        elif node is not None and node.entry_type in ("store", "fork"):
+            self._parent_path = store_id
+            self._child_prefix = "Q"
+            self._child_entry_type = "query"
+        elif node is not None and node.entry_type in ("query", "tool"):
+            self._parent_path = store_id
+            self._child_prefix = "Q"
+            self._child_entry_type = "query"
+        else:
             error = ToolOutput(
                 status="error",
-                content="Store not found. Use ctxinit to create a store first.",
+                content=f"Cannot resolve store path: {store_id}",
                 content_type="text",
             )
             return [TextContent(type="text", text=error.model_dump_json())]
 
+        from utils.context_builder import build_context_from_ancestry
+        from utils.context_store import walk_ancestry
+
+        ancestors = walk_ancestry(store, store_id)
+        self._injected_history = build_context_from_ancestry(ancestors)
+        self._store = store
+        self._store_id = store_id
+
+        arguments.pop("continuation_id", None)
         arguments["thinking_mode"] = "max"
 
-        from utils.context_registry import get_store_entry
-
-        self._store_id = arguments["store_id"]
-        entry = get_store_entry(self._store_id)
-        self._entry = entry
-
-        if entry and entry.get("entry_type") == "store":
-            return await self._execute_fork_path(arguments)
-        else:
-            return await self._execute_continue_path(arguments)
-
-    async def _execute_fork_path(self, arguments: dict[str, Any]) -> list[TextContent]:
-        from utils.context_registry import get_next_query_index, register_store
-        from utils.conversation_memory import add_turn, create_thread
-
-        parent_uuid = arguments["continuation_id"]
-        prompt = arguments.get("prompt", "")
-        entry = self._entry
-
-        new_thread_id = create_thread("ctxquery", {}, parent_thread_id=parent_uuid)
-        add_turn(new_thread_id, "user", prompt, tool_name="ctxquery")
-
-        query_index = get_next_query_index(self._store_id)
-        new_store_id = f"{self._store_id}.Q{query_index}"
-
-        register_store(
-            store_id=new_store_id,
-            thread_id=new_thread_id,
-            directory=entry["directory"],
-            label=_truncate_label(prompt) if prompt else None,
-            entry_type="query",
-            parent_store_id=self._store_id,
-        )
-
-        arguments["continuation_id"] = new_thread_id
-        self._new_store_id = new_store_id
-
         return await super().execute(arguments)
 
-    async def _execute_continue_path(self, arguments: dict[str, Any]) -> list[TextContent]:
-        from utils.context_registry import increment_follow_up_count
-        from utils.conversation_memory import add_turn
+    async def prepare_prompt(self, request: CtxQueryRequest) -> str:
+        user_content = self.handle_prompt_file_with_fallback(request)
 
-        thread_uuid = arguments["continuation_id"]
-        prompt = arguments.get("prompt", "")
+        injected = getattr(self, "_injected_history", "")
+        base = f"=== CONTEXT SILO QUERY ===\n\n{user_content}"
 
-        add_turn(thread_uuid, "user", prompt, tool_name="ctxquery")
+        if injected:
+            return f"{injected}\n\n{base}"
+        return base
 
-        new_store_id = increment_follow_up_count(self._store_id)
-        self._new_store_id = new_store_id
-
-        return await super().execute(arguments)
+    def format_response(self, response: str, request: CtxQueryRequest, model_info: Optional[dict] = None) -> str:
+        self._last_raw_response = response
+        return f"{response}\n\n---\n\nAGENT'S TURN: Evaluate this response from the context silo alongside your own analysis."
 
     def _create_continuation_offer(self, request, model_info: Optional[dict] = None):
-        new_id = getattr(self, "_new_store_id", None)
-        if not new_id:
+        from utils.context_store import get_next_key
+
+        store = getattr(self, "_store", None)
+        parent_path = getattr(self, "_parent_path", None)
+        child_prefix = getattr(self, "_child_prefix", "Q")
+        if store is None or parent_path is None:
             return None
-        context_window, context_used = self._get_context_token_info()
+
+        self._next_key = get_next_key(store, parent_path, child_prefix)
+        self._new_store_path = f"{parent_path}.{self._next_key}"
+
         return {
-            "continuation_id": new_id,
-            "context_window": context_window,
-            "context_used": context_used,
-            "note": f"Query recorded at {new_id}.",
+            "continuation_id": self._new_store_path,
+            "context_window": 0,
+            "context_used": 0,
+            "note": f"Query recorded at {self._new_store_path}.",
         }
 
     def _record_assistant_turn(
         self, continuation_id: str, response_text: str, request, model_info: Optional[dict]
     ) -> None:
-        from utils.conversation_memory import add_turn
+        from utils.context_store import StoreNode, add_child, save_store
 
-        model_provider = None
-        model_name = None
-        model_metadata: dict[str, Any] = {}
-        if model_info:
-            provider = model_info.get("provider")
-            if provider:
-                if isinstance(provider, str):
-                    model_provider = provider
-                else:
-                    try:
-                        model_provider = provider.get_provider_type().value
-                    except AttributeError:
-                        model_provider = str(provider)
-            model_name = model_info.get("model_name")
-            model_response = model_info.get("model_response")
-            if model_response:
-                model_metadata = {"usage": model_response.usage, "metadata": model_response.metadata}
-        add_turn(
-            continuation_id,
-            "assistant",
-            response_text,
-            tool_name=self.get_name(),
-            model_provider=model_provider,
-            model_name=model_name,
-            model_metadata=model_metadata if model_metadata else None,
+        store = getattr(self, "_store", None)
+        parent_path = getattr(self, "_parent_path", None)
+        next_key = getattr(self, "_next_key", None)
+        child_entry_type = getattr(self, "_child_entry_type", "query")
+
+        if store is None or parent_path is None or next_key is None:
+            logger.warning("ctxquery: missing store state in _record_assistant_turn, skipping write")
+            return
+
+        raw = getattr(self, "_last_raw_response", response_text)
+        model_name = model_info.get("model_name") if model_info else None
+        prompt = self.get_request_prompt(request)
+
+        node = StoreNode(
+            entry_type=child_entry_type,
+            label=_truncate_label(prompt) if prompt else None,
+            timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            model=model_name,
+            prompt=prompt,
+            response=raw,
         )
 
-    async def prepare_prompt(self, request: CtxQueryRequest) -> str:
-        user_content = self.handle_prompt_file_with_fallback(request)
-        return f"=== CONTEXT SILO QUERY ===\n\n{user_content}"
-
-    def format_response(self, response: str, request: CtxQueryRequest, model_info: Optional[dict] = None) -> str:
-        return f"{response}\n\n---\n\nAGENT'S TURN: Evaluate this response from the context silo alongside your own analysis."
+        add_child(store, parent_path, next_key, node)
+        save_store(store)
 
 
 # ---------------------------------------------------------------------------
-# ctxlist
+# ctxfork
 # ---------------------------------------------------------------------------
 
 
-class CtxListTool(BaseTool):
+class CtxForkTool(BaseTool):
     def get_name(self) -> str:
-        return "ctxlist"
+        return "ctxfork"
 
     def get_description(self) -> str:
-        return "List context stores registered with PAL. Optionally filter by project directory."
+        return (
+            "Create a fork point in a context store. Forks let you branch the conversation from any node, "
+            "exploring alternatives without disrupting the main lineage. Returns a new store_id for the fork."
+        )
 
     def get_input_schema(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
-                "directory": {
-                    "type": "string",
-                    "description": "Absolute path to filter stores by project directory. Omit to list all stores.",
-                },
+                "store_id": {"type": "string", "description": "The store path to fork from."},
+                "label": {"type": "string", "description": "Optional label for the fork point."},
             },
-            "required": [],
+            "required": ["store_id"],
             "additionalProperties": False,
         }
 
-    def get_annotations(self) -> Optional[dict[str, Any]]:
-        return {"readOnlyHint": True}
+    def get_annotations(self) -> dict:
+        return {"readOnlyHint": False}
 
     def get_system_prompt(self) -> str:
         return ""
@@ -614,38 +643,65 @@ class CtxListTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
-        from utils.context_registry import list_stores
+        from utils.context_store import (
+            StoreNode,
+            add_child,
+            get_next_key,
+            load_store,
+            resolve_store_location,
+            save_store,
+        )
 
-        directory = arguments.get("directory")
-        stores = list_stores(directory)
+        store_id = arguments.get("store_id", "")
+        label = arguments.get("label")
 
-        if stores:
-            lines = [_format_entry_line(entry) for entry in stores]
-            content = f"Found {len(stores)} node(s):\n\n" + "\n".join(lines)
-        else:
-            scope = f" for directory '{directory}'" if directory else ""
-            content = f"No context stores found{scope}."
+        location = resolve_store_location(store_id)
+        if location is None:
+            error = ToolOutput(status="error", content=f"Store not found: {store_id}", content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        directory, root_id = location
+        store = load_store(directory, root_id)
+        if store is None:
+            error = ToolOutput(status="error", content=f"Store file not found: {root_id}", content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        next_key = get_next_key(store, store_id, "F")
+        fork_node = StoreNode(
+            entry_type="fork",
+            label=label,
+            timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        )
+        new_path = add_child(store, store_id, next_key, fork_node)
+        save_store(store)
 
         tool_output = ToolOutput(
             status="success",
-            content=content,
+            content=(
+                f"Fork created.\n\n"
+                f"store_id: {new_path}\n\n"
+                f"Use this store_id to build a new context branch from this point."
+            ),
             content_type="text",
-            metadata={"store_count": len(stores), "directory_filter": directory},
+            metadata={"store_id": new_path, "parent_store_id": store_id},
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]
 
 
 # ---------------------------------------------------------------------------
-# ctxtree
+# ctxlist
 # ---------------------------------------------------------------------------
 
 
-class CtxTreeTool(BaseTool):
+class CtxListTool(BaseTool):
     def get_name(self) -> str:
-        return "ctxtree"
+        return "ctxlist"
 
     def get_description(self) -> str:
-        return "Show context stores as an indented tree, grouped by parent-child relationships."
+        return (
+            "List context stores and their full node trees. Optionally filter by project directory "
+            "or drill into a specific store_id subtree."
+        )
 
     def get_input_schema(self) -> dict[str, Any]:
         return {
@@ -653,7 +709,11 @@ class CtxTreeTool(BaseTool):
             "properties": {
                 "directory": {
                     "type": "string",
-                    "description": "Absolute path to filter stores by project directory. Omit to show all stores.",
+                    "description": "Absolute path to filter stores by project directory. Omit to list all stores.",
+                },
+                "store_id": {
+                    "type": "string",
+                    "description": "Show the subtree of this specific node.",
                 },
             },
             "required": [],
@@ -683,25 +743,57 @@ class CtxTreeTool(BaseTool):
     def format_response(self, response: str, request: ToolRequest, model_info: Optional[dict] = None) -> str:
         return response
 
+    def _count_l_children(self, children: dict) -> int:
+        return sum(1 for k in children if k.startswith("L") and k[1:].isdigit())
+
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
-        from utils.context_registry import build_store_tree, list_stores
+        from utils.context_store import list_stores, load_store, resolve_node, resolve_store_location
 
         directory = arguments.get("directory")
-        stores = list_stores(directory)
+        store_id = arguments.get("store_id")
 
-        if stores:
-            roots = build_store_tree(stores)
-            content = f"Found {len(stores)} node(s):\n\n" + "\n".join(_render_tree(roots))
+        if store_id:
+            location = resolve_store_location(store_id)
+            if location is None:
+                error = ToolOutput(status="error", content=f"Store not found: {store_id}", content_type="text")
+                return [TextContent(type="text", text=error.model_dump_json())]
+
+            dir_, root_id = location
+            store = load_store(dir_, root_id)
+            if store is None:
+                error = ToolOutput(status="error", content=f"Store file not found: {root_id}", content_type="text")
+                return [TextContent(type="text", text=error.model_dump_json())]
+
+            node = resolve_node(store, store_id)
+            if node is None and store_id == store.store_id:
+                n_layers = self._count_l_children(store.children)
+                lines = [f"{store.store_id}  ({n_layers} layers)"]
+                lines.extend(_render_store_tree(store, indent=1))
+            elif node is not None:
+                lines = [f"{store_id}"]
+                lines.extend(_render_store_tree(node.children, root_path=store_id, indent=1))
+            else:
+                lines = [f"Node not found: {store_id}"]
+
+            content = "\n".join(lines)
         else:
-            scope = f" for directory '{directory}'" if directory else ""
-            content = f"No context stores found{scope}."
+            stores = list_stores(directory)
+            if stores:
+                lines = []
+                for store in stores:
+                    n_layers = self._count_l_children(store.children)
+                    lines.append(f"{store.store_id}  ({n_layers} layers)")
+                    lines.extend(_render_store_tree(store, indent=1))
+                content = "\n".join(lines)
+            else:
+                scope = f" for directory '{directory}'" if directory else ""
+                content = f"No context stores found{scope}."
 
         tool_output = ToolOutput(
             status="success",
             content=content,
             content_type="text",
-            metadata={"store_count": len(stores), "directory_filter": directory},
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]
 
@@ -716,10 +808,7 @@ class CtxReadTool(BaseTool):
         return "ctxread"
 
     def get_description(self) -> str:
-        return (
-            "Read the content of a context store node. Without a page number, returns a table of contents. "
-            "With a page number, returns the full prompt and response for that layer."
-        )
+        return "Read the full content of a context store node by store_id path."
 
     def get_input_schema(self) -> dict[str, Any]:
         return {
@@ -727,12 +816,7 @@ class CtxReadTool(BaseTool):
             "properties": {
                 "store_id": {
                     "type": "string",
-                    "description": "The store_id to read. Must exist in the context registry.",
-                },
-                "page": {
-                    "type": "integer",
-                    "description": "1-indexed page number. Each page is one prompt+response pair. Omit for table of contents.",
-                    "minimum": 1,
+                    "description": "The store_id path of the node to read.",
                 },
             },
             "required": ["store_id"],
@@ -762,161 +846,69 @@ class CtxReadTool(BaseTool):
     def format_response(self, response: str, request: ToolRequest, model_info: Optional[dict] = None) -> str:
         return response
 
-    def _get_page_label(self, page_turns: list, entry_label: str | None) -> str:
-        """Extract the label for a page from the assistant turn's metadata, falling back to entry label."""
-        if len(page_turns) >= 2:
-            meta = page_turns[1].model_metadata or {}
-            label = meta.get("context_label")
-            if label:
-                return label
-        return entry_label or "(none)"
-
-    def _get_page_date(self, page_turns: list) -> str:
-        """Extract a short date string from the user turn's timestamp."""
-        if page_turns:
-            ts = page_turns[0].timestamp or ""
-            return ts[:10] if len(ts) >= 10 else ts
-        return "unknown"
-
-    def _get_page_model(self, page_turns: list) -> str:
-        """Get the model name from the assistant turn."""
-        if len(page_turns) >= 2:
-            return page_turns[1].model_name or "unknown"
-        return "unknown"
-
-    def _get_page_files(self, page_turns: list) -> list[str]:
-        """Get file paths from the user turn."""
-        if page_turns and page_turns[0].files:
-            return page_turns[0].files
-        return []
-
-    def _render_toc(self, store_id: str, entry: dict, pages: list) -> str:
-        """Render the table of contents in markdown TOC format."""
-        total = len(pages)
-        etype = entry.get("entry_type", "?")
-        directory = entry.get("directory", "")
-
-        lines = [
-            f"## {store_id}",
-            "",
-            f"**Type:** {etype} | **Pages:** {total}  ",
-            f"**Directory:** {directory}",
-            "",
-            "## Table of Contents",
-            "",
-        ]
-
-        for i, page_turns in enumerate(pages, 1):
-            label = _truncate_label(self._get_page_label(page_turns, entry.get("label")))
-            date = self._get_page_date(page_turns)
-            model = self._get_page_model(page_turns)
-            files = self._get_page_files(page_turns)
-
-            anchor = f"{store_id}.p{i}"
-            line = f"- [{i}. {label}](#{anchor}) — {date}"
-            if files:
-                basenames = ", ".join(os.path.basename(f) for f in files)
-                line += f" — {basenames}"
-            lines.append(line)
-
-        return "\n".join(lines)
-
-    def _render_page(self, store_id: str, page_num: int, total: int, page_turns: list, entry_label: str | None) -> str:
-        """Render a single page with full prompt and response in markdown format."""
-        label = self._get_page_label(page_turns, entry_label)
-        model = self._get_page_model(page_turns)
-        date = self._get_page_date(page_turns)
-        files = self._get_page_files(page_turns)
-
-        lines = [
-            f"# Page {page_num} of {total} — {store_id}",
-            "",
-            f"**Label:** {label}",
-            f"**Model:** {model}",
-            f"**Timestamp:** {date}",
-        ]
-
-        if files:
-            lines.append("")
-            lines.append("**Files:**")
-            for f in files:
-                lines.append(f"- {f}")
-
-        user_turn = page_turns[0]
-        lines.append("")
-        lines.append("## Prompt")
-        lines.append("")
-        lines.append(user_turn.content)
-
-        if len(page_turns) >= 2:
-            lines.append("")
-            lines.append("## Response")
-            lines.append("")
-            lines.append(page_turns[1].content)
-        else:
-            lines.append("")
-            lines.append("*(response pending or incomplete)*")
-
-        return "\n".join(lines)
-
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
-        from utils.context_registry import get_store_entry, resolve_thread_id
-        from utils.conversation_memory import get_thread
+        from utils.context_store import load_store, resolve_node, resolve_store_location
 
         store_id = arguments.get("store_id", "")
-        page = arguments.get("page")
 
-        thread_id = resolve_thread_id(store_id)
-        if not thread_id:
-            error = ToolOutput(status="error", content=f'Store "{store_id}" not found.', content_type="text")
+        location = resolve_store_location(store_id)
+        if location is None:
+            error = ToolOutput(status="error", content=f'Store not found: "{store_id}"', content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        entry = get_store_entry(store_id) or {}
-
-        thread = get_thread(thread_id)
-        if not thread:
-            error = ToolOutput(
-                status="error",
-                content=(
-                    f'Thread data unavailable for "{store_id}". '
-                    "The store exists in the registry but the thread was not found in memory."
-                ),
-                content_type="text",
-            )
+        directory, root_id = location
+        store = load_store(directory, root_id)
+        if store is None:
+            error = ToolOutput(status="error", content=f"Store file not found: {root_id}", content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        if not thread.turns:
-            error = ToolOutput(
-                status="error",
-                content=f'Store "{store_id}" exists but has no recorded turns.',
-                content_type="text",
-            )
-            return [TextContent(type="text", text=error.model_dump_json())]
+        node = resolve_node(store, store_id)
 
-        # Group turns into pages (each user+assistant pair = 1 page)
-        pages: list[list] = []
-        for i in range(0, len(thread.turns), 2):
-            pages.append(thread.turns[i : i + 2])
-        total_pages = len(pages)
-
-        if page is None:
-            content = self._render_toc(store_id, entry, pages)
-        else:
-            if page < 1 or page > total_pages:
+        if node is None:
+            if store_id == store.store_id:
+                lines = [
+                    f"# {store_id}",
+                    "",
+                    "**Type:** store root",
+                    f"**Directory:** {store.directory}",
+                    f"**Created:** {store.created_at}",
+                ]
+                if store.label:
+                    lines.append(f"**Label:** {store.label}")
+                content = "\n".join(lines)
+            else:
                 error = ToolOutput(
                     status="error",
-                    content=f"Page {page} does not exist. Store has {total_pages} page(s).",
+                    content=f"Node not found: {store_id}",
                     content_type="text",
                 )
                 return [TextContent(type="text", text=error.model_dump_json())]
-            content = self._render_page(store_id, page, total_pages, pages[page - 1], entry.get("label"))
+        else:
+            lines = [f"# {store_id}", ""]
+            if node.label:
+                lines.append(f"**Label:** {node.label}")
+            if node.entry_type:
+                lines.append(f"**Type:** {node.entry_type}")
+            if node.model:
+                lines.append(f"**Model:** {node.model}")
+            if node.timestamp:
+                lines.append(f"**Timestamp:** {node.timestamp}")
+            if node.files:
+                lines.append("**Files:**")
+                for f in node.files:
+                    lines.append(f"- {f}")
+            if node.prompt:
+                lines.extend(["", "## Prompt", "", node.prompt])
+            if node.response:
+                lines.extend(["", "## Response", "", node.response])
+            content = "\n".join(lines)
 
         tool_output = ToolOutput(
             status="success",
             content=content,
             content_type="text",
-            metadata={"store_id": store_id, "total_pages": total_pages, "page": page},
+            metadata={"store_id": store_id},
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]
 
@@ -944,7 +936,7 @@ class CtxArmTool(BaseTool):
             "properties": {
                 "store_id": {
                     "type": "string",
-                    "description": "The store_id to arm for auto-revival. Must exist in the context registry.",
+                    "description": "The store_id to arm for auto-revival. Must exist.",
                 },
                 "directory": {
                     "type": "string",
@@ -985,7 +977,7 @@ class CtxArmTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
-        from utils.context_registry import arm_store, disarm_store, get_store_entry
+        from utils.context_store import arm_store, disarm_store, load_store, resolve_store_location
 
         store_id = arguments.get("store_id", "")
         directory = arguments.get("directory", "")
@@ -1001,8 +993,8 @@ class CtxArmTool(BaseTool):
             )
             return [TextContent(type="text", text=tool_output.model_dump_json())]
 
-        entry = get_store_entry(store_id)
-        if not entry:
+        location = resolve_store_location(store_id)
+        if location is None:
             tool_output = ToolOutput(
                 status="error",
                 content=f'Store "{store_id}" not found. Use ctxinit to create it first.',
@@ -1010,11 +1002,21 @@ class CtxArmTool(BaseTool):
             )
             return [TextContent(type="text", text=tool_output.model_dump_json())]
 
-        if entry.get("directory") != directory:
+        store_directory, root_id = location
+        store = load_store(store_directory, root_id)
+        if store is None:
+            tool_output = ToolOutput(
+                status="error",
+                content=f'Store file not found for "{store_id}".',
+                content_type="text",
+            )
+            return [TextContent(type="text", text=tool_output.model_dump_json())]
+
+        if store.directory != directory:
             tool_output = ToolOutput(
                 status="error",
                 content=(
-                    f'Store "{store_id}" is registered to "{entry.get("directory")}", '
+                    f'Store "{store_id}" is registered to "{store.directory}", '
                     f'not "{directory}". Use the correct directory.'
                 ),
                 content_type="text",

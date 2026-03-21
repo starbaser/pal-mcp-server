@@ -36,26 +36,20 @@ class TestCtxInitTool:
         assert annotations["readOnlyHint"] is False
 
     async def test_create_store(self):
-        new_uuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-
-        with patch("utils.conversation_memory.create_thread", return_value=new_uuid):
-            with patch("utils.context_registry.get_store_entry", return_value=None):
-                with patch("utils.context_registry.register_store") as mock_register:
+        with patch("utils.context_store.resolve_store_location", return_value=None):
+            with patch("utils.context_store.save_store") as mock_save:
+                with patch("utils.context_store.update_index") as mock_update:
                     result = await self.tool.execute({"store_name": "myproject", "directory": "/tmp/proj"})
 
         assert len(result) == 1
         payload = json.loads(result[0].text)
         assert payload["status"] == "success"
         assert "myproject" in payload["content"]
-        mock_register.assert_called_once_with(
-            store_id="myproject",
-            thread_id=new_uuid,
-            directory="/tmp/proj",
-            entry_type="store",
-        )
+        mock_save.assert_called_once()
+        mock_update.assert_called_once_with("/tmp/proj", "myproject")
 
-    async def test_collision_same_directory(self):
-        with patch("utils.context_registry.get_store_entry", return_value={"directory": "/tmp/proj"}):
+    async def test_collision_existing_store(self):
+        with patch("utils.context_store.resolve_store_location", return_value=("/tmp/proj", "myproject")):
             result = await self.tool.execute({"store_name": "myproject", "directory": "/tmp/proj"})
 
         assert len(result) == 1
@@ -63,17 +57,13 @@ class TestCtxInitTool:
         assert payload["status"] == "error"
         assert "already exists" in payload["content"].lower()
 
-    async def test_collision_different_directory_allowed(self):
-        new_uuid = "ffffffff-0000-1111-2222-333333333333"
-
-        with patch("utils.context_registry.get_store_entry", return_value={"directory": "/other/dir"}):
-            with patch("utils.conversation_memory.create_thread", return_value=new_uuid):
-                with patch("utils.context_registry.register_store"):
-                    result = await self.tool.execute({"store_name": "myproject", "directory": "/tmp/proj"})
+    async def test_dots_in_name_rejected(self):
+        result = await self.tool.execute({"store_name": "my.project", "directory": "/tmp/proj"})
 
         assert len(result) == 1
         payload = json.loads(result[0].text)
-        assert payload["status"] == "success"
+        assert payload["status"] == "error"
+        assert "dot" in payload["content"].lower()
 
 
 class TestCtxStoreTool:
@@ -95,9 +85,6 @@ class TestCtxStoreTool:
         assert "directory" not in props
         assert "context_label" in props
 
-    def test_ephemeral_false(self):
-        assert self.tool.ephemeral is False
-
     async def test_store_requires_store_id(self):
         result = await self.tool.execute({"prompt": "test"})
 
@@ -107,7 +94,7 @@ class TestCtxStoreTool:
         assert "ctxinit" in payload["content"].lower()
 
     async def test_store_id_not_found(self):
-        with patch("utils.context_registry.resolve_thread_id", return_value=None):
+        with patch("utils.context_store.resolve_store_location", return_value=None):
             result = await self.tool.execute({"store_id": "nonexistent", "prompt": "test"})
 
         assert len(result) == 1
@@ -148,9 +135,6 @@ class TestCtxQueryTool:
         assert "absolute_file_paths" not in props
         assert "context_label" not in props
 
-    def test_ephemeral_true(self):
-        assert self.tool.ephemeral is True
-
     async def test_query_without_store_id_returns_error(self):
         result = await self.tool.execute({"prompt": "test"})
 
@@ -159,7 +143,7 @@ class TestCtxQueryTool:
         assert payload["status"] == "error"
 
     async def test_query_store_id_not_found(self):
-        with patch("utils.context_registry.resolve_thread_id", return_value=None):
+        with patch("utils.context_store.resolve_store_location", return_value=None):
             result = await self.tool.execute({"store_id": "missing", "prompt": "test"})
 
         assert len(result) == 1
@@ -187,7 +171,7 @@ class TestCtxListTool:
         assert annotations["readOnlyHint"] is True
 
     async def test_execute_empty_registry(self):
-        with patch("utils.context_registry.list_stores", return_value=[]):
+        with patch("utils.context_store.list_stores", return_value=[]):
             result = await self.tool.execute({})
 
         assert len(result) == 1
@@ -196,31 +180,19 @@ class TestCtxListTool:
         assert "No context stores found" in payload["content"]
 
     async def test_execute_with_stores(self):
+        from utils.context_store import StoreRoot
+
         stores = [
-            {
-                "store_id": "myproject",
-                "entry_type": "store",
-                "label": "first",
-                "layer_count": 2,
-                "follow_up_count": 0,
-            },
-            {
-                "store_id": "myproject.Q0",
-                "entry_type": "query",
-                "label": None,
-                "layer_count": 0,
-                "follow_up_count": 1,
-            },
+            StoreRoot(store_id="myproject", directory="/tmp/proj", created_at="2026-01-01T00:00:00Z"),
         ]
 
-        with patch("utils.context_registry.list_stores", return_value=stores):
+        with patch("utils.context_store.list_stores", return_value=stores):
             result = await self.tool.execute({})
 
         assert len(result) == 1
         payload = json.loads(result[0].text)
         assert payload["status"] == "success"
-        assert "Found 2 node(s)" in payload["content"]
-        assert payload["metadata"]["store_count"] == 2
+        assert "myproject" in payload["content"]
 
 
 class TestContextRegistry:
@@ -471,49 +443,15 @@ class TestContextEphemeralGuard:
         assert thread.turns[1].role == "user"
         assert thread.turns[1].content == "follow-up query"
 
-    def test_ctxquery_has_ephemeral_true(self):
+    def test_ctxquery_registered_in_tools(self):
         from server import TOOLS
 
-        assert TOOLS["ctxquery"].ephemeral is True
+        assert "ctxquery" in TOOLS
 
-    def test_ctxinit_not_in_ephemeral_tools(self):
+    def test_ctxstore_registered_in_tools(self):
         from server import TOOLS
 
-        assert getattr(TOOLS["ctxinit"], "ephemeral", False) is False
-
-    def test_ctxstore_has_ephemeral_false(self):
-        from server import TOOLS
-
-        assert TOOLS["ctxstore"].ephemeral is False
-
-
-class TestContextStoreIdMapping:
-    """store_id to continuation_id argument mapping via registry lookup."""
-
-    def test_store_id_resolves_to_thread_uuid(self):
-        tool = CtxStoreTool()
-        args = {"store_id": "myproject", "prompt": "hello"}
-
-        with patch("utils.context_registry.resolve_thread_id", return_value="real-uuid-5678"):
-            tool._map_store_id(args)
-
-        assert args["continuation_id"] == "real-uuid-5678"
-
-    def test_store_id_not_found_sets_flag(self):
-        tool = CtxStoreTool()
-        args = {"store_id": "unknown-store", "prompt": "hello"}
-
-        with patch("utils.context_registry.resolve_thread_id", return_value=None):
-            tool._map_store_id(args)
-
-        assert args.get("_store_id_not_found") is True
-
-    def test_no_store_id_no_mapping(self):
-        tool = CtxStoreTool()
-        args = {"prompt": "hello"}
-        tool._map_store_id(args)
-
-        assert "continuation_id" not in args
+        assert "ctxstore" in TOOLS
 
 
 class TestContextForkChain:
@@ -655,171 +593,202 @@ class TestToolForkRegistry:
 class TestResolveStoreContinuation:
     """Tests for _resolve_store_continuation in server.py."""
 
-    def test_returns_none_for_uuid(self, tmp_path):
-        from server import _resolve_store_continuation
-        from utils import context_registry
+    def _make_store(self, tmp_path, monkeypatch, store_id: str, directory: str):
+        """Create, save, and index a StoreRoot under tmp_path."""
+        import os
 
-        context_registry._REGISTRY_PATH = str(tmp_path / "context" / "stores.json")
+        from utils import context_store
+        from utils.context_store import StoreRoot, save_store, update_index
+
+        ctx_dir = str(tmp_path / "context")
+        monkeypatch.setattr(context_store, "_CTX_DIR", ctx_dir)
+        monkeypatch.setattr(context_store, "_INDEX_PATH", os.path.join(ctx_dir, "store-index.json"))
+        monkeypatch.setattr(context_store, "_ARMED_PATH", os.path.join(ctx_dir, "armed.json"))
+
+        from datetime import datetime, timezone
+
+        store = StoreRoot(
+            store_id=store_id,
+            directory=directory,
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+        save_store(store)
+        update_index(directory, store_id)
+        return store
+
+    def test_returns_none_for_uuid(self, tmp_path, monkeypatch):
+        import os
+
+        from server import _resolve_store_continuation
+        from utils import context_store
+
+        ctx_dir = str(tmp_path / "context")
+        monkeypatch.setattr(context_store, "_CTX_DIR", ctx_dir)
+        monkeypatch.setattr(context_store, "_INDEX_PATH", os.path.join(ctx_dir, "store-index.json"))
+        monkeypatch.setattr(context_store, "_ARMED_PATH", os.path.join(ctx_dir, "armed.json"))
 
         args = {"continuation_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"}
         result = _resolve_store_continuation("thinkdeep", args)
 
         assert result is None
-        # continuation_id unchanged
         assert args["continuation_id"] == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
-    def test_fork_from_store(self, tmp_path):
+    def test_fork_from_store(self, tmp_path, monkeypatch):
         from server import _resolve_store_continuation
-        from utils import context_registry
-        from utils.conversation_memory import create_thread
 
-        context_registry._REGISTRY_PATH = str(tmp_path / "context" / "stores.json")
-
-        parent_uuid = create_thread("ctxstore", {"prompt": "init"})
-        context_registry.register_store(store_id="myproject", thread_id=parent_uuid, directory="/tmp/proj")
+        self._make_store(tmp_path, monkeypatch, "myproject", "/tmp/proj")
 
         args = {"continuation_id": "myproject"}
         result = _resolve_store_continuation("thinkdeep", args)
 
         assert result == "myproject.thinkdeep0"
-        # continuation_id should now be the new thread UUID, not "myproject"
+        # continuation_id is now a hydrated thread UUID, not the store path
         assert args["continuation_id"] != "myproject"
-        assert args["continuation_id"] != parent_uuid
 
-        # Verify registry entry was created
-        entry = context_registry.get_store_entry("myproject.thinkdeep0")
-        assert entry is not None
-        assert entry["entry_type"] == "tool"
-        assert entry["tool_name"] == "thinkdeep"
-        assert entry["parent_store_id"] == "myproject"
+        bridge = args["_store_bridge"]
+        assert bridge["new_path"] == "myproject.thinkdeep0"
+        assert bridge["child_key"] == "thinkdeep0"
+        assert bridge["tool_name"] == "thinkdeep"
+        assert bridge["parent_path"] == "myproject"
+        assert bridge["store"].store_id == "myproject"
 
-    def test_continue_same_tool(self, tmp_path):
+    def test_continue_same_tool(self, tmp_path, monkeypatch):
         from server import _resolve_store_continuation
-        from utils import context_registry
-        from utils.conversation_memory import create_thread
+        from utils.context_store import StoreNode, save_store
 
-        context_registry._REGISTRY_PATH = str(tmp_path / "context" / "stores.json")
+        from datetime import datetime, timezone
 
-        parent_uuid = create_thread("ctxstore", {"prompt": "init"})
-        fork_uuid = create_thread("thinkdeep", {"store_fork": "myproject"}, parent_thread_id=parent_uuid)
+        store = self._make_store(tmp_path, monkeypatch, "myproject", "/tmp/proj")
 
-        context_registry.register_store(store_id="myproject", thread_id=parent_uuid, directory="/tmp/proj")
-        context_registry.register_store(
-            store_id="myproject.thinkdeep0",
-            thread_id=fork_uuid,
-            directory="/tmp/proj",
+        thinkdeep_node = StoreNode(
             entry_type="tool",
-            parent_store_id="myproject",
             tool_name="thinkdeep",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            prompt="initial prompt",
+            response="initial response",
         )
+        store.children["thinkdeep0"] = thinkdeep_node
+        save_store(store)
 
         args = {"continuation_id": "myproject.thinkdeep0"}
         result = _resolve_store_continuation("thinkdeep", args)
 
-        assert result == "myproject.thinkdeep0"
-        assert args["continuation_id"] == fork_uuid
+        # CONTINUE path: numeric follow-up child of thinkdeep0
+        assert result == "myproject.thinkdeep0.1"
+        assert args["continuation_id"] != "myproject.thinkdeep0"
 
-        # follow_up_count should have incremented
-        entry = context_registry.get_store_entry("myproject.thinkdeep0")
-        assert entry["follow_up_count"] == 1
+        bridge = args["_store_bridge"]
+        assert bridge["new_path"] == "myproject.thinkdeep0.1"
+        assert bridge["child_key"] == "1"
+        assert bridge["tool_name"] == "thinkdeep"
+        assert bridge["parent_path"] == "myproject.thinkdeep0"
 
-    def test_refork_different_tool(self, tmp_path):
+    def test_refork_different_tool(self, tmp_path, monkeypatch):
         from server import _resolve_store_continuation
-        from utils import context_registry
-        from utils.conversation_memory import create_thread
+        from utils.context_store import StoreNode, save_store
 
-        context_registry._REGISTRY_PATH = str(tmp_path / "context" / "stores.json")
+        from datetime import datetime, timezone
 
-        parent_uuid = create_thread("ctxstore", {"prompt": "init"})
-        fork_uuid = create_thread("thinkdeep", {"store_fork": "myproject"}, parent_thread_id=parent_uuid)
+        store = self._make_store(tmp_path, monkeypatch, "myproject", "/tmp/proj")
 
-        context_registry.register_store(store_id="myproject", thread_id=parent_uuid, directory="/tmp/proj")
-        context_registry.register_store(
-            store_id="myproject.thinkdeep0",
-            thread_id=fork_uuid,
-            directory="/tmp/proj",
+        thinkdeep_node = StoreNode(
             entry_type="tool",
-            parent_store_id="myproject",
             tool_name="thinkdeep",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            prompt="initial prompt",
+            response="initial response",
         )
+        store.children["thinkdeep0"] = thinkdeep_node
+        save_store(store)
 
         args = {"continuation_id": "myproject.thinkdeep0"}
         result = _resolve_store_continuation("analyze", args)
 
         assert result == "myproject.thinkdeep0.analyze0"
-        # Should be a new UUID, not the thinkdeep fork's UUID
-        assert args["continuation_id"] != fork_uuid
-        assert args["continuation_id"] != parent_uuid
+        assert args["continuation_id"] != "myproject.thinkdeep0"
 
-        entry = context_registry.get_store_entry("myproject.thinkdeep0.analyze0")
-        assert entry is not None
-        assert entry["entry_type"] == "tool"
-        assert entry["tool_name"] == "analyze"
-        assert entry["parent_store_id"] == "myproject.thinkdeep0"
+        bridge = args["_store_bridge"]
+        assert bridge["new_path"] == "myproject.thinkdeep0.analyze0"
+        assert bridge["child_key"] == "analyze0"
+        assert bridge["tool_name"] == "analyze"
+        assert bridge["parent_path"] == "myproject.thinkdeep0"
 
-    def test_fork_from_query(self, tmp_path):
+    def test_fork_from_query(self, tmp_path, monkeypatch):
         from server import _resolve_store_continuation
-        from utils import context_registry
-        from utils.conversation_memory import create_thread
+        from utils.context_store import StoreNode, save_store
 
-        context_registry._REGISTRY_PATH = str(tmp_path / "context" / "stores.json")
+        from datetime import datetime, timezone
 
-        store_uuid = create_thread("ctxstore", {"prompt": "init"})
-        query_uuid = create_thread("ctxquery", {"prompt": "ask"}, parent_thread_id=store_uuid)
+        store = self._make_store(tmp_path, monkeypatch, "myproject", "/tmp/proj")
 
-        context_registry.register_store(store_id="myproject", thread_id=store_uuid, directory="/tmp/proj")
-        context_registry.register_store(
-            store_id="myproject.Q0",
-            thread_id=query_uuid,
-            directory="/tmp/proj",
+        query_node = StoreNode(
             entry_type="query",
-            parent_store_id="myproject",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            prompt="query prompt",
+            response="query response",
         )
+        store.children["Q0"] = query_node
+        save_store(store)
 
         args = {"continuation_id": "myproject.Q0"}
         result = _resolve_store_continuation("thinkdeep", args)
 
         assert result == "myproject.Q0.thinkdeep0"
 
-    def test_fork_from_layer(self, tmp_path):
+        bridge = args["_store_bridge"]
+        assert bridge["new_path"] == "myproject.Q0.thinkdeep0"
+        assert bridge["parent_path"] == "myproject.Q0"
+
+    def test_fork_from_layer(self, tmp_path, monkeypatch):
         from server import _resolve_store_continuation
-        from utils import context_registry
-        from utils.conversation_memory import create_thread
+        from utils.context_store import StoreNode, save_store
 
-        context_registry._REGISTRY_PATH = str(tmp_path / "context" / "stores.json")
+        from datetime import datetime, timezone
 
-        store_uuid = create_thread("ctxstore", {"prompt": "init"})
+        store = self._make_store(tmp_path, monkeypatch, "myproject", "/tmp/proj")
 
-        context_registry.register_store(store_id="myproject", thread_id=store_uuid, directory="/tmp/proj")
-        context_registry.register_store(
-            store_id="myproject.L1",
-            thread_id=store_uuid,
-            directory="/tmp/proj",
+        layer_node = StoreNode(
             entry_type="store",
-            parent_store_id="myproject",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            prompt="layer prompt",
+            response="layer response",
         )
+        store.children["L1"] = layer_node
+        save_store(store)
 
         args = {"continuation_id": "myproject.L1"}
         result = _resolve_store_continuation("chat", args)
 
         assert result == "myproject.L1.chat0"
 
-    def test_fork_index_increments(self, tmp_path):
+        bridge = args["_store_bridge"]
+        assert bridge["new_path"] == "myproject.L1.chat0"
+        assert bridge["parent_path"] == "myproject.L1"
+
+    def test_fork_index_increments(self, tmp_path, monkeypatch):
         from server import _resolve_store_continuation
-        from utils import context_registry
-        from utils.conversation_memory import create_thread
+        from utils.context_store import StoreNode, save_store
 
-        context_registry._REGISTRY_PATH = str(tmp_path / "context" / "stores.json")
+        from datetime import datetime, timezone
 
-        parent_uuid = create_thread("ctxstore", {"prompt": "init"})
-        context_registry.register_store(store_id="myproject", thread_id=parent_uuid, directory="/tmp/proj")
+        store = self._make_store(tmp_path, monkeypatch, "myproject", "/tmp/proj")
 
-        # First fork
+        # First fork — no children exist yet
         args1 = {"continuation_id": "myproject"}
         result1 = _resolve_store_continuation("thinkdeep", args1)
         assert result1 == "myproject.thinkdeep0"
 
-        # Second fork (new invocation from same store)
+        # Simulate _inject_store_path_continuation persisting thinkdeep0 to disk
+        store.children["thinkdeep0"] = StoreNode(
+            entry_type="tool",
+            tool_name="thinkdeep",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            prompt="p",
+            response="r",
+        )
+        save_store(store)
+
+        # Second fork from the same root sees thinkdeep0 already present
         args2 = {"continuation_id": "myproject"}
         result2 = _resolve_store_continuation("thinkdeep", args2)
         assert result2 == "myproject.thinkdeep1"

@@ -34,6 +34,14 @@ def _truncate_label(text: str, max_len: int = 80) -> str:
     return truncated + "…"
 
 
+def _natural_sort_key(key: str) -> tuple:
+    """Sort key that handles mixed alpha-numeric keys naturally: L1, L2, ..., L10."""
+    import re
+
+    parts = re.split(r"(\d+)", key)
+    return tuple(int(p) if p.isdigit() else p for p in parts)
+
+
 def _render_store_tree(store, root_path: str = "", indent: int = 0) -> list[str]:
     """Render a store's node dict as indented markdown link lines."""
     from utils.context_store import StoreNode
@@ -42,23 +50,25 @@ def _render_store_tree(store, root_path: str = "", indent: int = 0) -> list[str]
 
     def _render_nodes(nodes: dict[str, StoreNode], parent_path: str, depth: int) -> None:
         p = "  " * depth
-        for key, node in nodes.items():
+        for key, node in sorted(nodes.items(), key=lambda kv: _natural_sort_key(kv[0])):
             full_path = f"{parent_path}.{key}"
             etype = node.entry_type
             ts = (node.timestamp or "")[:10]
 
             if etype == "store":
                 label_part = f"{key}. {node.label}" if node.label else key
+                prompt_part = f'  "{_truncate_label(node.prompt, 60)}"' if node.prompt else ""
                 date_part = f" — {ts}" if ts else ""
                 files_part = ""
                 if node.files:
                     basenames = ", ".join(os.path.basename(f) for f in node.files)
                     files_part = f" — {basenames}"
-                lines.append(f"{p}- [{label_part}](#{full_path}){date_part}{files_part}")
+                lines.append(f"{p}- [{label_part}](#{full_path}){prompt_part}{date_part}{files_part}")
             elif etype == "query":
+                display_key = f".{key}" if key.isdigit() else key
                 prompt_part = f'  "{_truncate_label(node.prompt, 60)}"' if node.prompt else ""
                 date_part = f" — {ts}" if ts else ""
-                lines.append(f"{p}- [{key}](#{full_path}){prompt_part}{date_part}")
+                lines.append(f"{p}- [{display_key}](#{full_path}){prompt_part}{date_part}")
             elif etype == "fork":
                 label_part = f"{key}. {node.label}" if node.label else key
                 date_part = f" — {ts}" if ts else ""
@@ -67,7 +77,7 @@ def _render_store_tree(store, root_path: str = "", indent: int = 0) -> list[str]
                 tool_name = node.tool_name or key
                 lines.append(f"{p}- [.{tool_name}](#{full_path})")
             else:
-                lines.append(f"{p}- [{key}](#{full_path})")
+                lines.append(f"{p}- [.{key}](#{full_path})")
 
             if node.children:
                 _render_nodes(node.children, full_path, depth + 1)

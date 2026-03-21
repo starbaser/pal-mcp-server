@@ -63,8 +63,8 @@ def load_thread_file(thread_id: str) -> list[dict] | None:
         return None
 
 
-def _extract_turn_pair(turns: list[dict], pair_index: int) -> tuple[str, str, str, str] | None:
-    """Extract (prompt, response, label, model) for turn pair at pair_index.
+def _extract_turn_pair(turns: list[dict], pair_index: int) -> tuple[str, str, str, str, str] | None:
+    """Extract (prompt, response, label, model, timestamp) for turn pair at pair_index.
 
     Pair 0 is turns[0:2], pair 1 is turns[2:4], etc.  A pair is valid only if
     it contains at least one assistant turn with non-empty content.  Returns
@@ -86,12 +86,15 @@ def _extract_turn_pair(turns: list[dict], pair_index: int) -> tuple[str, str, st
 
     label = ""
     model = ""
+    timestamp = ""
     if asst_turn:
         meta = asst_turn.get("model_metadata") or {}
         label = meta.get("context_label") or asst_turn.get("tool_name") or ""
         model = asst_turn.get("model_name") or ""
+    if user_turn:
+        timestamp = user_turn.get("timestamp") or ""
 
-    return prompt, response, label, model
+    return prompt, response, label, model, timestamp
 
 
 def _now_iso() -> str:
@@ -111,12 +114,7 @@ def _build_layer_nodes(root_entry: dict) -> dict[str, StoreNode]:
     """Build the L-keyed layer nodes for a root store entry.
 
     The root entry and all its .LN siblings share the same thread_id and
-    accumulate turns sequentially.  Turn pair 0 → root implicit layer,
-    pair 1 → L1, pair 2 → L2, etc.
-
-    Returns a dict of child-key → StoreNode for everything beyond pair 0;
-    pair 0 content is returned separately as (prompt, response) on the
-    StoreRoot and is not represented as a child node.
+    accumulate turns sequentially.  Pair 0 → L1, pair 1 → L2, etc.
     """
     thread_id = root_entry["thread_id"]
     turns = load_thread_file(thread_id)
@@ -127,16 +125,16 @@ def _build_layer_nodes(root_entry: dict) -> dict[str, StoreNode]:
     nodes: dict[str, StoreNode] = {}
     pair_count = (len(turns) + 1) // 2  # ceil division
 
-    for pair_idx in range(1, pair_count):
+    for pair_idx in range(0, pair_count):
         pair = _extract_turn_pair(turns, pair_idx)
         if pair is None:
             continue
-        prompt, response, label, model = pair
-        key = f"L{pair_idx}"
+        prompt, response, label, model, timestamp = pair
+        key = f"L{pair_idx + 1}"
         nodes[key] = StoreNode(
             entry_type="store",
             label=label or None,
-            timestamp=_entry_timestamp(root_entry),
+            timestamp=timestamp or _entry_timestamp(root_entry),
             model=model or None,
             prompt=prompt,
             response=response,
@@ -180,7 +178,7 @@ def _build_query_node(q_entry: dict, all_entries: dict[str, dict]) -> StoreNode 
         _stats["turns_skipped"] += 1
         return None
 
-    prompt, response, label, model = first_pair
+    prompt, response, label, model, timestamp = first_pair
     effective_label = q_entry.get("label") or label or None
 
     # Build numeric follow-up children from additional pairs in the same thread
@@ -190,12 +188,12 @@ def _build_query_node(q_entry: dict, all_entries: dict[str, dict]) -> StoreNode 
         pair = _extract_turn_pair(turns, pair_idx)
         if pair is None:
             continue
-        fp, fr, fl, fm = pair
+        fp, fr, fl, fm, fts = pair
         key = str(pair_idx)
         children[key] = StoreNode(
             entry_type="query",
             label=fl or None,
-            timestamp=_entry_timestamp(q_entry),
+            timestamp=fts or _entry_timestamp(q_entry),
             model=fm or None,
             prompt=fp,
             response=fr,
@@ -218,11 +216,11 @@ def _build_query_node(q_entry: dict, all_entries: dict[str, dict]) -> StoreNode 
             if fu_turns:
                 fu_pair = _extract_turn_pair(fu_turns, 0)
                 if fu_pair:
-                    fp, fr, fl, fm = fu_pair
+                    fp, fr, fl, fm, fts = fu_pair
                     children[suffix] = StoreNode(
                         entry_type="query",
                         label=fl or None,
-                        timestamp=_entry_timestamp(other_entry),
+                        timestamp=fts or _entry_timestamp(other_entry),
                         model=fm or None,
                         prompt=fp,
                         response=fr,
@@ -232,7 +230,7 @@ def _build_query_node(q_entry: dict, all_entries: dict[str, dict]) -> StoreNode 
     node = StoreNode(
         entry_type="query",
         label=effective_label,
-        timestamp=_entry_timestamp(q_entry),
+        timestamp=timestamp or _entry_timestamp(q_entry),
         model=model or None,
         prompt=prompt,
         response=response,
@@ -262,11 +260,11 @@ def _build_tool_node(tool_entry: dict) -> StoreNode | None:
         _stats["turns_skipped"] += 1
         return None
 
-    prompt, response, label, model = first_pair
+    prompt, response, label, model, timestamp = first_pair
     node = StoreNode(
         entry_type="tool",
         label=label or tool_entry.get("label") or None,
-        timestamp=_entry_timestamp(tool_entry),
+        timestamp=timestamp or _entry_timestamp(tool_entry),
         model=model or None,
         tool_name=tool_entry.get("tool_name"),
         prompt=prompt,
@@ -339,7 +337,7 @@ def build_tree_for_root(root_entry: dict, all_entries: dict[str, dict]) -> Store
     if turns is not None:
         pair0 = _extract_turn_pair(turns, 0)
         if pair0:
-            _, _, extracted_label, _ = pair0
+            _, _, extracted_label, _, _ = pair0
             if not root_label and extracted_label:
                 root_label = extracted_label
     else:

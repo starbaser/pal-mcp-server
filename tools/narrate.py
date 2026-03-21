@@ -308,53 +308,43 @@ class NarrateTool(WorkflowTool):
         return "\n".join(context_parts)
 
     def _build_store_section(self, store_id: str, store_pages: list[int]) -> str:
-        """Read the requested pages from a context store and format them for the expert writer."""
-        try:
-            from utils.context_registry import resolve_thread_id
-            from utils.conversation_memory import get_thread
+        """Read the requested pages from a context store and format them for the expert writer.
 
-            thread_id = resolve_thread_id(store_id)
-            if thread_id is None:
-                logger.warning(
-                    f"[NARRATE] store_id '{store_id}' not found in context registry — skipping store section"
-                )
+        store_pages is a legacy parameter — in the new tree-based system, nodes are addressed
+        by store_id path. This method reads the store's L-children by index as a compatibility bridge.
+        """
+        try:
+            from utils.context_store import load_store, resolve_store_location
+
+            location = resolve_store_location(store_id)
+            if location is None:
+                logger.warning(f"[NARRATE] store_id '{store_id}' not found — skipping store section")
                 return ""
 
-            thread = get_thread(thread_id)
-            if thread is None:
-                logger.warning(
-                    f"[NARRATE] thread {thread_id} for store '{store_id}' not found in memory — skipping store section"
-                )
+            directory, root_id = location
+            store = load_store(directory, root_id)
+            if store is None:
+                logger.warning(f"[NARRATE] store file not found for '{store_id}' — skipping store section")
                 return ""
 
             page_parts = []
             for page_num in store_pages:
-                # Pages are 1-indexed; each page = one user+assistant turn pair
-                pair_start = 2 * (page_num - 1)
-                pair_end = pair_start + 2
-                pair = thread.turns[pair_start:pair_end]
-
-                if not pair:
-                    logger.warning(f"[NARRATE] store '{store_id}' page {page_num} is out of range — skipping")
+                key = f"L{page_num}"
+                node = store.children.get(key)
+                if node is None:
+                    logger.warning(f"[NARRATE] store '{store_id}' node {key} not found — skipping")
                     continue
 
-                # Extract label from model_metadata on the assistant turn if present
-                label = f"page {page_num}"
-                for turn in pair:
-                    if turn.role == "assistant" and turn.model_metadata:
-                        candidate = turn.model_metadata.get("context_label")
-                        if candidate:
-                            label = candidate
-                            break
+                label = node.label or f"layer {page_num}"
+                content_parts = []
+                if node.prompt:
+                    content_parts.append(node.prompt)
+                if node.response:
+                    content_parts.append(node.response)
 
-                page_content_parts = []
-                for turn in pair:
-                    if turn.content:
-                        page_content_parts.append(turn.content)
-
-                if page_content_parts:
-                    page_text = "\n\n".join(page_content_parts)
-                    page_parts.append(f"--- Page {page_num}: {label} ---\n{page_text}")
+                if content_parts:
+                    page_text = "\n\n".join(content_parts)
+                    page_parts.append(f"--- {key}: {label} ---\n{page_text}")
 
             if not page_parts:
                 return ""

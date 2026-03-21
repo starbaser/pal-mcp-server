@@ -529,6 +529,16 @@ class CtxQueryTool(ContextBaseTool):
         from utils.context_store import walk_ancestry
 
         ancestors = walk_ancestry(store, store_id)
+
+        # Root-level query: walk_ancestry returns [] because there's no path to traverse.
+        # Collect all L-children (layers) as the context — this is "query the whole store".
+        if not ancestors and store_id == store.store_id:
+            layers = [
+                (k, v) for k, v in store.children.items() if k.startswith("L") and k[1:].isdigit()
+            ]
+            layers.sort(key=lambda kv: int(kv[0][1:]))
+            ancestors = [node for _, node in layers]
+
         self._injected_history = build_context_from_ancestry(ancestors)
         self._store = store
         self._store_id = store_id

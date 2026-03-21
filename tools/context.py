@@ -25,7 +25,8 @@ STORE_ID_DESCRIPTION = (
 
 
 def _truncate_label(text: str, max_len: int = 80) -> str:
-    """Truncate label at a word boundary with ellipsis."""
+    """Truncate label at a word boundary with ellipsis. Collapses newlines to spaces."""
+    text = " ".join(text.split())
     if len(text) <= max_len:
         return text
     truncated = text[:max_len].rsplit(" ", 1)[0]
@@ -812,10 +813,11 @@ class CtxReadTool(BaseTool):
             files = self._get_page_files(page_turns)
 
             anchor = f"{store_id}.p{i}"
-            lines.append(f"- [{i}. {label}](#{anchor}) — {date}, {model}")
+            line = f"- [{i}. {label}](#{anchor}) — {date}"
             if files:
                 basenames = ", ".join(os.path.basename(f) for f in files)
-                lines.append(f"  - Files: {basenames}")
+                line += f" — {basenames}"
+            lines.append(line)
 
         return "\n".join(lines)
 

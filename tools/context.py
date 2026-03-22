@@ -1055,3 +1055,98 @@ class CtxArmTool(BaseTool):
             metadata={"store_id": store_id, "directory": directory, "armed": True},
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]
+
+
+# ---------------------------------------------------------------------------
+# ctxrename
+# ---------------------------------------------------------------------------
+
+
+class CtxRenameTool(BaseTool):
+    def get_name(self) -> str:
+        return "ctxrename"
+
+    def get_description(self) -> str:
+        return "Rename a root context store. Updates the store file, index, and armed state."
+
+    def get_input_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "store_id": {
+                    "type": "string",
+                    "description": "Current store_id of the store to rename.",
+                },
+                "new_name": {
+                    "type": "string",
+                    "description": "New name for the store. No dots allowed.",
+                },
+                "directory": {
+                    "type": "string",
+                    "description": "Absolute path to the project directory the store is associated with.",
+                },
+            },
+            "required": ["store_id", "new_name", "directory"],
+            "additionalProperties": False,
+        }
+
+    def get_annotations(self) -> dict:
+        return {"readOnlyHint": False}
+
+    def get_system_prompt(self) -> str:
+        return ""
+
+    def get_request_model(self):
+        return ToolRequest
+
+    def requires_model(self) -> bool:
+        return False
+
+    def get_model_category(self):
+        from tools.models import ToolModelCategory
+
+        return ToolModelCategory.FAST_RESPONSE
+
+    async def prepare_prompt(self, request: ToolRequest) -> str:
+        return ""
+
+    def format_response(self, response: str, request: ToolRequest, model_info: Optional[dict] = None) -> str:
+        return response
+
+    async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
+        from tools.models import ToolOutput
+        from utils.context_store import rename_store
+
+        store_id = arguments.get("store_id", "")
+        new_name = arguments.get("new_name", "")
+        directory = arguments.get("directory", "")
+
+        if not store_id or not new_name or not directory:
+            tool_output = ToolOutput(
+                status="error",
+                content="store_id, new_name, and directory are all required.",
+                content_type="text",
+            )
+            return [TextContent(type="text", text=tool_output.model_dump_json())]
+
+        try:
+            rename_store(directory, store_id, new_name)
+        except KeyError as e:
+            tool_output = ToolOutput(status="error", content=str(e), content_type="text")
+            return [TextContent(type="text", text=tool_output.model_dump_json())]
+        except ValueError as e:
+            tool_output = ToolOutput(status="error", content=str(e), content_type="text")
+            return [TextContent(type="text", text=tool_output.model_dump_json())]
+
+        tool_output = ToolOutput(
+            status="success",
+            content=(
+                f"Store renamed.\n\n"
+                f"old store_id: {store_id}\n"
+                f"new store_id: {new_name}\n"
+                f"directory: {directory}"
+            ),
+            content_type="text",
+            metadata={"store_id": new_name, "old_store_id": store_id, "directory": directory},
+        )
+        return [TextContent(type="text", text=tool_output.model_dump_json())]

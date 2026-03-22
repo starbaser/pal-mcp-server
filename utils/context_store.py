@@ -122,6 +122,33 @@ def save_store(store: StoreRoot) -> None:
     _atomic_write(path, store)
 
 
+def rename_store(directory: str, old_id: str, new_id: str) -> None:
+    """Rename a root store: update store_id, rename file on disk, update index and armed state."""
+    store = load_store(directory, old_id)
+    if store is None:
+        raise KeyError(f"Store not found: {old_id}")
+    if "." in new_id:
+        raise ValueError("Store names cannot contain dots.")
+
+    store.store_id = new_id
+    save_store(store)
+
+    old_path = get_store_path(directory, old_id)
+    if os.path.exists(old_path):
+        os.remove(old_path)
+
+    index = load_index()
+    index["stores"].pop(old_id, None)
+    encoded = encode_directory(directory)
+    index["stores"][new_id] = encoded
+    save_index(index)
+
+    armed = load_armed()
+    if armed.get(directory) == old_id:
+        armed[directory] = new_id
+        save_armed(armed)
+
+
 # ---------------------------------------------------------------------------
 # Tree navigation
 # ---------------------------------------------------------------------------

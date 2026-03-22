@@ -71,7 +71,16 @@ from tools import (  # noqa: E402
     TracerTool,
     VersionTool,
 )
-from tools.context import CtxArmTool, CtxForkTool, CtxInitTool, CtxListTool, CtxQueryTool, CtxReadTool, CtxStoreTool
+from tools.context import (
+    CtxArmTool,
+    CtxForkTool,
+    CtxInitTool,
+    CtxListTool,
+    CtxQueryTool,
+    CtxReadTool,
+    CtxRenameTool,
+    CtxStoreTool,
+)
 from tools.models import ToolOutput  # noqa: E402
 from tools.shared.exceptions import ToolExecutionError  # noqa: E402
 from utils.env import env_override_enabled, get_env  # noqa: E402
@@ -292,6 +301,7 @@ TOOLS = {
     "ctxfork": CtxForkTool(),  # Create a fork point in a context store tree
     "ctxread": CtxReadTool(),  # Read content of a specific context store node
     "ctxarm": CtxArmTool(),  # Arm/disarm a store for auto-revival on SessionStart
+    "ctxrename": CtxRenameTool(),  # Rename a root context store
 }
 TOOLS = filter_disabled_tools(TOOLS)
 

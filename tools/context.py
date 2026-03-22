@@ -135,7 +135,7 @@ class ContextBaseTool(SimpleTool):
         return None
 
     def get_annotations(self) -> dict:
-        return {"readOnlyHint": False}
+        return {"readOnlyHint": False, "openWorldHint": False}
 
     def _resolve_store(self, store_id: str):
         """Load store for a given store_id path. Returns (store, root_store_id).
@@ -150,7 +150,7 @@ class ContextBaseTool(SimpleTool):
         directory, root_id = location
         store = load_store(directory, root_id)
         if store is None:
-            raise KeyError(f"Store file not found: {root_id} in {directory}")
+            raise KeyError(f'Store file not found: "{root_id}".')
         return store, root_id
 
 
@@ -310,7 +310,10 @@ class CtxStoreTool(ContextBaseTool):
         return {
             "type": "object",
             "properties": {
-                "prompt": {"type": "string", "description": "Content or context to store in this layer."},
+                "prompt": {
+                    "type": "string",
+                    "description": "Prose context or instructions for the external model to process and store.",
+                },
                 "absolute_file_paths": {
                     "type": "array",
                     "items": {"type": "string"},
@@ -323,7 +326,7 @@ class CtxStoreTool(ContextBaseTool):
                 },
                 "context_label": {
                     "type": "string",
-                    "description": "Optional human-readable label for this context layer.",
+                    "description": "Short human-readable label for this layer (e.g. 'session 3 conversation').",
                 },
                 "store_id": {"type": "string", "description": STORE_ID_DESCRIPTION},
                 "model": self.get_model_field_schema(),
@@ -459,8 +462,9 @@ class CtxQueryTool(ContextBaseTool):
 
     def get_description(self) -> str:
         return (
-            "Query a context store. Forks on store/fork nodes, continues on query nodes. "
-            "Returns a new store_id reflecting the operation."
+            "Query a context store, sending stored layers to an external model and returning its response. "
+            "Safe to call multiple times — each query is recorded as a child node and a new store_id is returned. "
+            "Use ctxlist to discover store_ids; use ctxstore to add context before querying."
         )
 
     def get_request_model(self):
@@ -468,7 +472,10 @@ class CtxQueryTool(ContextBaseTool):
 
     def get_tool_fields(self) -> dict[str, dict[str, Any]]:
         return {
-            "prompt": {"type": "string", "description": "Question or query to run against the context silo."},
+            "prompt": {
+                "type": "string",
+                "description": "Question or instruction to run against the context silo.",
+            },
             "store_id": {"type": "string", "description": STORE_ID_DESCRIPTION},
         }
 
@@ -483,7 +490,10 @@ class CtxQueryTool(ContextBaseTool):
         return {
             "type": "object",
             "properties": {
-                "prompt": {"type": "string", "description": "Question or query to run against the context silo."},
+                "prompt": {
+                    "type": "string",
+                    "description": "Question or instruction to run against the context silo.",
+                },
                 "store_id": {"type": "string", "description": STORE_ID_DESCRIPTION},
                 "model": self.get_model_field_schema(),
                 "temperature": {
@@ -637,23 +647,30 @@ class CtxForkTool(BaseTool):
 
     def get_description(self) -> str:
         return (
-            "Create a fork point in a context store. Forks let you branch the conversation from any node, "
-            "exploring alternatives without disrupting the main lineage. Returns a new store_id for the fork."
+            "Create a fork point in a context store, branching from any node to explore alternatives "
+            "without disrupting the main lineage. Returns a new store_id for the fork branch. "
+            "Use ctxlist to find the store_id to fork from; use ctxstore or ctxquery with the returned fork store_id."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
-                "store_id": {"type": "string", "description": "The store path to fork from."},
-                "label": {"type": "string", "description": "Optional label for the fork point."},
+                "store_id": {
+                    "type": "string",
+                    "description": STORE_ID_DESCRIPTION,
+                },
+                "label": {
+                    "type": "string",
+                    "description": "Optional short label for the fork point (e.g. 'alt-approach-A').",
+                },
             },
             "required": ["store_id"],
             "additionalProperties": False,
         }
 
     def get_annotations(self) -> dict:
-        return {"readOnlyHint": False}
+        return {"readOnlyHint": False, "openWorldHint": False}
 
     def get_system_prompt(self) -> str:
         return ""
@@ -691,13 +708,13 @@ class CtxForkTool(BaseTool):
 
         location = resolve_store_location(store_id)
         if location is None:
-            error = ToolOutput(status="error", content=f"Store not found: {store_id}", content_type="text")
+            error = ToolOutput(status="error", content=f'Store "{store_id}" not found.', content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
         directory, root_id = location
         store = load_store(directory, root_id)
         if store is None:
-            error = ToolOutput(status="error", content=f"Store file not found: {root_id}", content_type="text")
+            error = ToolOutput(status="error", content=f'Store file not found: "{root_id}".', content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
         next_key = get_next_key(store, store_id, "F")
@@ -733,8 +750,9 @@ class CtxListTool(BaseTool):
 
     def get_description(self) -> str:
         return (
-            "List context stores and their full node trees. Optionally filter by project directory "
-            "or drill into a specific store_id subtree."
+            "List context stores and their full node trees, returning store_ids needed for ctxstore, ctxquery, "
+            "ctxread, ctxfork, and ctxarm. Filter by directory to scope to a project, "
+            "or pass store_id to drill into a specific subtree."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -743,11 +761,17 @@ class CtxListTool(BaseTool):
             "properties": {
                 "directory": {
                     "type": "string",
-                    "description": "Absolute path to filter stores by project directory. Omit to list all stores.",
+                    "description": (
+                        "Absolute path to filter stores by project directory. "
+                        "Omit to list all stores across all projects."
+                    ),
                 },
                 "store_id": {
                     "type": "string",
-                    "description": "Show the subtree of this specific node.",
+                    "description": (
+                        "Show only the subtree rooted at this node (e.g. 'myproject' or 'myproject.L2'). "
+                        "Use ctxread for the full content of a single node."
+                    ),
                 },
             },
             "required": [],
@@ -755,7 +779,7 @@ class CtxListTool(BaseTool):
         }
 
     def get_annotations(self) -> dict:
-        return {"readOnlyHint": True}
+        return {"readOnlyHint": True, "idempotentHint": True, "openWorldHint": False}
 
     def get_system_prompt(self) -> str:
         return ""
@@ -790,13 +814,13 @@ class CtxListTool(BaseTool):
         if store_id:
             location = resolve_store_location(store_id)
             if location is None:
-                error = ToolOutput(status="error", content=f"Store not found: {store_id}", content_type="text")
+                error = ToolOutput(status="error", content=f'Store "{store_id}" not found.', content_type="text")
                 return [TextContent(type="text", text=error.model_dump_json())]
 
             dir_, root_id = location
             store = load_store(dir_, root_id)
             if store is None:
-                error = ToolOutput(status="error", content=f"Store file not found: {root_id}", content_type="text")
+                error = ToolOutput(status="error", content=f'Store file not found: "{root_id}".', content_type="text")
                 return [TextContent(type="text", text=error.model_dump_json())]
 
             node = resolve_node(store, store_id)
@@ -842,7 +866,10 @@ class CtxReadTool(BaseTool):
         return "ctxread"
 
     def get_description(self) -> str:
-        return "Read the full content of a context store node by store_id path."
+        return (
+            "Read the full content of a single context store node — prompt, response, metadata, and attached files. "
+            "Use ctxlist to discover available store_ids and node paths before reading."
+        )
 
     def get_input_schema(self) -> dict[str, Any]:
         return {
@@ -850,7 +877,7 @@ class CtxReadTool(BaseTool):
             "properties": {
                 "store_id": {
                     "type": "string",
-                    "description": "The store_id path of the node to read.",
+                    "description": STORE_ID_DESCRIPTION,
                 },
             },
             "required": ["store_id"],
@@ -858,7 +885,7 @@ class CtxReadTool(BaseTool):
         }
 
     def get_annotations(self) -> dict:
-        return {"readOnlyHint": True}
+        return {"readOnlyHint": True, "idempotentHint": True, "openWorldHint": False}
 
     def get_system_prompt(self) -> str:
         return ""
@@ -888,13 +915,13 @@ class CtxReadTool(BaseTool):
 
         location = resolve_store_location(store_id)
         if location is None:
-            error = ToolOutput(status="error", content=f'Store not found: "{store_id}"', content_type="text")
+            error = ToolOutput(status="error", content=f'Store "{store_id}" not found.', content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
         directory, root_id = location
         store = load_store(directory, root_id)
         if store is None:
-            error = ToolOutput(status="error", content=f"Store file not found: {root_id}", content_type="text")
+            error = ToolOutput(status="error", content=f'Store file not found: "{root_id}".', content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
         node = resolve_node(store, store_id)
@@ -958,10 +985,9 @@ class CtxArmTool(BaseTool):
 
     def get_description(self) -> str:
         return (
-            "Arm a context store for automatic revival at every session start. "
-            "On each new Claude session for this directory, revival fires automatically "
-            "via SessionStart hook, running ctxlist and ctxquery to restore project context. "
-            "Pass disarm=true to remove the armed state."
+            "Arm a context store for automatic revival at every session start, "
+            "so the SessionStart hook runs ctxlist and ctxquery to restore project context without manual steps. "
+            "Pass disarm=true to remove the armed state; use ctxlist to find the store_id to arm."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -970,15 +996,21 @@ class CtxArmTool(BaseTool):
             "properties": {
                 "store_id": {
                     "type": "string",
-                    "description": "The store_id to arm for auto-revival. Must exist.",
+                    "description": (
+                        "Root store_id to arm for auto-revival (e.g. 'myproject'). "
+                        "Must be an existing root store — use ctxlist to confirm."
+                    ),
                 },
                 "directory": {
                     "type": "string",
-                    "description": "Absolute path to the project directory. Must match the store's registered directory.",
+                    "description": (
+                        "Absolute path to the project directory. "
+                        "Must match the directory the store was registered to at ctxinit time."
+                    ),
                 },
                 "disarm": {
                     "type": "boolean",
-                    "description": "If true, removes the armed state for this directory.",
+                    "description": "Set true to remove the armed state for this directory. Defaults to false.",
                     "default": False,
                 },
             },
@@ -987,7 +1019,7 @@ class CtxArmTool(BaseTool):
         }
 
     def get_annotations(self) -> dict:
-        return {"readOnlyHint": False}
+        return {"readOnlyHint": False, "idempotentHint": True, "openWorldHint": False}
 
     def get_system_prompt(self) -> str:
         return ""
@@ -1081,7 +1113,10 @@ class CtxRenameTool(BaseTool):
         return "ctxrename"
 
     def get_description(self) -> str:
-        return "Rename a root context store. Updates the store file, index, and armed state."
+        return (
+            "Rename a root context store, updating the store file, index, and any armed state atomically. "
+            "Use ctxlist to confirm the current store_id before renaming."
+        )
 
     def get_input_schema(self) -> dict[str, Any]:
         return {
@@ -1089,11 +1124,11 @@ class CtxRenameTool(BaseTool):
             "properties": {
                 "store_id": {
                     "type": "string",
-                    "description": "Current store_id of the store to rename.",
+                    "description": "Current root store_id to rename (e.g. 'myproject'). Use ctxlist to confirm it exists.",
                 },
                 "new_name": {
                     "type": "string",
-                    "description": "New name for the store. No dots allowed.",
+                    "description": "New name for the store (e.g. 'myproject-v2'). No dots allowed.",
                 },
                 "directory": {
                     "type": "string",
@@ -1105,7 +1140,7 @@ class CtxRenameTool(BaseTool):
         }
 
     def get_annotations(self) -> dict:
-        return {"readOnlyHint": False}
+        return {"readOnlyHint": False, "destructiveHint": True, "openWorldHint": False}
 
     def get_system_prompt(self) -> str:
         return ""

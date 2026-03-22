@@ -367,6 +367,9 @@ class CtxStoreTool(ContextBaseTool):
         self._store = store
         self._store_id = store_id
 
+        # Estimate context usage for continuation_offer reporting
+        arguments["_context_used"] = len(self._injected_history) // 4 if self._injected_history else 0
+
         arguments.pop("continuation_id", None)
         arguments["thinking_mode"] = "max"
 
@@ -415,10 +418,11 @@ class CtxStoreTool(ContextBaseTool):
         else:
             self._new_store_path = f"{store_id}.{self._next_key}"
 
+        context_window, context_used = self._get_context_token_info()
         return {
             "continuation_id": self._new_store_path,
-            "context_window": 0,
-            "context_used": 0,
+            "context_window": context_window,
+            "context_used": context_used,
             "note": f"Layer stored at {self._new_store_path}.",
         }
 
@@ -567,6 +571,8 @@ class CtxQueryTool(ContextBaseTool):
         self._store = store
         self._store_id = store_id
 
+        arguments["_context_used"] = len(self._injected_history) // 4 if self._injected_history else 0
+
         arguments.pop("continuation_id", None)
         arguments["thinking_mode"] = "max"
 
@@ -598,10 +604,11 @@ class CtxQueryTool(ContextBaseTool):
         self._next_key = get_next_key(store, parent_path, child_prefix)
         self._new_store_path = f"{parent_path}.{self._next_key}"
 
+        context_window, context_used = self._get_context_token_info()
         return {
             "continuation_id": self._new_store_path,
-            "context_window": 0,
-            "context_used": 0,
+            "context_window": context_window,
+            "context_used": context_used,
             "note": f"Query recorded at {self._new_store_path}.",
         }
 

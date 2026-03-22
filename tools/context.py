@@ -57,7 +57,12 @@ def _render_store_tree(store, root_path: str = "", indent: int = 0) -> list[str]
             ts = (node.timestamp or "")[:10]
 
             if etype == "store":
-                label_part = f"{key}. {node.label}" if node.label else key
+                if node.label and node.label.startswith(f"{key}:"):
+                    label_part = node.label
+                elif node.label:
+                    label_part = f"{key}. {node.label}"
+                else:
+                    label_part = key
                 prompt_part = f'  "{_truncate_label(node.prompt, 60)}"' if node.prompt else ""
                 date_part = f" — {ts}" if ts else ""
                 files_part = ""
@@ -71,7 +76,12 @@ def _render_store_tree(store, root_path: str = "", indent: int = 0) -> list[str]
                 date_part = f" — {ts}" if ts else ""
                 lines.append(f"{p}- [{display_key}](#{full_path}){prompt_part}{date_part}")
             elif etype == "fork":
-                label_part = f"{key}. {node.label}" if node.label else key
+                if node.label and node.label.startswith(f"{key}:"):
+                    label_part = node.label
+                elif node.label:
+                    label_part = f"{key}. {node.label}"
+                else:
+                    label_part = key
                 date_part = f" — {ts}" if ts else ""
                 lines.append(f"{p}- [{label_part}](#{full_path}){date_part}")
             elif etype == "tool":
@@ -208,10 +218,10 @@ class CtxInitTool(BaseTool):
 
         return ToolModelCategory.FAST_RESPONSE
 
-    async def prepare_prompt(self, request: ToolRequest) -> str:
+    async def prepare_prompt(self, _request: ToolRequest) -> str:
         return ""
 
-    def format_response(self, response: str, request: ToolRequest, model_info: Optional[dict] = None) -> str:
+    def format_response(self, response: str, _request: ToolRequest, _model_info: Optional[dict] = None) -> str:
         return response
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
@@ -399,11 +409,11 @@ class CtxStoreTool(ContextBaseTool):
             return f"{injected}\n\n{base}"
         return base
 
-    def format_response(self, response: str, request: CtxStoreRequest, model_info: Optional[dict] = None) -> str:
+    def format_response(self, response: str, _request: CtxStoreRequest, _model_info: Optional[dict] = None) -> str:
         self._last_raw_response = response
         return f"{response}\n\n---\n\nAGENT'S TURN: Context layer stored. Use the store_id to add more layers or query this silo."
 
-    def _create_continuation_offer(self, request, model_info: Optional[dict] = None):
+    def _create_continuation_offer(self, _request, _model_info: Optional[dict] = None):
         from utils.context_store import get_next_key
 
         store = getattr(self, "_store", None)
@@ -427,7 +437,7 @@ class CtxStoreTool(ContextBaseTool):
         }
 
     def _record_assistant_turn(
-        self, continuation_id: str, response_text: str, request, model_info: Optional[dict]
+        self, _continuation_id: str, response_text: str, request, model_info: Optional[dict]
     ) -> None:
         from utils.context_store import StoreNode, add_child, save_store
 
@@ -588,11 +598,11 @@ class CtxQueryTool(ContextBaseTool):
             return f"{injected}\n\n{base}"
         return base
 
-    def format_response(self, response: str, request: CtxQueryRequest, model_info: Optional[dict] = None) -> str:
+    def format_response(self, response: str, _request: CtxQueryRequest, _model_info: Optional[dict] = None) -> str:
         self._last_raw_response = response
         return f"{response}\n\n---\n\nAGENT'S TURN: Evaluate this response from the context silo alongside your own analysis."
 
-    def _create_continuation_offer(self, request, model_info: Optional[dict] = None):
+    def _create_continuation_offer(self, _request, _model_info: Optional[dict] = None):
         from utils.context_store import get_next_key
 
         store = getattr(self, "_store", None)
@@ -613,7 +623,7 @@ class CtxQueryTool(ContextBaseTool):
         }
 
     def _record_assistant_turn(
-        self, continuation_id: str, response_text: str, request, model_info: Optional[dict]
+        self, _continuation_id: str, response_text: str, request, model_info: Optional[dict]
     ) -> None:
         from utils.context_store import StoreNode, add_child, save_store
 
@@ -693,10 +703,10 @@ class CtxForkTool(BaseTool):
 
         return ToolModelCategory.FAST_RESPONSE
 
-    async def prepare_prompt(self, request: ToolRequest) -> str:
+    async def prepare_prompt(self, _request: ToolRequest) -> str:
         return ""
 
-    def format_response(self, response: str, request: ToolRequest, model_info: Optional[dict] = None) -> str:
+    def format_response(self, response: str, _request: ToolRequest, _model_info: Optional[dict] = None) -> str:
         return response
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
@@ -802,10 +812,10 @@ class CtxListTool(BaseTool):
 
         return ToolModelCategory.FAST_RESPONSE
 
-    async def prepare_prompt(self, request: ToolRequest) -> str:
+    async def prepare_prompt(self, _request: ToolRequest) -> str:
         return ""
 
-    def format_response(self, response: str, request: ToolRequest, model_info: Optional[dict] = None) -> str:
+    def format_response(self, response: str, _request: ToolRequest, _model_info: Optional[dict] = None) -> str:
         return response
 
     def _count_l_children(self, children: dict) -> int:
@@ -908,10 +918,10 @@ class CtxReadTool(BaseTool):
 
         return ToolModelCategory.FAST_RESPONSE
 
-    async def prepare_prompt(self, request: ToolRequest) -> str:
+    async def prepare_prompt(self, _request: ToolRequest) -> str:
         return ""
 
-    def format_response(self, response: str, request: ToolRequest, model_info: Optional[dict] = None) -> str:
+    def format_response(self, response: str, _request: ToolRequest, _model_info: Optional[dict] = None) -> str:
         return response
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
@@ -1042,10 +1052,10 @@ class CtxArmTool(BaseTool):
 
         return ToolModelCategory.FAST_RESPONSE
 
-    async def prepare_prompt(self, request: ToolRequest) -> str:
+    async def prepare_prompt(self, _request: ToolRequest) -> str:
         return ""
 
-    def format_response(self, response: str, request: ToolRequest, model_info: Optional[dict] = None) -> str:
+    def format_response(self, response: str, _request: ToolRequest, _model_info: Optional[dict] = None) -> str:
         return response
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
@@ -1163,10 +1173,10 @@ class CtxRenameTool(BaseTool):
 
         return ToolModelCategory.FAST_RESPONSE
 
-    async def prepare_prompt(self, request: ToolRequest) -> str:
+    async def prepare_prompt(self, _request: ToolRequest) -> str:
         return ""
 
-    def format_response(self, response: str, request: ToolRequest, model_info: Optional[dict] = None) -> str:
+    def format_response(self, response: str, _request: ToolRequest, _model_info: Optional[dict] = None) -> str:
         return response
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:

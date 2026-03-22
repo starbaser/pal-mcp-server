@@ -20,8 +20,9 @@ from .simple.base import SimpleTool
 logger = logging.getLogger(__name__)
 
 STORE_ID_DESCRIPTION = (
-    "Path-based identifier for the context store. Returned by ctxinit or ctxstore. "
-    "Pass back to continue storing or querying."
+    "Dot-path identifier for a context store node. Root stores use a plain name (e.g. 'myproject'). "
+    "Child nodes extend the path with dot notation (e.g. 'myproject.L1', 'myproject.L1.Q1'). "
+    "Use ctxlist to discover existing store_ids. Returned by ctxinit, ctxstore, ctxquery, and ctxfork."
 )
 
 
@@ -145,7 +146,7 @@ class ContextBaseTool(SimpleTool):
 
         location = resolve_store_location(store_id)
         if location is None:
-            raise KeyError(f"Store not found for: {store_id}")
+            raise KeyError(f'Store "{store_id}" not found.')
         directory, root_id = location
         store = load_store(directory, root_id)
         if store is None:
@@ -163,7 +164,11 @@ class CtxInitTool(BaseTool):
         return "ctxinit"
 
     def get_description(self) -> str:
-        return "Create a named context store. Returns a store_id to use with ctxstore and ctxquery."
+        return (
+            "Create a new named context store and register it to a project directory. "
+            "Run ctxlist first to check for an existing store before creating a new one; "
+            "use ctxstore to add context layers after creation."
+        )
 
     def get_input_schema(self) -> dict[str, Any]:
         return {
@@ -171,7 +176,11 @@ class CtxInitTool(BaseTool):
             "properties": {
                 "store_name": {
                     "type": "string",
-                    "description": "Name for the context store. No dots allowed. Used as the store_id.",
+                    "description": (
+                        "Unique name for the context store (e.g. 'myproject'). "
+                        "No dots allowed — dots are reserved for dot-path child notation. "
+                        "Becomes the root store_id."
+                    ),
                 },
                 "directory": {
                     "type": "string",
@@ -183,7 +192,7 @@ class CtxInitTool(BaseTool):
         }
 
     def get_annotations(self) -> dict:
-        return {"readOnlyHint": False}
+        return {"readOnlyHint": False, "openWorldHint": False}
 
     def get_system_prompt(self) -> str:
         return ""
@@ -264,7 +273,9 @@ class CtxStoreTool(ContextBaseTool):
 
     def get_description(self) -> str:
         return (
-            "Add context layers to an existing store. Each call appends a new layer. Requires a store_id from ctxinit."
+            "Add a context layer to an existing store, embedding files and prose for an external model to process. "
+            "Each call appends a new numbered layer (L1, L2, …); seed 4–6 key files per layer for best results. "
+            "Use ctxinit to create a store first, then ctxquery to retrieve stored context."
         )
 
     def get_request_model(self):
@@ -272,7 +283,10 @@ class CtxStoreTool(ContextBaseTool):
 
     def get_tool_fields(self) -> dict[str, dict[str, Any]]:
         return {
-            "prompt": {"type": "string", "description": "Content or context to store in this layer."},
+            "prompt": {
+                "type": "string",
+                "description": "Prose context or instructions for the external model to process and store.",
+            },
             "absolute_file_paths": {
                 "type": "array",
                 "items": {"type": "string"},
@@ -280,7 +294,7 @@ class CtxStoreTool(ContextBaseTool):
             },
             "context_label": {
                 "type": "string",
-                "description": "Optional human-readable label for this context layer.",
+                "description": "Short human-readable label for this layer (e.g. 'session 3 conversation').",
             },
             "store_id": {"type": "string", "description": STORE_ID_DESCRIPTION},
         }

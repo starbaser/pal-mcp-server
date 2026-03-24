@@ -50,6 +50,7 @@ class StoreNode(BaseModel):
     files: list[str] = []
     prompt: str = ""
     response: str = ""
+    content: str = ""  # Full API exchange: assembled prompt (with files) + model response
     tool_name: str | None = None
     children: dict[str, StoreNode] = {}
 

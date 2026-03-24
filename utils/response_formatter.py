@@ -65,13 +65,30 @@ def _separate_fields(
 # ---------------------------------------------------------------------------
 
 
+_POSTSCRIPT_KEYS = (
+    "next_steps",
+    "required_actions",
+    "store_continuation_guidance",
+    "store_chain_note",
+    "saved_content_path",
+    "completion_message",
+)
+
+
 def render_markdown_output(data: dict) -> str:
     """Transform a tool output dict into a markdown document with YAML front matter.
 
     Multi-line text fields are extracted from the JSON and rendered as markdown
     sections below the front matter.  Scalar metadata stays in the front matter
     under the ``json:`` key.
+
+    Known directive keys (next_steps, required_actions, store_continuation_guidance,
+    etc.) are extracted from the data and rendered as a postscript section at the
+    bottom of the document so they are visible to agents.
     """
+    # Extract postscript directives before field separation
+    postscript = _extract_postscript(data)
+
     inline, formatted = _separate_fields(data)
 
     # Inject placeholder references for extracted keys
@@ -85,7 +102,29 @@ def render_markdown_output(data: dict) -> str:
     for dotted_key, text in formatted:
         parts.append(f"# `{dotted_key}`\n\n{text}")
 
+    # Render postscript directives at the bottom
+    if postscript:
+        parts.append("---\n\n" + "\n\n".join(postscript))
+
     return "\n\n".join(parts)
+
+
+def _extract_postscript(data: dict) -> list[str]:
+    """Pull known directive keys from data and format them as postscript lines.
+
+    Removes matched keys from data so they don't appear in YAML front matter.
+    """
+    lines = []
+    for key in _POSTSCRIPT_KEYS:
+        value = data.pop(key, None)
+        if value is None:
+            continue
+        if isinstance(value, list):
+            items = "\n".join(f"- {item}" for item in value)
+            lines.append(f"**{key}**:\n{items}")
+        else:
+            lines.append(f"**{key}**: {value}")
+    return lines
 
 
 def _inject_placeholders(inline: dict, dotted_keys: list[str]) -> None:

@@ -83,12 +83,17 @@ def hydrate_thread_context(store: StoreRoot, node_path: str) -> ThreadContext:
     for ancestor in ancestors:
         if getattr(ancestor, "entry_type", None) == "fork":
             continue
-        if not ancestor.prompt or not ancestor.response:
-            continue
 
-        files = getattr(ancestor, "files", None) or None
-        add_turn(thread_id, "user", ancestor.prompt, files=files)
-        add_turn(thread_id, "assistant", ancestor.response)
+        # Prefer content blob (full API exchange) over separate prompt/response
+        content = getattr(ancestor, "content", "")
+        if content:
+            add_turn(thread_id, "user", content)
+        elif ancestor.prompt or ancestor.response:
+            files = getattr(ancestor, "files", None) or None
+            if ancestor.prompt:
+                add_turn(thread_id, "user", ancestor.prompt, files=files)
+            if ancestor.response:
+                add_turn(thread_id, "assistant", ancestor.response)
 
     thread = get_thread(thread_id)
     if thread is None:

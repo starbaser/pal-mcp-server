@@ -405,9 +405,9 @@ class CtxStoreTool(ContextBaseTool):
         base = f"=== CONTEXT LAYER SUBMISSION ==={label_line}\n\n{user_content}{file_section}"
 
         injected = getattr(self, "_injected_history", "")
-        if injected:
-            return f"{injected}\n\n{base}"
-        return base
+        full_prompt = f"{injected}\n\n{base}" if injected else base
+        self._last_full_prompt = full_prompt
+        return full_prompt
 
     def format_response(self, response: str, _request: CtxStoreRequest, _model_info: Optional[dict] = None) -> str:
         self._last_raw_response = response
@@ -449,7 +449,11 @@ class CtxStoreTool(ContextBaseTool):
             return
 
         raw = getattr(self, "_last_raw_response", response_text)
+        full_prompt = getattr(self, "_last_full_prompt", "")
         model_name = model_info.get("model_name") if model_info else None
+
+        # Build content blob: full API exchange (prompt with files + model response)
+        content = f"{full_prompt}\n\n---\n\n{raw}" if full_prompt else raw
 
         node = StoreNode(
             entry_type="store",
@@ -459,6 +463,7 @@ class CtxStoreTool(ContextBaseTool):
             files=self.get_request_files(request),
             prompt=self.get_request_prompt(request),
             response=raw,
+            content=content,
         )
 
         add_child(store, store_id, next_key, node)
@@ -571,9 +576,7 @@ class CtxQueryTool(ContextBaseTool):
         # Root-level query: walk_ancestry returns [] because there's no path to traverse.
         # Collect all L-children (layers) as the context — this is "query the whole store".
         if not ancestors and store_id == store.store_id:
-            layers = [
-                (k, v) for k, v in store.children.items() if k.startswith("L") and k[1:].isdigit()
-            ]
+            layers = [(k, v) for k, v in store.children.items() if k.startswith("L") and k[1:].isdigit()]
             layers.sort(key=lambda kv: int(kv[0][1:]))
             ancestors = [node for _, node in layers]
 
@@ -594,9 +597,9 @@ class CtxQueryTool(ContextBaseTool):
         injected = getattr(self, "_injected_history", "")
         base = f"=== CONTEXT SILO QUERY ===\n\n{user_content}"
 
-        if injected:
-            return f"{injected}\n\n{base}"
-        return base
+        full_prompt = f"{injected}\n\n{base}" if injected else base
+        self._last_full_prompt = full_prompt
+        return full_prompt
 
     def format_response(self, response: str, _request: CtxQueryRequest, _model_info: Optional[dict] = None) -> str:
         self._last_raw_response = response
@@ -637,8 +640,11 @@ class CtxQueryTool(ContextBaseTool):
             return
 
         raw = getattr(self, "_last_raw_response", response_text)
+        full_prompt = getattr(self, "_last_full_prompt", "")
         model_name = model_info.get("model_name") if model_info else None
         prompt = self.get_request_prompt(request)
+
+        content = f"{full_prompt}\n\n---\n\n{raw}" if full_prompt else raw
 
         node = StoreNode(
             entry_type=child_entry_type,
@@ -647,6 +653,7 @@ class CtxQueryTool(ContextBaseTool):
             model=model_name,
             prompt=prompt,
             response=raw,
+            content=content,
         )
 
         add_child(store, parent_path, next_key, node)
@@ -1206,12 +1213,7 @@ class CtxRenameTool(BaseTool):
 
         tool_output = ToolOutput(
             status="success",
-            content=(
-                f"Store renamed.\n\n"
-                f"old store_id: {store_id}\n"
-                f"new store_id: {new_name}\n"
-                f"directory: {directory}"
-            ),
+            content=(f"Store renamed.\n\nold store_id: {store_id}\nnew store_id: {new_name}\ndirectory: {directory}"),
             content_type="text",
             metadata={"store_id": new_name, "old_store_id": store_id, "directory": directory},
         )

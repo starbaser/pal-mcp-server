@@ -116,7 +116,7 @@ class SimpleTool(BaseTool):
         """
         return {"readOnlyHint": True}
 
-    def format_response(self, response: str, request, model_info: Optional[dict] = None) -> str:
+    def format_response(self, response: str, _request, _model_info: Optional[dict] = None) -> str:
         """
         Format the AI response before returning to the client.
 
@@ -125,8 +125,8 @@ class SimpleTool(BaseTool):
 
         Args:
             response: The raw response from the AI model
-            request: The validated request object
-            model_info: Optional model information dictionary
+            _request: The validated request object
+            _model_info: Optional model information dictionary
 
         Returns:
             Formatted response string
@@ -476,6 +476,13 @@ class SimpleTool(BaseTool):
             logger.info(f"Received response from {provider.get_provider_type().value} API for {self.get_name()}")
             _final_model_response = model_response
 
+            # Estimate context usage after model call (for first-call reporting)
+            if "_context_used" not in self._current_arguments:
+                sys_tokens = estimate_tokens(system_prompt) if system_prompt else 0
+                prompt_tokens = estimated_tokens  # already computed above
+                resp_tokens = estimate_tokens(model_response.content) if model_response.content else 0
+                self._current_arguments["_context_used"] = sys_tokens + prompt_tokens + resp_tokens
+
             # Process the model's response
             if model_response.content or getattr(model_response, "generated_images", None):
                 raw_text = model_response.content
@@ -715,7 +722,7 @@ class SimpleTool(BaseTool):
 
         return context_window, context_used
 
-    def _create_continuation_offer(self, request, model_info: Optional[dict] = None):
+    def _create_continuation_offer(self, request, _model_info: Optional[dict] = None):
         """Create continuation offer with context usage information."""
         continuation_id = self.get_request_continuation_id(request)
         context_window, context_used = self._get_context_token_info()
@@ -758,7 +765,7 @@ class SimpleTool(BaseTool):
                 return {
                     "continuation_id": new_thread_id,
                     "context_window": context_window,
-                    "context_used": 0,
+                    "context_used": context_used,
                     "note": "Conversation is active and can be continued.",
                 }
         except Exception:

@@ -801,13 +801,25 @@ def _resolve_store_continuation(tool_name: str, arguments: dict) -> str | None:
 
     Returns the path-based store_id for response injection, or None if
     continuation_id is a regular UUID (not a store path).
+
+    Two modes:
+    - CONTINUE: target node is a tool node for the same tool. The agent keeps the
+      same continuation_id; the response is persisted back to the existing node.
+    - FORK: target is any other node type. An auto-fork (F0, F1, ...) is created
+      under the target, and a tool node is placed under the fork. The agent gets
+      the tool node path as its continuation_id.
     """
+    from datetime import datetime, timezone
+
     from utils.context_builder import hydrate_thread_context
     from utils.context_store import (
+        StoreNode,
+        add_child,
         get_next_key,
         load_store,
         resolve_node,
         resolve_store_location,
+        save_store,
     )
 
     continuation_id = arguments.get("continuation_id", "")
@@ -825,80 +837,154 @@ def _resolve_store_continuation(tool_name: str, arguments: dict) -> str | None:
 
     node = resolve_node(store, continuation_id)
 
-    # Determine fork vs continue
     if node and node.entry_type == "tool" and node.tool_name == tool_name:
-        # CONTINUE: same tool on same tool node → numbered child
-        child_prefix = ""
+        # CONTINUE: same tool on same tool node — agent keeps the same path
+        tool_path = continuation_id
+
+        # Hydrate thread from ancestry (includes the tool node itself)
+        thread_context = hydrate_thread_context(store, tool_path)
+        arguments["continuation_id"] = thread_context.thread_id
+
+        arguments["_store_bridge"] = {
+            "store": store,
+            "tool_path": tool_path,
+            "tool_name": tool_name,
+            "mode": "continue",
+        }
+
+        logger.info(f"Store continuation CONTINUE: {tool_path} (hydrated thread {thread_context.thread_id})")
+        return tool_path
     else:
-        # FORK: create new tool node as child
-        child_prefix = tool_name
+        # FORK: auto-create fork node, then tool child under it
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    next_key = get_next_key(store, continuation_id, child_prefix)
-    new_path = f"{continuation_id}.{next_key}"
+        fork_key = get_next_key(store, continuation_id, "F")
+        fork_node = StoreNode(
+            entry_type="fork",
+            label=tool_name,
+            timestamp=now,
+        )
+        fork_path = add_child(store, continuation_id, fork_key, fork_node)
 
-    # Hydrate thread from tree ancestry for reconstruct_thread_context
-    thread_context = hydrate_thread_context(store, continuation_id)
-    arguments["continuation_id"] = thread_context.thread_id
+        tool_node = StoreNode(
+            entry_type="tool",
+            tool_name=tool_name,
+            timestamp=now,
+        )
+        tool_path = add_child(store, fork_path, tool_name, tool_node)
 
-    # Stash bridge metadata for post-processing
-    arguments["_store_bridge"] = {
-        "store": store,
-        "parent_path": continuation_id,
-        "new_path": new_path,
-        "child_key": next_key,
-        "tool_name": tool_name,
-    }
+        save_store(store)
 
-    logger.info(f"Store continuation: {continuation_id} → {new_path} (hydrated thread {thread_context.thread_id})")
-    return new_path
+        # Hydrate thread from ancestry (through the fork to the tool node)
+        thread_context = hydrate_thread_context(store, tool_path)
+        arguments["continuation_id"] = thread_context.thread_id
+
+        arguments["_store_bridge"] = {
+            "store": store,
+            "tool_path": tool_path,
+            "tool_name": tool_name,
+            "mode": "fork",
+        }
+
+        logger.info(
+            f"Store continuation FORK: {continuation_id} → {tool_path} (hydrated thread {thread_context.thread_id})"
+        )
+        return tool_path
 
 
 def _inject_store_path_continuation(result: list, store_path: str, arguments: dict | None = None) -> list:
     """Replace UUID continuation_id with store path in tool response.
 
-    If _store_bridge metadata is present, also persists the tool response back to the store tree.
+    Handles two response formats:
+    - Simple tools: continuation_id inside a ``continuation_offer`` wrapper
+    - Workflow tools: bare top-level ``continuation_id``
+
+    When the tool is mid-workflow (``next_step_required=True``), injects
+    ``store_continuation_guidance`` telling the agent to finish the chain.
+
+    If _store_bridge metadata is present, persists the tool response back to
+    the store tree (update for CONTINUE, already created for FORK).
     """
     import json
     from datetime import datetime, timezone
+
+    bridge = arguments.get("_store_bridge") if arguments else None
 
     processed = []
     response_text = None
     for item in result:
         try:
             data = json.loads(item.text)
+            patched = False
+
+            # Path 1: simple tools — continuation_id inside continuation_offer
             if "continuation_offer" in data and data["continuation_offer"]:
                 data["continuation_offer"]["continuation_id"] = store_path
-                processed.append(TextContent(type="text", text=json.dumps(data)))
                 response_text = data.get("content", "")
-            else:
-                processed.append(item)
+                patched = True
+
+            # Path 2: workflow tools — bare top-level continuation_id
+            elif "continuation_id" in data and data["continuation_id"]:
+                data["continuation_id"] = store_path
+                response_text = data.get("content", data.get("next_steps", ""))
+                patched = True
+
+            # Inject store-aware guidance for agents
+            if patched and bridge:
+                tool_hint = bridge["tool_name"]
+                if data.get("next_step_required") is True:
+                    # Mid-workflow: strong guidance to finish this chain
+                    step = data.get("step_number", 0)
+                    total = data.get("total_steps", "?")
+                    next_step = step + 1
+                    data["store_continuation_guidance"] = (
+                        f"You are on step {step} of {total}. "
+                        f"Finish this tool chain before calling a different tool. "
+                        f'Call {tool_hint} again with continuation_id="{store_path}" '
+                        f"and step_number={next_step}."
+                    )
+                else:
+                    # Completed or single-step: inform agent of the store path for chaining
+                    data["store_chain_note"] = (
+                        f"This {tool_hint} result is persisted to context store path "
+                        f'"{store_path}". To chain another tool from this result, '
+                        f"pass this path as the continuation_id."
+                    )
+
+            processed.append(TextContent(type="text", text=json.dumps(data)) if patched else item)
         except (json.JSONDecodeError, AttributeError):
             processed.append(item)
 
-    # Persist tool response back to store tree if bridge metadata exists
-    if arguments and "_store_bridge" in arguments and response_text is not None:
-        from utils.context_store import StoreNode, add_child, save_store
+    # Persist tool response back to store tree
+    if bridge and response_text is not None:
+        from utils.context_store import resolve_node, save_store
 
-        bridge = arguments["_store_bridge"]
-        node = StoreNode(
-            entry_type="tool",
-            tool_name=bridge["tool_name"],
-            timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            prompt=arguments.get("prompt", ""),
-            response=response_text,
-        )
         try:
-            add_child(bridge["store"], bridge["parent_path"], bridge["child_key"], node)
-            save_store(bridge["store"])
-            logger.info(f"Persisted tool response to store tree at {bridge['new_path']}")
+            tool_node = resolve_node(bridge["store"], bridge["tool_path"])
+            if tool_node is not None:
+                # Update the existing tool node with the response content
+                tool_node.prompt = arguments.get("prompt", "") if arguments else ""
+                tool_node.response = response_text
+                tool_node.timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                save_store(bridge["store"])
+                logger.info(
+                    f"Persisted tool response to store tree at {bridge['tool_path']} (mode={bridge.get('mode', 'unknown')})"
+                )
+            else:
+                logger.warning(f"Could not resolve tool node at {bridge['tool_path']} for persistence")
         except Exception as exc:
             logger.warning(f"Failed to persist tool response to store tree: {exc}")
 
     return processed
 
 
-def _save_response_content(tool_name: str, result: list, continuation_id: str | None = None) -> None:
-    """Persist the AI response content as a markdown file for easy viewing."""
+def _save_response_content(
+    tool_name: str, result: list, continuation_id: str | None = None, prompt: str | None = None
+) -> str | None:
+    """Persist the AI request/response as a markdown file.
+
+    Returns the absolute file path on success, None on failure or skip.
+    """
     import json
     from datetime import datetime
 
@@ -906,12 +992,12 @@ def _save_response_content(tool_name: str, result: list, continuation_id: str | 
 
     try:
         if not result or not hasattr(result[0], "text"):
-            return
+            return None
         parsed = json.loads(result[0].text)
         content = parsed.get("content", "")
         status = parsed.get("status", "")
         if not content or status == "error":
-            return
+            return None
 
         # Resolve continuation_id: prefer explicit arg, fall back to result JSON
         cid = continuation_id
@@ -924,11 +1010,40 @@ def _save_response_content(tool_name: str, result: list, continuation_id: str | 
             content_dir = content_dir / cid
         content_dir.mkdir(parents=True, exist_ok=True)
 
+        # Build markdown with request + response sections
+        parts = []
+        if prompt:
+            parts.append(f"# Request\n\n{prompt}")
+            parts.append("---")
+        parts.append(f"# Response\n\n{content}")
+        document = "\n\n".join(parts)
+
         timestamp = datetime.now().strftime("%Y-%m-%d_%H:%M:%S.%f")
         filename = f"{timestamp}_{tool_name}.md"
-        (content_dir / filename).write_text(content, encoding="utf-8")
+        filepath = content_dir / filename
+        filepath.write_text(document, encoding="utf-8")
+        return str(filepath.resolve())
     except Exception:
         logger.debug(f"Failed to save response content for {tool_name}", exc_info=True)
+        return None
+
+
+def _inject_saved_content_path(result: list, filepath: str) -> list:
+    """Add the saved content file path to the tool response JSON."""
+    import json
+
+    processed = []
+    for item in result:
+        try:
+            data = json.loads(item.text)
+            if isinstance(data, dict):
+                data["saved_content_path"] = filepath
+                processed.append(TextContent(type="text", text=json.dumps(data)))
+            else:
+                processed.append(item)
+        except (json.JSONDecodeError, AttributeError):
+            processed.append(item)
+    return processed
 
 
 def _apply_output_format(result: list, raw: bool) -> list:
@@ -1150,9 +1265,13 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
 
         # Replace UUID with store path in response if this was a store continuation
         if _store_path and result:
-            result = _inject_store_path_continuation(result, _store_path)
+            result = _inject_store_path_continuation(result, _store_path, arguments)
 
-        _save_response_content(name, result, arguments.get("continuation_id"))
+        saved_path = _save_response_content(
+            name, result, arguments.get("continuation_id"), prompt=arguments.get("prompt")
+        )
+        if saved_path:
+            result = _inject_saved_content_path(result, saved_path)
 
         result = _apply_output_format(result, raw_output)
 

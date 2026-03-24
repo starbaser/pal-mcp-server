@@ -146,16 +146,18 @@ class TestResolveNode:
         store = _make_root()
         l1 = _make_node(entry_type="query", prompt="l1p", response="l1r")
         q0 = _make_node(entry_type="query", prompt="q0p", response="q0r")
-        td0 = _make_node(entry_type="tool", prompt="tdp", response="tdr")
+        f0 = _make_node(entry_type="fork", prompt="", response="")
+        td = _make_node(entry_type="tool", prompt="tdp", response="tdr")
 
-        q0.children["thinkdeep0"] = td0
+        f0.children["thinkdeep"] = td
+        q0.children["F0"] = f0
         l1.children["Q0"] = q0
         store.children["L1"] = l1
 
         # Index the store so parse_store_path can find the root
         update_index(store.directory, store.store_id)
 
-        result = resolve_node(store, "mystore.L1.Q0.thinkdeep0")
+        result = resolve_node(store, "mystore.L1.Q0.F0.thinkdeep")
         assert result is not None
         assert result.prompt == "tdp"
 
@@ -222,19 +224,22 @@ class TestWalkAncestry:
         store = _make_root()
         l1 = _make_node(entry_type="query", prompt="l1p", response="l1r")
         q0 = _make_node(entry_type="query", prompt="q0p", response="q0r")
-        td0 = _make_node(entry_type="tool", prompt="tdp", response="tdr")
+        f0 = _make_node(entry_type="fork", prompt="", response="")
+        td = _make_node(entry_type="tool", prompt="tdp", response="tdr")
 
-        q0.children["thinkdeep0"] = td0
+        f0.children["thinkdeep"] = td
+        q0.children["F0"] = f0
         l1.children["Q0"] = q0
         store.children["L1"] = l1
 
         update_index(store.directory, store.store_id)
 
-        result = walk_ancestry(store, "mystore.L1.Q0.thinkdeep0")
-        assert len(result) == 3
+        result = walk_ancestry(store, "mystore.L1.Q0.F0.thinkdeep")
+        assert len(result) == 4
         assert result[0].prompt == "l1p"
         assert result[1].prompt == "q0p"
-        assert result[2].prompt == "tdp"
+        assert result[2].entry_type == "fork"
+        assert result[3].prompt == "tdp"
 
     def test_walk_to_root_returns_empty(self, ctx_env):
         store = _make_root()
@@ -301,22 +306,15 @@ class TestGetNextKey:
         store.children["2"] = _make_node()
         assert get_next_key(store, "mystore", "") == "3"
 
-    def test_tool_prefix_empty(self, ctx_env):
+    def test_tool_name_prefix_raises_value_error(self, ctx_env):
         store = _make_root()
-        assert get_next_key(store, "mystore", "thinkdeep") == "thinkdeep0"
+        with pytest.raises(ValueError, match="Unsupported prefix"):
+            get_next_key(store, "mystore", "thinkdeep")
 
-    def test_tool_prefix_existing(self, ctx_env):
+    def test_another_tool_name_raises_value_error(self, ctx_env):
         store = _make_root()
-        store.children["thinkdeep0"] = _make_node()
-        assert get_next_key(store, "mystore", "thinkdeep") == "thinkdeep1"
-
-    def test_tool_prefix_nested_node(self, ctx_env):
-        store = _make_root()
-        l1 = _make_node(entry_type="query", prompt="p", response="r")
-        store.children["L1"] = l1
-        update_index(store.directory, store.store_id)
-
-        assert get_next_key(store, "mystore.L1", "analyze") == "analyze0"
+        with pytest.raises(ValueError, match="Unsupported prefix"):
+            get_next_key(store, "mystore", "analyze")
 
 
 # ---------------------------------------------------------------------------
@@ -336,11 +334,11 @@ class TestParseStorePath:
         assert root == "mystore"
         assert segments == ["L1", "Q0"]
 
-    def test_with_tool_index(self, ctx_env):
+    def test_with_tool_child_under_fork(self, ctx_env):
         update_index("/home/user/project", "mystore")
-        root, segments = parse_store_path("mystore.Q0.thinkdeep0")
+        root, segments = parse_store_path("mystore.Q0.F0.thinkdeep")
         assert root == "mystore"
-        assert segments == ["Q0", "thinkdeep0"]
+        assert segments == ["Q0", "F0", "thinkdeep"]
 
     def test_fallback_to_first_segment_when_not_indexed(self, ctx_env):
         # No index entry for "unknown-store"

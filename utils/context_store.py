@@ -220,7 +220,6 @@ def get_next_key(store: StoreRoot, parent_path: str, prefix: str) -> str:
       "Q"           → Q-children, start at Q0, increment max
       "F"           → F-children, start at F0, increment max
       "" (empty)    → numeric follow-ups, start at 1
-      any tool name → tool-prefixed children, start at 0
     """
     if parent_path == store.store_id:
         siblings = store.children
@@ -239,10 +238,7 @@ def get_next_key(store: StoreRoot, parent_path: str, prefix: str) -> str:
         indices = [int(m.group(1)) for k in siblings if (m := pattern.match(k))]
         return f"{prefix}{max(indices) + 1}" if indices else f"{prefix}{start}"
 
-    # Tool prefix (e.g. "thinkdeep", "analyze")
-    pattern = re.compile(rf"^{re.escape(prefix)}(\d+)$")
-    indices = [int(m.group(1)) for k in siblings if (m := pattern.match(k))]
-    return f"{prefix}{max(indices) + 1}" if indices else f"{prefix}0"
+    raise ValueError(f"Unsupported prefix for get_next_key: {prefix!r}")
 
 
 # ---------------------------------------------------------------------------

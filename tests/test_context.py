@@ -375,25 +375,32 @@ class TestResolveStoreContinuation:
         args = {"continuation_id": "myproject"}
         result = _resolve_store_continuation("thinkdeep", args)
 
-        assert result == "myproject.thinkdeep0"
+        # FORK mode: auto-fork F0 created under root, tool node under fork
+        assert result == "myproject.F0.thinkdeep"
         # continuation_id is now a hydrated thread UUID, not the store path
         assert args["continuation_id"] != "myproject"
 
         bridge = args["_store_bridge"]
-        assert bridge["new_path"] == "myproject.thinkdeep0"
-        assert bridge["child_key"] == "thinkdeep0"
+        assert bridge["tool_path"] == "myproject.F0.thinkdeep"
         assert bridge["tool_name"] == "thinkdeep"
-        assert bridge["parent_path"] == "myproject"
+        assert bridge["mode"] == "fork"
         assert bridge["store"].store_id == "myproject"
 
     def test_continue_same_tool(self, tmp_path, monkeypatch):
+        from datetime import datetime, timezone
+
         from server import _resolve_store_continuation
         from utils.context_store import StoreNode, save_store
 
-        from datetime import datetime, timezone
-
         store = self._make_store(tmp_path, monkeypatch, "myproject", "/tmp/proj")
 
+        # Simulate the structure a prior FORK call would have created:
+        # myproject.F0 (fork) → myproject.F0.thinkdeep (tool)
+        fork_node = StoreNode(
+            entry_type="fork",
+            label="thinkdeep",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+        )
         thinkdeep_node = StoreNode(
             entry_type="tool",
             tool_name="thinkdeep",
@@ -401,30 +408,37 @@ class TestResolveStoreContinuation:
             prompt="initial prompt",
             response="initial response",
         )
-        store.children["thinkdeep0"] = thinkdeep_node
+        fork_node.children["thinkdeep"] = thinkdeep_node
+        store.children["F0"] = fork_node
         save_store(store)
 
-        args = {"continuation_id": "myproject.thinkdeep0"}
+        args = {"continuation_id": "myproject.F0.thinkdeep"}
         result = _resolve_store_continuation("thinkdeep", args)
 
-        # CONTINUE path: numeric follow-up child of thinkdeep0
-        assert result == "myproject.thinkdeep0.1"
-        assert args["continuation_id"] != "myproject.thinkdeep0"
+        # CONTINUE: same tool on same tool node — returns the same path
+        assert result == "myproject.F0.thinkdeep"
+        assert args["continuation_id"] != "myproject.F0.thinkdeep"
 
         bridge = args["_store_bridge"]
-        assert bridge["new_path"] == "myproject.thinkdeep0.1"
-        assert bridge["child_key"] == "1"
+        assert bridge["tool_path"] == "myproject.F0.thinkdeep"
         assert bridge["tool_name"] == "thinkdeep"
-        assert bridge["parent_path"] == "myproject.thinkdeep0"
+        assert bridge["mode"] == "continue"
 
     def test_refork_different_tool(self, tmp_path, monkeypatch):
+        from datetime import datetime, timezone
+
         from server import _resolve_store_continuation
         from utils.context_store import StoreNode, save_store
 
-        from datetime import datetime, timezone
-
         store = self._make_store(tmp_path, monkeypatch, "myproject", "/tmp/proj")
 
+        # Simulate the structure from a prior FORK call:
+        # myproject.F0 (fork) → myproject.F0.thinkdeep (tool)
+        fork_node = StoreNode(
+            entry_type="fork",
+            label="thinkdeep",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+        )
         thinkdeep_node = StoreNode(
             entry_type="tool",
             tool_name="thinkdeep",
@@ -432,26 +446,27 @@ class TestResolveStoreContinuation:
             prompt="initial prompt",
             response="initial response",
         )
-        store.children["thinkdeep0"] = thinkdeep_node
+        fork_node.children["thinkdeep"] = thinkdeep_node
+        store.children["F0"] = fork_node
         save_store(store)
 
-        args = {"continuation_id": "myproject.thinkdeep0"}
+        args = {"continuation_id": "myproject.F0.thinkdeep"}
         result = _resolve_store_continuation("analyze", args)
 
-        assert result == "myproject.thinkdeep0.analyze0"
-        assert args["continuation_id"] != "myproject.thinkdeep0"
+        # FORK: analyze on a thinkdeep tool node creates F0 under thinkdeep, then analyze under that
+        assert result == "myproject.F0.thinkdeep.F0.analyze"
+        assert args["continuation_id"] != "myproject.F0.thinkdeep"
 
         bridge = args["_store_bridge"]
-        assert bridge["new_path"] == "myproject.thinkdeep0.analyze0"
-        assert bridge["child_key"] == "analyze0"
+        assert bridge["tool_path"] == "myproject.F0.thinkdeep.F0.analyze"
         assert bridge["tool_name"] == "analyze"
-        assert bridge["parent_path"] == "myproject.thinkdeep0"
+        assert bridge["mode"] == "fork"
 
     def test_fork_from_query(self, tmp_path, monkeypatch):
+        from datetime import datetime, timezone
+
         from server import _resolve_store_continuation
         from utils.context_store import StoreNode, save_store
-
-        from datetime import datetime, timezone
 
         store = self._make_store(tmp_path, monkeypatch, "myproject", "/tmp/proj")
 
@@ -467,17 +482,18 @@ class TestResolveStoreContinuation:
         args = {"continuation_id": "myproject.Q0"}
         result = _resolve_store_continuation("thinkdeep", args)
 
-        assert result == "myproject.Q0.thinkdeep0"
+        # FORK: auto-fork F0 under Q0, then thinkdeep tool node under the fork
+        assert result == "myproject.Q0.F0.thinkdeep"
 
         bridge = args["_store_bridge"]
-        assert bridge["new_path"] == "myproject.Q0.thinkdeep0"
-        assert bridge["parent_path"] == "myproject.Q0"
+        assert bridge["tool_path"] == "myproject.Q0.F0.thinkdeep"
+        assert bridge["mode"] == "fork"
 
     def test_fork_from_layer(self, tmp_path, monkeypatch):
+        from datetime import datetime, timezone
+
         from server import _resolve_store_continuation
         from utils.context_store import StoreNode, save_store
-
-        from datetime import datetime, timezone
 
         store = self._make_store(tmp_path, monkeypatch, "myproject", "/tmp/proj")
 
@@ -493,39 +509,27 @@ class TestResolveStoreContinuation:
         args = {"continuation_id": "myproject.L1"}
         result = _resolve_store_continuation("chat", args)
 
-        assert result == "myproject.L1.chat0"
+        # FORK: auto-fork F0 under L1, then chat tool node under the fork
+        assert result == "myproject.L1.F0.chat"
 
         bridge = args["_store_bridge"]
-        assert bridge["new_path"] == "myproject.L1.chat0"
-        assert bridge["parent_path"] == "myproject.L1"
+        assert bridge["tool_path"] == "myproject.L1.F0.chat"
+        assert bridge["mode"] == "fork"
 
     def test_fork_index_increments(self, tmp_path, monkeypatch):
         from server import _resolve_store_continuation
-        from utils.context_store import StoreNode, save_store
 
-        from datetime import datetime, timezone
+        self._make_store(tmp_path, monkeypatch, "myproject", "/tmp/proj")
 
-        store = self._make_store(tmp_path, monkeypatch, "myproject", "/tmp/proj")
-
-        # First fork — no children exist yet
+        # First fork — no children exist yet; _resolve_store_continuation saves to disk
         args1 = {"continuation_id": "myproject"}
         result1 = _resolve_store_continuation("thinkdeep", args1)
-        assert result1 == "myproject.thinkdeep0"
+        assert result1 == "myproject.F0.thinkdeep"
 
-        # Simulate _inject_store_path_continuation persisting thinkdeep0 to disk
-        store.children["thinkdeep0"] = StoreNode(
-            entry_type="tool",
-            tool_name="thinkdeep",
-            timestamp=datetime.now(timezone.utc).isoformat(),
-            prompt="p",
-            response="r",
-        )
-        save_store(store)
-
-        # Second fork from the same root sees thinkdeep0 already present
+        # Second fork: reload from disk so F0 is visible, then call again
         args2 = {"continuation_id": "myproject"}
         result2 = _resolve_store_continuation("thinkdeep", args2)
-        assert result2 == "myproject.thinkdeep1"
+        assert result2 == "myproject.F1.thinkdeep"
 
 
 class TestInjectStorePathContinuation:
@@ -551,11 +555,85 @@ class TestInjectStorePathContinuation:
         )
         items = [TextContent(type="text", text=response_json)]
 
-        result = _inject_store_path_continuation(items, "myproject.thinkdeep0")
+        result = _inject_store_path_continuation(items, "myproject.F0.thinkdeep")
 
         parsed = json.loads(result[0].text)
-        assert parsed["continuation_offer"]["continuation_id"] == "myproject.thinkdeep0"
+        assert parsed["continuation_offer"]["continuation_id"] == "myproject.F0.thinkdeep"
         assert parsed["content"] == "Analysis complete."
+
+    def test_bare_continuation_id_replaced_in_workflow_response(self):
+        from mcp.types import TextContent
+
+        from server import _inject_store_path_continuation
+
+        response_json = json.dumps(
+            {
+                "status": "in_progress",
+                "content": "Step 1 complete.",
+                "continuation_id": "some-uuid-value",
+                "step_number": 1,
+                "total_steps": 3,
+                "next_step_required": False,
+            }
+        )
+        items = [TextContent(type="text", text=response_json)]
+
+        result = _inject_store_path_continuation(items, "myproject.F0.analyze")
+
+        parsed = json.loads(result[0].text)
+        assert parsed["continuation_id"] == "myproject.F0.analyze"
+        assert parsed["content"] == "Step 1 complete."
+
+    def test_workflow_next_step_injects_guidance(self):
+        from mcp.types import TextContent
+
+        from server import _inject_store_path_continuation
+
+        bridge = {"tool_name": "analyze", "tool_path": "myproject.F0.analyze", "mode": "fork"}
+        response_json = json.dumps(
+            {
+                "status": "in_progress",
+                "content": "Step 1.",
+                "continuation_id": "some-uuid-value",
+                "step_number": 1,
+                "total_steps": 3,
+                "next_step_required": True,
+            }
+        )
+        items = [TextContent(type="text", text=response_json)]
+        args = {"_store_bridge": bridge, "prompt": "test"}
+
+        result = _inject_store_path_continuation(items, "myproject.F0.analyze", arguments=args)
+
+        parsed = json.loads(result[0].text)
+        assert "store_continuation_guidance" in parsed
+        guidance = parsed["store_continuation_guidance"]
+        assert "myproject.F0.analyze" in guidance
+        assert "step_number=2" in guidance
+
+    def test_completed_workflow_injects_chain_note(self):
+        from mcp.types import TextContent
+
+        from server import _inject_store_path_continuation
+
+        bridge = {"tool_name": "planner", "tool_path": "myproject.F0.planner", "mode": "fork"}
+        response_json = json.dumps(
+            {
+                "status": "complete",
+                "content": "Plan complete.",
+                "continuation_id": "some-uuid-value",
+                "next_step_required": False,
+            }
+        )
+        items = [TextContent(type="text", text=response_json)]
+        args = {"_store_bridge": bridge, "prompt": "test"}
+
+        result = _inject_store_path_continuation(items, "myproject.F0.planner", arguments=args)
+
+        parsed = json.loads(result[0].text)
+        assert "store_chain_note" in parsed
+        assert "myproject.F0.planner" in parsed["store_chain_note"]
+        assert "store_continuation_guidance" not in parsed
 
     def test_non_json_passthrough(self):
         from mcp.types import TextContent
@@ -563,7 +641,7 @@ class TestInjectStorePathContinuation:
         from server import _inject_store_path_continuation
 
         items = [TextContent(type="text", text="not json")]
-        result = _inject_store_path_continuation(items, "myproject.thinkdeep0")
+        result = _inject_store_path_continuation(items, "myproject.F0.thinkdeep")
 
         assert result[0].text == "not json"
 
@@ -575,10 +653,11 @@ class TestInjectStorePathContinuation:
         response_json = json.dumps({"status": "success", "content": "Done."})
         items = [TextContent(type="text", text=response_json)]
 
-        result = _inject_store_path_continuation(items, "myproject.thinkdeep0")
+        result = _inject_store_path_continuation(items, "myproject.F0.thinkdeep")
 
         parsed = json.loads(result[0].text)
         assert "continuation_offer" not in parsed or parsed.get("continuation_offer") is None
+        assert "continuation_id" not in parsed or parsed.get("continuation_id") is None
 
 
 class TestStrictHistoryEnforcement:

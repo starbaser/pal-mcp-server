@@ -1218,3 +1218,204 @@ class CtxRenameTool(BaseTool):
             metadata={"store_id": new_name, "old_store_id": store_id, "directory": directory},
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]
+
+
+# ---------------------------------------------------------------------------
+# ctxexport
+# ---------------------------------------------------------------------------
+
+
+class CtxExportTool(BaseTool):
+    def get_name(self) -> str:
+        return "ctxexport"
+
+    def get_description(self) -> str:
+        return (
+            "Export an entire context store to a self-contained markdown file. "
+            "Serializes all layers, metadata, prompts, responses, and file references "
+            "into a single portable document suitable for archival, handoffs, or direct file reads."
+        )
+
+    def get_input_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "store_id": {
+                    "type": "string",
+                    "description": STORE_ID_DESCRIPTION,
+                },
+                "output_path": {
+                    "type": "string",
+                    "description": (
+                        "Absolute path for the output markdown file. "
+                        "Parent directory must exist. Example: '/home/user/.claude/handoffs/myproject-export.md'"
+                    ),
+                },
+            },
+            "required": ["store_id", "output_path"],
+            "additionalProperties": False,
+        }
+
+    def get_annotations(self) -> dict:
+        return {"readOnlyHint": False, "idempotentHint": True, "openWorldHint": False}
+
+    def get_system_prompt(self) -> str:
+        return ""
+
+    def get_request_model(self):
+        return ToolRequest
+
+    def requires_model(self) -> bool:
+        return False
+
+    def get_model_category(self):
+        from tools.models import ToolModelCategory
+
+        return ToolModelCategory.FAST_RESPONSE
+
+    async def prepare_prompt(self, _request: ToolRequest) -> str:
+        return ""
+
+    def format_response(self, response: str, _request: ToolRequest, _model_info: Optional[dict] = None) -> str:
+        return response
+
+    def _render_node(self, path: str, node, depth: int) -> list[str]:
+        """Render a single node as markdown sections."""
+        from utils.context_store import StoreNode
+
+        node: StoreNode
+        heading = "#" * min(depth, 6)
+        lines = [f"{heading} {path}", ""]
+
+        meta_parts = []
+        if node.label:
+            meta_parts.append(f"**Label:** {node.label}")
+        if node.entry_type:
+            meta_parts.append(f"**Type:** {node.entry_type}")
+        if node.model:
+            meta_parts.append(f"**Model:** {node.model}")
+        if node.timestamp:
+            meta_parts.append(f"**Timestamp:** {node.timestamp}")
+        if node.tool_name:
+            meta_parts.append(f"**Tool:** {node.tool_name}")
+        if meta_parts:
+            lines.extend(meta_parts)
+            lines.append("")
+
+        if node.files:
+            lines.append("**Attached files:**")
+            for f in node.files:
+                lines.append(f"- `{f}`")
+            lines.append("")
+
+        if node.prompt:
+            lines.extend(["### Prompt", "", node.prompt, ""])
+        if node.response:
+            lines.extend(["### Response", "", node.response, ""])
+
+        return lines
+
+    def _walk_tree(self, nodes: dict, parent_path: str, depth: int) -> list[str]:
+        """Recursively render all nodes depth-first."""
+        lines: list[str] = []
+        for key in sorted(nodes, key=_natural_sort_key):
+            node = nodes[key]
+            full_path = f"{parent_path}.{key}"
+            lines.extend(self._render_node(full_path, node, depth))
+            if node.children:
+                lines.extend(self._walk_tree(node.children, full_path, depth + 1))
+        return lines
+
+    def _build_toc(self, nodes: dict, parent_path: str, indent: int = 0) -> list[str]:
+        """Build a flat table of contents with anchor links."""
+        lines: list[str] = []
+        pad = "  " * indent
+        for key in sorted(nodes, key=_natural_sort_key):
+            node = nodes[key]
+            full_path = f"{parent_path}.{key}"
+            anchor = full_path.lower().replace(".", "")
+            ts = (node.timestamp or "")[:10]
+            date_part = f" — {ts}" if ts else ""
+            lines.append(f"{pad}- [{full_path}](#{anchor}){date_part}")
+            if node.children:
+                lines.extend(self._build_toc(node.children, full_path, indent + 1))
+        return lines
+
+    async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
+        from tools.models import ToolOutput
+        from utils.context_store import load_store, resolve_store_location
+
+        store_id = arguments.get("store_id", "")
+        output_path = arguments.get("output_path", "")
+
+        if not output_path:
+            error = ToolOutput(status="error", content="output_path is required.", content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        parent_dir = os.path.dirname(output_path)
+        if parent_dir and not os.path.isdir(parent_dir):
+            error = ToolOutput(
+                status="error",
+                content=f"Parent directory does not exist: {parent_dir}",
+                content_type="text",
+            )
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        location = resolve_store_location(store_id)
+        if location is None:
+            error = ToolOutput(status="error", content=f'Store "{store_id}" not found.', content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        directory, root_id = location
+        store = load_store(directory, root_id)
+        if store is None:
+            error = ToolOutput(status="error", content=f'Store file not found: "{root_id}".', content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        # Build the markdown document
+        doc: list[str] = []
+
+        # Header
+        doc.append(f"# Context Store Export: {store.store_id}")
+        doc.append("")
+
+        # Store metadata
+        doc.append(f"**Directory:** `{store.directory}`")
+        doc.append(f"**Created:** {store.created_at}")
+        if store.label:
+            doc.append(f"**Label:** {store.label}")
+        n_layers = sum(1 for k in store.children if k.startswith("L") and k[1:].isdigit())
+        doc.append(f"**Layers:** {n_layers}")
+        doc.append(f"**Exported:** {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}")
+        doc.append("")
+
+        # Table of contents
+        if store.children:
+            doc.append("## Table of Contents")
+            doc.append("")
+            doc.extend(self._build_toc(store.children, store.store_id))
+            doc.append("")
+
+        # Separator
+        doc.append("---")
+        doc.append("")
+
+        # All nodes
+        doc.extend(self._walk_tree(store.children, store.store_id, depth=2))
+
+        content = "\n".join(doc)
+
+        try:
+            with open(output_path, "w") as f:
+                f.write(content)
+        except OSError as e:
+            error = ToolOutput(status="error", content=f"Failed to write file: {e}", content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        tool_output = ToolOutput(
+            status="success",
+            content=f"Exported store '{store.store_id}' ({n_layers} layers) to:\n{output_path}",
+            content_type="text",
+            metadata={"store_id": store_id, "output_path": output_path, "layers": n_layers},
+        )
+        return [TextContent(type="text", text=tool_output.model_dump_json())]

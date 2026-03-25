@@ -73,6 +73,7 @@ from tools import (  # noqa: E402
 )
 from tools.context import (
     CtxArmTool,
+    CtxExportTool,
     CtxForkTool,
     CtxInitTool,
     CtxListTool,
@@ -302,6 +303,7 @@ TOOLS = {
     "ctxread": CtxReadTool(),  # Read content of a specific context store node
     "ctxarm": CtxArmTool(),  # Arm/disarm a store for auto-revival on SessionStart
     "ctxrename": CtxRenameTool(),  # Rename a root context store
+    "ctxexport": CtxExportTool(),  # Export entire store to self-contained markdown
 }
 TOOLS = filter_disabled_tools(TOOLS)
 

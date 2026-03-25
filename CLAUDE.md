@@ -142,9 +142,9 @@ Register in `server.py` TOOLS dict. Tools that bypass model resolution override 
 
 ## Context Revival (ctxarm)
 
-The `ctxarm` tool is a single-fire tripwire: it arms a context store for revival on the next user prompt, then automatically disarms. When armed, a `UserPromptSubmit` hook injects `additionalContext` forcing Claude to run `ctxlist` + `ctxquery` to restore project context, then removes the armed entry so subsequent prompts proceed normally.
+The `ctxarm` tool is a single-fire tripwire: it arms a context store for revival on the next user prompt, then automatically disarms. When armed, a `SessionStart` hook injects `additionalContext` forcing Claude to run `ctxlist` + `ctxquery` to restore project context, then removes the armed entry so subsequent prompts proceed normally.
 
-After compaction, a `PostCompact` hook auto-arms the most recently used store for the project, so the next user message triggers a full revival from the store (compaction summaries are lossy).
+After compaction, a `PostCompact` hook auto-arms the most recently used store for the project, so the next tool call triggers a full revival from the store (compaction summaries are lossy).
 
 ### Usage
 
@@ -165,16 +165,26 @@ mcp__pal__ctxarm(store_id="my-project", directory="/path/to/project", disarm=tru
 ctxarm tool ──▶ ~/.claude/pal/context/armed.json
                 { "/path/to/project": "my-project" }
 
-UserPromptSubmit hook ──▶ reads armed.json
-                      ──▶ looks up cwd
-                      ──▶ injects revival additionalContext
-                      ──▶ removes cwd entry (disarms)
+SessionStart hook ──▶ reads armed.json
+                  ──▶ looks up cwd
+                  ──▶ injects revival additionalContext
+                  ──▶ removes cwd entry (disarms)
 
 PostCompact hook ──▶ reads store-index.json
                  ──▶ finds most recent store for cwd
-                 ──▶ arms it in armed.json
-                 ──▶ next user message triggers revival
+                 ──▶ arms it in compact-armed.json
+
+PreToolUse hook ──▶ reads compact-armed.json
+                ──▶ if armed: injects revival + disarms
+                ──▶ fires on next tool call (immediate post-compact)
 ```
+
+The tripwire uses two separate armed files and hook events to handle different scenarios:
+
+| Scenario | Armed file | Hook | Fires on resume? |
+|----------|-----------|------|-------------------|
+| Manual arm (ctxarm) | `armed.json` | `SessionStart` | No |
+| Post-compact auto-arm | `compact-armed.json` | `PreToolUse` | N/A (same session) |
 
 ### Hook Installation
 
@@ -183,12 +193,22 @@ Two hooks must be registered in `~/.claude/settings.json`:
 ```json
 {
   "hooks": {
-    "UserPromptSubmit": [
+    "SessionStart": [
       {
         "hooks": [
           {
             "type": "command",
-            "command": "~/.claude/scripts/ctx-arm.sh"
+            "command": "~/.claude/scripts/ctx-arm.sh manual"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/scripts/ctx-arm.sh compact"
           }
         ]
       }
@@ -213,6 +233,7 @@ Two hooks must be registered in `~/.claude/settings.json`:
 ### Storage
 
 - Armed state: `~/.claude/pal/context/armed.json` (directory → store_id mapping)
+- Compact armed state: `~/.claude/pal/context/compact-armed.json`
 - Store index: `~/.claude/pal/context/store-index.json`
 - MCP handshake shows `[armed]` marker on armed stores
 

@@ -1,16 +1,26 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# SessionStart hook: fires the ctxstore revival sequence.
-# Reads armed.json from PAL storage — written by the ctxarm MCP tool.
-# If cwd is armed, injects additionalContext forcing Claude to revive from the store.
+# Context store revival tripwire — single-fire, then disarms.
+# Two modes:
+#   manual  (SessionStart)      — reads armed.json, fires on new session / /clear only
+#   compact (PreToolUse)         — reads compact-armed.json, fires after compaction
 
+mode="${1:-manual}"
 input=$(cat)
 cwd=$(printf '%s' "$input" | jq -r '.cwd // empty')
 
 [[ -z "$cwd" ]] && exit 0
 
-armed_file="${PAL_STORAGE_DIR:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/pal}/context/armed.json"
+context_dir="${PAL_STORAGE_DIR:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/pal}/context"
+
+if [[ "$mode" == "compact" ]]; then
+  armed_file="$context_dir/compact-armed.json"
+  hook_event="PreToolUse"
+else
+  armed_file="$context_dir/armed.json"
+  hook_event="SessionStart"
+fi
 
 [[ -f "$armed_file" ]] || exit 0
 
@@ -40,13 +50,18 @@ Step 3: If a plan file path appears in the store output, read it with the Read t
 
 == END REVIVAL SEQUENCE ==
 
+This tripwire has been disarmed. It will not fire again unless re-armed.
 After completing the revival sequence, acknowledge: "Context revived from store: $store_name"
 Then proceed normally.
 TRIPWIRE
 
-printf '%s' "$context_msg" | jq -Rs '{
+# Disarm: remove this cwd entry (single-fire tripwire)
+jq --arg cwd "$cwd" 'del(.[$cwd])' "$armed_file" > "${armed_file}.tmp" && mv "${armed_file}.tmp" "$armed_file"
+
+printf '%s' "$context_msg" | jq -Rs --arg store "$store_name" --arg event "$hook_event" '{
   hookSpecificOutput: {
-    hookEventName: "SessionStart",
+    hookEventName: $event,
     additionalContext: .
-  }
+  },
+  systemMessage: ("Context store revived: " + $store + " (tripwire disarmed)")
 }'

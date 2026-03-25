@@ -212,7 +212,7 @@ def _build_query_node(q_entry: dict, all_entries: dict[str, dict]) -> StoreNode 
     for other_id, other_entry in all_entries.items():
         if other_entry.get("parent_store_id") != q_id:
             continue
-        suffix = other_id[len(q_id) + 1:]
+        suffix = other_id[len(q_id) + 1 :]
         if not suffix.isdigit():
             continue
         # Registry numeric follow-up children share the Q thread; their
@@ -299,7 +299,7 @@ def _build_children(
         if entry.get("parent_store_id") != parent_id:
             continue
 
-        suffix = sid[len(parent_id) + 1:]
+        suffix = sid[len(parent_id) + 1 :]
         # Skip if there are more dots — those are handled by the recursive call
         # on the intermediate node.
         if "." in suffix:

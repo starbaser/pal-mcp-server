@@ -142,7 +142,9 @@ Register in `server.py` TOOLS dict. Tools that bypass model resolution override 
 
 ## Context Revival (ctxarm)
 
-The `ctxarm` tool is a single-fire tripwire: it arms a context store for revival on the next session start, then automatically disarms. The SessionStart hook fires once before the user's first message, forcing Claude to run `ctxlist` + `ctxquery` to restore project context, then removes the armed entry so subsequent sessions start clean.
+The `ctxarm` tool is a single-fire tripwire: it arms a context store for revival on the next user prompt, then automatically disarms. When armed, a `UserPromptSubmit` hook injects `additionalContext` forcing Claude to run `ctxlist` + `ctxquery` to restore project context, then removes the armed entry so subsequent prompts proceed normally.
+
+After compaction, a `PostCompact` hook auto-arms the most recently used store for the project, so the next user message triggers a full revival from the store (compaction summaries are lossy).
 
 ### Usage
 
@@ -163,20 +165,25 @@ mcp__pal__ctxarm(store_id="my-project", directory="/path/to/project", disarm=tru
 ctxarm tool ──▶ ~/.claude/pal/context/armed.json
                 { "/path/to/project": "my-project" }
 
-SessionStart hook ──▶ reads armed.json
-                  ──▶ looks up cwd
-                  ──▶ injects revival additionalContext
-                  ──▶ removes cwd entry (disarms)
+UserPromptSubmit hook ──▶ reads armed.json
+                      ──▶ looks up cwd
+                      ──▶ injects revival additionalContext
+                      ──▶ removes cwd entry (disarms)
+
+PostCompact hook ──▶ reads store-index.json
+                 ──▶ finds most recent store for cwd
+                 ──▶ arms it in armed.json
+                 ──▶ next user message triggers revival
 ```
 
 ### Hook Installation
 
-The SessionStart hook must be registered in `~/.claude/settings.json`:
+Two hooks must be registered in `~/.claude/settings.json`:
 
 ```json
 {
   "hooks": {
-    "SessionStart": [
+    "UserPromptSubmit": [
       {
         "hooks": [
           {
@@ -185,17 +192,28 @@ The SessionStart hook must be registered in `~/.claude/settings.json`:
           }
         ]
       }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/scripts/ctx-compact.sh"
+          }
+        ]
+      }
     ]
   }
 }
 ```
 
-The hook script (`ctx-arm.sh`) reads `${PAL_STORAGE_DIR:-${CLAUDE_CONFIG_DIR:-$HOME/.claude}/pal}/context/armed.json`, looks up the session's `cwd`, and if armed, emits `additionalContext` with a mandatory revival sequence. Requires `jq`.
+- `ctx-arm.sh` — reads `armed.json`, injects revival tripwire via `additionalContext`, disarms. Requires `jq`.
+- `ctx-compact.sh` — reads `store-index.json`, arms the most recently used store for the cwd. Requires `jq`.
 
 ### Storage
 
 - Armed state: `~/.claude/pal/context/armed.json` (directory → store_id mapping)
-- Store registry: `~/.claude/pal/context/stores.json`
+- Store index: `~/.claude/pal/context/store-index.json`
 - MCP handshake shows `[armed]` marker on armed stores
 
 ## Environment Variables

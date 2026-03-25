@@ -1,7 +1,4 @@
-import json
-
-from utils.response_formatter import render_markdown_output, _separate_fields
-
+from utils.response_formatter import _separate_fields, render_markdown_output
 
 # ---------------------------------------------------------------------------
 # _separate_fields

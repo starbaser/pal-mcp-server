@@ -17,8 +17,8 @@ tail -f logs/mcp_activity.log      # Tool calls only
 
 # Testing
 python -m pytest tests/ -v -m "not integration"     # Unit tests only
-python -m pytest tests/test_refactor.py -v          # Single test file
-./run_integration_tests.sh                          # Integration tests (needs Ollama)
+python -m pytest tests/test_refactor.py -v           # Single test file
+./run_integration_tests.sh                           # Integration tests (needs Ollama)
 
 # Simulator tests (end-to-end with real API keys)
 python communication_simulator_test.py --quick                        # 6 essential tests
@@ -59,32 +59,38 @@ CLI Client (Claude/Gemini/Codex)
 ### Key Components
 
 **`server.py`** — Entry point and MCP protocol handler
-- `TOOLS` dict maps tool names to instances
+- `TOOLS` dict maps tool names to instances (31 tools registered)
+- `ESSENTIAL_TOOLS = {"version", "listmodels"}` — cannot be disabled
 - `handle_call_tool()` routes requests, resolves models, reconstructs conversation context
 - `configure_providers()` registers providers based on API keys
-- `parse_model_option()` splits `"model:option"` format (e.g. `"gemini-pro:for"` → model + option)
+- `parse_model_option()` splits `"model:option"` format (e.g. `"gemini-pro:for"` → model + option), preserving OpenRouter suffixes (`:free`, `:beta`, `:preview`)
+- Store continuation: `_resolve_store_continuation()` hydrates threads from context store paths (not just UUIDs). Two modes: CONTINUE (same tool, same node) and FORK (auto-create fork + tool child)
+- Response post-processing pipeline: `_inject_store_path_continuation()` → `_save_response_content()` → `_apply_output_format()`
 
 **`tools/`** — MCP tool implementations. Two base classes:
-- `SimpleTool` (`tools/simple/base.py`) — single request/response (chat, clink, imagegen, perceive)
-- `WorkflowTool` (`tools/workflow/base.py`) — multi-step workflows (analyze, codereview, debug, planner, etc.)
+- `SimpleTool` (`tools/simple/base.py`) — single request/response (chat, clink, imagegen, perceive, ctx tools)
+- `WorkflowTool` (`tools/workflow/base.py`) — multi-step workflows with expert analysis (analyze, codereview, debug, planner, etc.)
 
 Both inherit from `BaseTool` (`tools/shared/base_tool.py`). Required methods: `get_name()`, `get_description()`, `get_input_schema()`, `get_system_prompt()`, `execute()`.
 
 **`providers/`** — AI provider abstraction
 - `base.py`: Abstract `ModelProvider` interface with `generate_content()`, `get_capabilities()`, retry logic
+- `openai_compatible.py`: Shared base for all non-Gemini providers (OpenAI, Azure, XAI, ZAI, DIAL, Custom, OpenRouter)
 - `registry.py`: `ModelProviderRegistry` singleton — lazy-initializes providers, resolves models by priority
 - Priority order: GOOGLE → OPENAI → AZURE → XAI → ZAI → DIAL → CUSTOM → OPENROUTER
 
 **`utils/conversation_memory.py`** — Stateless MCP → Stateful conversations
-- In-memory `ThreadContext` storage with UUID keys
+- `ThreadContext` storage with UUID keys, configurable backend: `"file"` (default, survives restarts) or `"memory"` (in-process)
 - `continuation_id` parameter enables multi-turn conversations
 - Cross-tool continuation: context flows between any tools (analyze → codereview → debug)
-- Dual prioritization: newest-first for token budgeting, chronological for LLM presentation
-- Configurable backend: `"memory"` (in-process) or `"file"` (survives restarts)
+- `build_conversation_history()`: Phase 1 collects turns in REVERSE chronological order (newest-first for token budgeting), Phase 2 reverses back to chronological for LLM presentation
+- `get_conversation_file_list()`: deduplicates files across turns, newest reference wins
 
-**`systemprompts/`** — Each tool has a corresponding `*_prompt.py` file (1:1 naming convention)
+**`systemprompts/`** — Each tool has a corresponding `*_prompt.py` file (1:1 naming convention). Tools without prompts (clink, ctx*, listmodels, version, apilookup, challenge) return `""` from `get_system_prompt()`.
 
 **`config.py`** — Central configuration: version, model defaults, token limits, storage paths, timeouts
+
+**`conf/`** — JSON model catalogs per provider (e.g. `gemini_models.json`, `openai_models.json`). Each defines model capabilities, aliases, context windows, and intelligence scores.
 
 ### Model Resolution
 
@@ -95,10 +101,38 @@ Models are resolved early at the MCP boundary in `handle_call_tool()`:
 4. Pass resolved context to tool
 
 Tools declare their preferred model tier via `get_model_category()` → `ToolModelCategory`:
-- `EXTENDED_REASONING` — most tools (codereview, debug, analyze, thinkdeep, etc.)
-- `FAST_RESPONSE` — chat, listmodels, version
-- `BALANCED` — perceive
+- `EXTENDED_REASONING` — most tools (codereview, debug, analyze, thinkdeep, ctxstore, ctxquery, etc.)
+- `FAST_RESPONSE` — chat, listmodels, version, ctxlist, ctxread, ctxarm, ctxfork, ctxinit, ctxrename, ctxexport
+- `BALANCED` — perceive, clink
 - `IMAGE_GENERATION` — imagegen
+
+Tools that override `requires_model() → False` bypass model resolution entirely: clink, planner, consensus, docgen, tracer, challenge, apilookup, listmodels, version, and all ctx* tools except ctxstore and ctxquery.
+
+### Tool System
+
+**SimpleTool execution flow** (`tools/simple/base.py`):
+1. Validate request via Pydantic model
+2. Resolve model, create `ModelContext`
+3. Call `prepare_prompt()` (tool-specific)
+4. Process files: `filter_new_files()` → `read_files()` (skips files already in conversation history)
+5. Augment system prompt with capability-specific additions + language instruction
+6. Call `provider.generate_content()`
+7. `_parse_response()` → `format_response()` → record assistant turn → create continuation offer
+
+**WorkflowTool** adds multi-step investigation via `BaseWorkflowMixin` (`tools/workflow/workflow_mixin.py`):
+- `execute_workflow()` drives step-by-step analysis with configurable `get_required_actions()` per step
+- `should_call_expert_analysis()` decides whether to invoke the expert model
+- `is_continuation_workflow()` — when `continuation_id` is present, skips multi-step and runs as single request
+
+**Context Tools** (`tools/context.py`) have a split inheritance:
+```
+BaseTool (direct) ─── CtxInitTool, CtxForkTool, CtxListTool, CtxReadTool,
+                      CtxArmTool, CtxRenameTool, CtxExportTool
+                      (requires_model=False, pure filesystem)
+
+SimpleTool → ContextBaseTool ─── CtxStoreTool, CtxQueryTool
+                                 (requires_model=True, thinking_mode="max")
+```
 
 ### MCP Transport Limits
 
@@ -107,10 +141,13 @@ Tools declare their preferred model tier via `get_model_category()` → `ToolMod
 ### clink Tool (CLI-to-CLI Bridge)
 
 `tools/clink.py` spawns external AI CLIs as subagents:
+- `requires_model() → False` — bypasses PAL model resolution, manages its own CLI invocations
 - Sets `PAL_MCP_CLINK=1` to identify headless sessions
+- Builds schema dynamically at `__init__` by querying the CLI registry for available clients and roles
 - Loads agent definitions from `.claude/agents/` directories
 - Returns structured JSON responses with continuation support
-- Output exceeding `MAX_MCP_OUTPUT_TOKENS` is offloaded to `.claude/output/`
+- Output exceeding `MAX_MCP_OUTPUT_TOKENS` is offloaded to `{cwd}/.claude/output/`
+- `CLINK_CLI_OVERRIDE` env var forces a specific CLI client
 
 ## Tool Implementation Pattern
 
@@ -146,19 +183,6 @@ The `ctxarm` tool is a single-fire tripwire: it arms a context store for revival
 
 After compaction, a `PostCompact` hook auto-arms the most recently used store for the project, so the next tool call triggers a full revival from the store (compaction summaries are lossy).
 
-### Usage
-
-```
-# Arm (requires an existing store from ctxinit)
-mcp__pal__ctxarm(store_id="my-project", directory="/path/to/project")
-
-# Disarm
-mcp__pal__ctxarm(store_id="my-project", directory="/path/to/project", disarm=true)
-
-# Or via slash command
-/arm-ctxstore my-project
-```
-
 ### How It Works
 
 ```
@@ -179,56 +203,14 @@ PreToolUse hook ──▶ reads compact-armed.json
                 ──▶ fires on next tool call (immediate post-compact)
 ```
 
-The tripwire uses two separate armed files and hook events to handle different scenarios:
+The tripwire uses two separate armed files and hook events:
 
 | Scenario | Armed file | Hook | Fires on resume? |
 |----------|-----------|------|-------------------|
 | Manual arm (ctxarm) | `armed.json` | `SessionStart` | No |
 | Post-compact auto-arm | `compact-armed.json` | `PreToolUse` | N/A (same session) |
 
-### Hook Installation
-
-Two hooks must be registered in `~/.claude/settings.json`:
-
-```json
-{
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/scripts/ctx-arm.sh manual"
-          }
-        ]
-      }
-    ],
-    "PreToolUse": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/scripts/ctx-arm.sh compact"
-          }
-        ]
-      }
-    ],
-    "PostCompact": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "~/.claude/scripts/ctx-compact.sh"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-- `ctx-arm.sh` — reads `armed.json`, injects revival tripwire via `additionalContext`, disarms. Requires `jq`.
-- `ctx-compact.sh` — reads `store-index.json`, arms the most recently used store for the cwd. Requires `jq`.
+Hook scripts are at `scripts/ctx-arm.sh` and `scripts/ctx-compact.sh`.
 
 ### Storage
 
@@ -243,8 +225,11 @@ Key variables (see `.env.example` for full list):
 - `GEMINI_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, `OPENROUTER_API_KEY` — Provider credentials
 - `CUSTOM_API_URL` — Local models (Ollama, vLLM)
 - `DEFAULT_MODEL` — Default model (`"auto"` for intelligent selection)
-- `DISABLED_TOOLS` — Comma-separated list to disable tools
+- `DISABLED_TOOLS` — Comma-separated list to disable tools (default: `analyze,refactor,testgen,secaudit,docgen,tracer`)
 - `LOG_LEVEL` — DEBUG, INFO, WARNING, ERROR
+- `PAL_STORAGE_DIR` — Persistent storage root (default: `~/.claude/pal`)
+- `CONVERSATION_STORAGE_BACKEND` — `"file"` (default) or `"memory"`
+- `MAX_MCP_OUTPUT_TOKENS` — Output token limit before file offload (default: 25000)
 
 ## Testing Strategy
 
@@ -254,41 +239,18 @@ Key variables (see `.env.example` for full list):
 
 Quick simulator mode covers: cross-tool continuation, conversation threading, consensus workflow, codereview workflow, planner workflow, token allocation.
 
+### Test Configuration
+
+`conftest.py` sets `DEFAULT_MODEL=gemini-2.5-flash` for all tests and registers dummy API keys. Auto-mode tests are identified by filename/testname containing `"auto_mode"`, `"intelligent_fallback"`, or `"per_tool_model_defaults"` — all other tests have auto mode disabled via monkeypatch. Use `@pytest.mark.integration` for tests requiring real API calls.
+
 ## Code Style
 
 - Line length: 120 (black, isort, ruff)
 - isort profile: `black`
 - ruff selects: E, W, F, I, B, C4, UP; ignores E501, B008, C901, B904
 
-## Code Navigation (kit-dev-mcp)
+## CI/CD
 
-This project is indexed for kit-dev-mcp repo tools. At session start, load the tools and open the repo:
-
-```
-# Load tools
-ToolSearch query: "select:mcp__kitstore__open_repository,mcp__kitstore__warm_cache,mcp__kitstore__grep_code,mcp__kitstore__grep_ast,mcp__kitstore__extract_symbols,mcp__kitstore__get_symbol_code,mcp__kitstore__find_symbol_usages,mcp__kitstore__get_file_tree,mcp__kitstore__analyze_dependencies,mcp__kitstore__review_diff"
-
-# Open and warm
-open_repository(path_or_url="/home/eigenmage/dev/opt/pal-mcp-server") → repo_id
-warm_cache(repo_id, warm_file_tree=true, warm_symbols=true)
-```
-
-### Available Tools
-
-| Tool | Purpose | Example |
-|------|---------|---------|
-| `grep_code(repo_id, pattern)` | Fast literal string search | `grep_code(repo_id, "handle_call_tool")` |
-| `grep_ast(repo_id, pattern)` | AST-aware semantic search (tree-sitter) | `grep_ast(repo_id, "class BaseTool")` |
-| `extract_symbols(repo_id, file_path)` | List functions/classes/types in a file | `extract_symbols(repo_id, "server.py")` |
-| `get_symbol_code(repo_id, file_path, symbol)` | Get a symbol's full source | `get_symbol_code(repo_id, "server.py", "handle_call_tool")` |
-| `find_symbol_usages(repo_id, symbol_name)` | Find where a symbol is used across repo | `find_symbol_usages(repo_id, "BaseTool")` |
-| `get_file_tree(repo_id)` | Repository file structure | `get_file_tree(repo_id)` |
-| `analyze_dependencies(path)` | Dependency graph via import parsing | `analyze_dependencies("/home/eigenmage/dev/opt/pal-mcp-server")` |
-| `review_diff(repo_id, diff_spec)` | AI review of git diffs | `review_diff(repo_id, "HEAD~1")` |
-
-### When to Use
-
-- **Symbol navigation**: `extract_symbols` + `get_symbol_code` for lazy loading (token efficient)
-- **Cross-file tracing**: `find_symbol_usages` to trace how classes/functions propagate
-- **Pattern search**: `grep_ast` for structural matches (class defs, function signatures); `grep_code` for literal strings
-- **Pre-commit review**: `review_diff` for AI-assisted diff review
+- **PR tests** (`test.yml`): Matrix across Python 3.10/3.11/3.12, runs lint + unit tests
+- **Release** (`semantic-release.yml`): `python-semantic-release` on push to `main`, syncs version to `config.py` via `scripts/sync_version.py`
+- **Docker** (`docker-pr.yml`, `docker-release.yml`): Multi-platform builds (`linux/amd64,linux/arm64`) to `ghcr.io`

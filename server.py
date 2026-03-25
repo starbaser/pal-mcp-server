@@ -295,8 +295,8 @@ TOOLS = {
     "imagegen": ImageGenTool(),  # Native AI image generation and editing
     "perceive": PerceiveTool(),  # Structured media intelligence extraction (image, video, audio)
     "ctxinit": CtxInitTool(),  # Create a named context store
-    "ctxstore": CtxStoreTool(),  # Store context layers in a persistent silo
-    "ctxquery": CtxQueryTool(),  # Query against a context silo
+    "ctxstore": CtxStoreTool(),  # Store context layers in a persistent store
+    "ctxquery": CtxQueryTool(),  # Query against a context store
     "ctxlist": CtxListTool(),  # List context stores and their full node trees
     "ctxfork": CtxForkTool(),  # Create a fork point in a context store tree
     "ctxread": CtxReadTool(),  # Read content of a specific context store node
@@ -409,13 +409,13 @@ PROMPT_TEMPLATES = {
     },
     "ctxstore": {
         "name": "ctxstore",
-        "description": "Store context layers in a persistent silo",
+        "description": "Store context layers in a persistent store",
         "template": "Store context with {model}",
     },
     "ctxquery": {
         "name": "ctxquery",
-        "description": "Query a context silo without changing its state",
-        "template": "Query context silo with {model}",
+        "description": "Query a context store without changing its state",
+        "template": "Query context store with {model}",
     },
     "ctxlist": {
         "name": "ctxlist",
@@ -1606,7 +1606,7 @@ async def reconstruct_thread_context(arguments: dict[str, Any]) -> dict[str, Any
     logger.debug(f"[CONVERSATION_DEBUG] Building conversation history for thread {continuation_id}")
     logger.debug(f"[CONVERSATION_DEBUG] Thread has {len(context.turns)} turns, tool: {context.tool_name}")
     logger.debug(f"[CONVERSATION_DEBUG] Using model: {model_context.model_name}")
-    # Context silo forks require strict mode — no silent history truncation
+    # Context store forks require strict mode — no silent history truncation
     _strict_history = "store_fork" in arguments
     conversation_history, conversation_tokens = build_conversation_history(
         context, model_context, strict=_strict_history

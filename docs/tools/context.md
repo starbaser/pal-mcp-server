@@ -1,20 +1,20 @@
-# Context Silo Tools — Persistent Knowledge Repository
+# Context Store Tools — Persistent Knowledge Repository
 
 **A layered, tree-structured knowledge store — initialize, build, query, and discover**
 
-The context silo tools give you a persistent, queryable knowledge repository that lives across conversations. Rather than repeatedly re-explaining a project to each tool call, you initialize a named silo once, build it up in layers, and query it as many times as needed. Context accumulates in layers; queries branch into independent threads that can themselves be continued or layered further.
+The context store tools give you a persistent, queryable knowledge repository that lives across conversations. Rather than repeatedly re-explaining a project to each tool call, you initialize a named store once, build it up in layers, and query it as many times as needed. Context accumulates in layers; queries branch into independent threads that can themselves be continued or layered further.
 
 Four tools form the system: `ctxinit` creates named stores, `ctxstore` builds and extends them, `ctxquery` interrogates them (forking or continuing depending on target), and `ctxlist` discovers existing stores registered to a project directory.
 
 ## Thinking Mode
 
-**Fixed at `max` for all context silo tools.** Thinking mode is hard-coded and cannot be overridden. Every init, store, query, and list operation runs at maximum reasoning depth — the silo's integrity depends on precise synthesis and citation, not speed.
+**Fixed at `max` for all context store tools.** Thinking mode is hard-coded and cannot be overridden. Every init, store, query, and list operation runs at maximum reasoning depth — the store's integrity depends on precise synthesis and citation, not speed.
 
 ---
 
 ## The store_id Path System
 
-Every node in the silo tree has a human-readable path that encodes its lineage. The `store_id` returned by each tool call is this path, not a UUID.
+Every node in the store tree has a human-readable path that encodes its lineage. The `store_id` returned by each tool call is this path, not a UUID.
 
 ### Path Segments
 
@@ -111,7 +111,7 @@ ctxinit(
 
 ---
 
-## ctxstore — Build and Extend the Silo
+## ctxstore — Build and Extend the Store
 
 `ctxstore` is the write path. Every call appends a new layer to an existing node. The `store_id` parameter is always required — use `ctxinit` to create the root first.
 
@@ -137,7 +137,7 @@ Querying or layering on any node in the same thread gives the model the same acc
 
 ### What to Include in the First Layer
 
-The richer the first layer, the more powerful the silo becomes:
+The richer the first layer, the more powerful the store becomes:
 
 - Project state, goals, and direction
 - Architectural overview and key decisions already made
@@ -152,7 +152,7 @@ The model returns a synthesis of the stored layer: key entities, concepts, files
 ### Example
 
 ```
-First layer — seed the silo:
+First layer — seed the store:
   ctxstore(
     store_id="pal-mcp",
     prompt="PAL MCP server: MCP protocol server connecting Claude/Gemini/Codex to external AI
@@ -167,7 +167,7 @@ First layer — seed the silo:
 Second layer — deepen:
   ctxstore(
     store_id="pal-mcp.L1",
-    prompt="Context silo redesign: store_id is now a human-readable path. ctxinit creates
+    prompt="Context store redesign: store_id is now a human-readable path. ctxinit creates
             roots. ctxquery forks on store nodes, continues on query nodes. ctxfork removed.",
     context_label="context path redesign"
   )
@@ -176,7 +176,7 @@ Second layer — deepen:
 
 ---
 
-## ctxquery — Query the Silo
+## ctxquery — Query the Store
 
 `ctxquery` interrogates an existing node. Its behavior depends on the target node type:
 
@@ -189,7 +189,7 @@ This means querying is naturally exploratory. Multiple forks from the same store
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
-| `prompt` | Yes | Question or query to run against the context silo |
+| `prompt` | Yes | Question or query to run against the context store |
 | `store_id` | Yes | The node to query |
 | `model` | No | Model to use (default: server default) |
 | `temperature` | No | Response temperature, 0–1 (default: analytical) |
@@ -242,7 +242,7 @@ Second independent fork from the same store node:
 
 `ctxlist` reads the per-directory registry and returns all known stores, optionally filtered by project directory. It requires no model and makes no external API calls — it is a pure registry lookup.
 
-Use `ctxlist` at the start of a session to find whether a silo already exists for your current project before calling `ctxinit`.
+Use `ctxlist` at the start of a session to find whether a store already exists for your current project before calling `ctxinit`.
 
 ### Parameters
 
@@ -285,7 +285,7 @@ ctxlist()
 
 ## Workflow Examples
 
-### Initialize and Build a Silo
+### Initialize and Build a Store
 
 ```
 Start of project — initialize the store:
@@ -304,7 +304,7 @@ Seed the first layer:
   )
   → store_id: "pal-mcp.L1"
 
-As work progresses — deepen the silo:
+As work progresses — deepen the store:
   ctxstore(
     store_id="pal-mcp.L1",
     prompt="[Completed refactor details, new design decisions]",

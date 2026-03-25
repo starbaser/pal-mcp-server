@@ -142,7 +142,7 @@ Register in `server.py` TOOLS dict. Tools that bypass model resolution override 
 
 ## Context Revival (ctxarm)
 
-The `ctxarm` tool arms a context store for automatic revival on every Claude session start. When armed, a SessionStart hook fires before the user's first message, forcing Claude to run `ctxlist` + `ctxquery` to restore project context from the silo.
+The `ctxarm` tool arms a context store for automatic revival on every Claude session start. When armed, a SessionStart hook fires before the user's first message, forcing Claude to run `ctxlist` + `ctxquery` to restore project context from the store.
 
 ### Usage
 

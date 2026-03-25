@@ -1,5 +1,5 @@
 """
-Tests for context silo tools — ctxinit, ctxstore, ctxquery, ctxlist, and context_registry.
+Tests for context store tools — ctxinit, ctxstore, ctxquery, ctxlist, and context_registry.
 """
 
 import json
@@ -661,7 +661,7 @@ class TestInjectStorePathContinuation:
 
 
 class TestStrictHistoryEnforcement:
-    """Context silos must never silently truncate conversation history."""
+    """Context stores must never silently truncate conversation history."""
 
     def test_strict_mode_raises_on_truncation(self):
         """When strict=True, build_conversation_history raises ValueError if turns would be dropped."""
@@ -703,7 +703,7 @@ class TestStrictHistoryEnforcement:
         )
         model_context.estimate_tokens = lambda text: len(text) // 4
 
-        with pytest.raises(ValueError, match="Context silo history"):
+        with pytest.raises(ValueError, match="Context store history"):
             build_conversation_history(context, model_context, strict=True)
 
     def test_non_strict_mode_truncates_silently(self):

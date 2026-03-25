@@ -1,5 +1,5 @@
 """
-Context silo tools — init, store, query, fork, list, read, and arm context stores.
+Context store tools — init, store, query, fork, list, read, and arm context stores.
 """
 
 import logging
@@ -125,7 +125,7 @@ class CtxQueryRequest(ToolRequest):
 
 
 class ContextBaseTool(SimpleTool):
-    """Shared base for context silo tools that call external models."""
+    """Shared base for context store tools that call external models."""
 
     def get_model_category(self):
         from tools.models import ToolModelCategory
@@ -411,7 +411,7 @@ class CtxStoreTool(ContextBaseTool):
 
     def format_response(self, response: str, _request: CtxStoreRequest, _model_info: Optional[dict] = None) -> str:
         self._last_raw_response = response
-        return f"{response}\n\n---\n\nAGENT'S TURN: Context layer stored. Use the store_id to add more layers or query this silo."
+        return f"{response}\n\n---\n\nAGENT'S TURN: Context layer stored. Use the store_id to add more layers or query this store."
 
     def _create_continuation_offer(self, _request, _model_info: Optional[dict] = None):
         from utils.context_store import get_next_key
@@ -493,7 +493,7 @@ class CtxQueryTool(ContextBaseTool):
         return {
             "prompt": {
                 "type": "string",
-                "description": "Question or instruction to run against the context silo.",
+                "description": "Question or instruction to run against the context store.",
             },
             "store_id": {"type": "string", "description": STORE_ID_DESCRIPTION},
         }
@@ -511,7 +511,7 @@ class CtxQueryTool(ContextBaseTool):
             "properties": {
                 "prompt": {
                     "type": "string",
-                    "description": "Question or instruction to run against the context silo.",
+                    "description": "Question or instruction to run against the context store.",
                 },
                 "store_id": {"type": "string", "description": STORE_ID_DESCRIPTION},
                 "model": self.get_model_field_schema(),
@@ -595,7 +595,7 @@ class CtxQueryTool(ContextBaseTool):
         user_content = self.handle_prompt_file_with_fallback(request)
 
         injected = getattr(self, "_injected_history", "")
-        base = f"=== CONTEXT SILO QUERY ===\n\n{user_content}"
+        base = f"=== CONTEXT STORE QUERY ===\n\n{user_content}"
 
         full_prompt = f"{injected}\n\n{base}" if injected else base
         self._last_full_prompt = full_prompt
@@ -603,7 +603,7 @@ class CtxQueryTool(ContextBaseTool):
 
     def format_response(self, response: str, _request: CtxQueryRequest, _model_info: Optional[dict] = None) -> str:
         self._last_raw_response = response
-        return f"{response}\n\n---\n\nAGENT'S TURN: Evaluate this response from the context silo alongside your own analysis."
+        return f"{response}\n\n---\n\nAGENT'S TURN: Evaluate this response from the context store alongside your own analysis."
 
     def _create_continuation_offer(self, _request, _model_info: Optional[dict] = None):
         from utils.context_store import get_next_key

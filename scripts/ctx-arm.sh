@@ -3,7 +3,7 @@ set -euo pipefail
 
 # SessionStart hook: fires the ctxstore revival sequence.
 # Reads armed.json from PAL storage — written by the ctxarm MCP tool.
-# If cwd is armed, injects additionalContext forcing Claude to revive from the silo.
+# If cwd is armed, injects additionalContext forcing Claude to revive from the store.
 
 input=$(cat)
 cwd=$(printf '%s' "$input" | jq -r '.cwd // empty')
@@ -36,11 +36,11 @@ Step 2: mcp__pal__ctxquery(store_id="$store_name", prompt="Restore full project 
   The returned summary IS your working context for this session.
   Do not proceed until you have read and internalized it.
 
-Step 3: If a plan file path appears in the silo output, read it with the Read tool.
+Step 3: If a plan file path appears in the store output, read it with the Read tool.
 
 == END REVIVAL SEQUENCE ==
 
-After completing the revival sequence, acknowledge: "Context revived from silo: $store_name"
+After completing the revival sequence, acknowledge: "Context revived from store: $store_name"
 Then proceed normally.
 TRIPWIRE
 

@@ -851,6 +851,15 @@ def _resolve_store_continuation(tool_name: str, arguments: dict) -> str | None:
     if not store:
         return None
 
+    # Root is an alias for the current top layer
+    if continuation_id == store.store_id:
+        from utils.context_store import get_last_layer_path
+
+        last = get_last_layer_path(store)
+        if last is None:
+            return None
+        continuation_id = last
+
     node = resolve_node(store, continuation_id)
 
     if node and node.entry_type == "tool" and node.tool_name == tool_name:

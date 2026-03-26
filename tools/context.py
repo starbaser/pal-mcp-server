@@ -550,16 +550,18 @@ class CtxQueryTool(ContextBaseTool):
         node = resolve_node(store, store_id)
 
         if node is None and store_id == store.store_id:
-            # Root-level query: nest under last L-child if layers exist
-            l_children = sorted(
-                [(k, v) for k, v in store.children.items() if k.startswith("L") and k[1:].isdigit()],
-                key=lambda kv: int(kv[0][1:]),
-            )
-            if l_children:
-                last_key = l_children[-1][0]
-                self._parent_path = f"{store_id}.{last_key}"
-            else:
-                self._parent_path = store_id
+            # Root is an alias for the current top layer
+            from utils.context_store import get_last_layer_path
+
+            last = get_last_layer_path(store)
+            if last is None:
+                error = ToolOutput(
+                    status="error",
+                    content="Store has no layers to query. Use ctxstore to add context first.",
+                    content_type="text",
+                )
+                return [TextContent(type="text", text=error.model_dump_json())]
+            self._parent_path = last
             self._child_prefix = "Q"
             self._child_entry_type = "query"
         elif node is not None and node.entry_type in ("store", "fork", "query", "tool"):
@@ -746,6 +748,20 @@ class CtxForkTool(BaseTool):
         if store is None:
             error = ToolOutput(status="error", content=f'Store file not found: "{root_id}".', content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
+
+        # Root is an alias for the current top layer
+        if store_id == store.store_id:
+            from utils.context_store import get_last_layer_path
+
+            last = get_last_layer_path(store)
+            if last is None:
+                error = ToolOutput(
+                    status="error",
+                    content="Store has no layers to fork from. Use ctxstore to add context first.",
+                    content_type="text",
+                )
+                return [TextContent(type="text", text=error.model_dump_json())]
+            store_id = last
 
         next_key = get_next_key(store, store_id, "F")
         fork_node = StoreNode(

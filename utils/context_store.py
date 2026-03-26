@@ -213,6 +213,14 @@ def walk_ancestry(store: StoreRoot, store_id: str) -> list[StoreNode]:
     return ancestry
 
 
+def get_last_layer_path(store: StoreRoot) -> str | None:
+    """Return dotted path to the highest-numbered L-child, or None if no layers exist."""
+    count = sum(1 for k in store.children if k.startswith("L") and k[1:].isdigit())
+    if not count:
+        return None
+    return f"{store.store_id}.L{count}"
+
+
 def get_next_key(store: StoreRoot, parent_path: str, prefix: str) -> str:
     """Compute the next available child key for a given prefix at parent_path.
 

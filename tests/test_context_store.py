@@ -14,6 +14,7 @@ from utils.context_store import (
     disarm_store,
     encode_directory,
     get_armed_store,
+    get_last_layer_path,
     get_next_key,
     list_armed_stores,
     list_stores,
@@ -1177,3 +1178,40 @@ class TestBuildContextAdditional:
         assert result.index("first") < result.index("second") < result.index("third")
         assert "Turn 1" in result
         assert "Turn 3" in result
+
+
+# ---------------------------------------------------------------------------
+# TestGetLastLayerPath
+# ---------------------------------------------------------------------------
+
+
+class TestGetLastLayerPath:
+    def test_empty_store_returns_none(self, ctx_env):
+        store = _make_root()
+        assert get_last_layer_path(store) is None
+
+    def test_single_layer(self, ctx_env):
+        store = _make_root()
+        store.children["L1"] = _make_node()
+        assert get_last_layer_path(store) == "mystore.L1"
+
+    def test_multiple_layers(self, ctx_env):
+        store = _make_root()
+        store.children["L1"] = _make_node()
+        store.children["L2"] = _make_node()
+        store.children["L3"] = _make_node()
+        assert get_last_layer_path(store) == "mystore.L3"
+
+    def test_ignores_non_l_children(self, ctx_env):
+        store = _make_root()
+        store.children["L1"] = _make_node()
+        store.children["L2"] = _make_node()
+        store.children["F0"] = _make_node(entry_type="fork")
+        assert get_last_layer_path(store) == "mystore.L2"
+
+    def test_gap_in_numbering(self, ctx_env):
+        store = _make_root()
+        store.children["L1"] = _make_node()
+        store.children["L5"] = _make_node()
+        # count is 2, so returns L2 — assumes contiguous numbering
+        assert get_last_layer_path(store) == "mystore.L2"

@@ -1009,6 +1009,7 @@ def _save_response_content(
     from datetime import datetime
 
     from config import CONTENT_STORAGE_DIR
+    from utils.context_store import encode_directory
 
     try:
         if not result or not hasattr(result[0], "text"):
@@ -1025,9 +1026,9 @@ def _save_response_content(
             cont = parsed.get("continuation", {})
             cid = cont.get("continuation_id") if isinstance(cont, dict) else None
 
-        content_dir = Path(CONTENT_STORAGE_DIR)
-        if cid:
-            content_dir = content_dir / cid
+        # Group by encoded CWD (matches context store directory encoding)
+        cwd = os.getcwd()
+        content_dir = Path(CONTENT_STORAGE_DIR) / encode_directory(cwd)
         content_dir.mkdir(parents=True, exist_ok=True)
 
         # Build markdown with request + response sections
@@ -1038,8 +1039,11 @@ def _save_response_content(
         parts.append(f"# Response\n\n{content}")
         document = "\n\n".join(parts)
 
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H:%M:%S.%f")
-        filename = f"{timestamp}_{tool_name}.md"
+        if cid:
+            filename = f"{tool_name}_{cid}.md"
+        else:
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H:%M:%S.%f")
+            filename = f"{tool_name}_{timestamp}.md"
         filepath = content_dir / filename
         filepath.write_text(document, encoding="utf-8")
         return str(filepath.resolve())

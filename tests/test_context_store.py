@@ -580,3 +580,600 @@ class TestContextBuilder:
         node = _make_node(entry_type="query", prompt="q", response="r")
         result = build_context_from_ancestry([node])
         assert result.strip().endswith("=== END CONVERSATION HISTORY ===")
+
+    def test_build_context_uses_content_for_user_turn(self):
+        from utils.context_builder import build_context_from_ancestry
+
+        full_prompt = "user text\n\n=== CONTEXT FILES ===\nFILE BLOB CONTENT HERE\n=== END CONTEXT FILES ==="
+        raw_response = "assistant replied"
+        node = StoreNode(
+            entry_type="store",
+            timestamp="2026-01-01T00:00:00Z",
+            prompt="user text",
+            response=raw_response,
+            content=f"{full_prompt}\n\n---\n\n{raw_response}",
+        )
+        result = build_context_from_ancestry([node])
+        assert "FILE BLOB CONTENT HERE" in result
+        assert raw_response in result
+
+    def test_build_context_falls_back_to_prompt_when_no_content(self):
+        from utils.context_builder import build_context_from_ancestry
+
+        node = _make_node(entry_type="store", prompt="bare prompt", response="response")
+        result = build_context_from_ancestry([node])
+        assert "bare prompt" in result
+
+    def test_build_context_split_uses_first_separator_only(self):
+        from utils.context_builder import build_context_from_ancestry
+
+        tricky_prompt = "before\n\n---\n\nstill part of prompt"
+        response = "answer"
+        node = StoreNode(
+            entry_type="store",
+            timestamp="2026-01-01T00:00:00Z",
+            prompt="short",
+            response=response,
+            content=f"{tricky_prompt}\n\n---\n\n{response}",
+        )
+        result = build_context_from_ancestry([node])
+        assert "before" in result
+        assert "still part of prompt" not in result
+        assert "answer" in result
+
+
+# ---------------------------------------------------------------------------
+# TestEncodeDirectoryEdgeCases
+# ---------------------------------------------------------------------------
+
+
+class TestEncodeDirectoryEdgeCases:
+    def test_empty_string(self):
+        assert encode_directory("") == ""
+
+    def test_trailing_slash(self):
+        assert encode_directory("/home/user/") == "-home-user-"
+
+    def test_path_with_spaces(self):
+        assert encode_directory("/home/user/my project") == "-home-user-my project"
+
+    def test_multiple_consecutive_slashes(self):
+        assert encode_directory("//home///user") == "--home---user"
+
+
+# ---------------------------------------------------------------------------
+# TestPathUtilities
+# ---------------------------------------------------------------------------
+
+
+class TestPathUtilities:
+    def test_get_store_dir_returns_expected_path(self, ctx_env):
+        from utils.context_store import get_store_dir
+
+        result = get_store_dir("/home/user/project")
+        assert result == os.path.join(ctx_env, "-home-user-project")
+
+    def test_get_store_path_ends_with_json(self, ctx_env):
+        from utils.context_store import get_store_path
+
+        result = get_store_path("/home/user/project", "mystore")
+        assert result.endswith("mystore.json")
+
+
+# ---------------------------------------------------------------------------
+# TestStoreLifecycleEdgeCases
+# ---------------------------------------------------------------------------
+
+
+class TestStoreLifecycleEdgeCases:
+    def test_load_store_with_list_json_returns_none(self, ctx_env):
+        from utils import context_store
+
+        store = _make_root()
+        path = context_store.get_store_path(store.directory, store.store_id)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            import json
+
+            json.dump([1, 2, 3], f)
+
+        result = load_store(store.directory, store.store_id)
+        assert result is None
+
+    def test_load_store_with_missing_required_fields_returns_none(self, ctx_env):
+        from utils import context_store
+
+        store = _make_root()
+        path = context_store.get_store_path(store.directory, store.store_id)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            import json
+
+            json.dump({"unrelated_field": "value"}, f)
+
+        result = load_store(store.directory, store.store_id)
+        assert result is None
+
+    def test_save_store_creates_nested_directories(self, ctx_env):
+        from utils import context_store
+
+        store = _make_root(directory="/some/deeply/nested/path")
+        save_store(store)
+
+        path = context_store.get_store_path(store.directory, store.store_id)
+        assert os.path.exists(path)
+
+
+# ---------------------------------------------------------------------------
+# TestRenameStore
+# ---------------------------------------------------------------------------
+
+
+class TestRenameStore:
+    def test_rename_happy_path(self, ctx_env):
+        from utils.context_store import get_store_path, load_index, rename_store
+
+        store = _make_root()
+        save_store(store)
+        update_index(store.directory, store.store_id)
+
+        rename_store(store.directory, "mystore", "renamed-store")
+
+        assert os.path.exists(get_store_path(store.directory, "renamed-store"))
+        assert not os.path.exists(get_store_path(store.directory, "mystore"))
+
+        loaded = load_store(store.directory, "renamed-store")
+        assert loaded is not None
+        assert loaded.store_id == "renamed-store"
+
+        index = load_index()
+        assert "renamed-store" in index["stores"]
+        assert "mystore" not in index["stores"]
+
+    def test_rename_nonexistent_raises_key_error(self, ctx_env):
+        from utils.context_store import rename_store
+
+        with pytest.raises(KeyError, match="Store not found"):
+            rename_store("/home/user/project", "ghost-store", "newname")
+
+    def test_rename_new_id_with_dots_raises_value_error(self, ctx_env):
+        from utils.context_store import rename_store
+
+        store = _make_root()
+        save_store(store)
+
+        with pytest.raises(ValueError, match="dots"):
+            rename_store(store.directory, "mystore", "new.name")
+
+    def test_rename_updates_armed_state(self, ctx_env):
+        from utils.context_store import rename_store
+
+        store = _make_root()
+        save_store(store)
+        update_index(store.directory, store.store_id)
+        arm_store(store.directory, "mystore")
+
+        rename_store(store.directory, "mystore", "renamed-store")
+
+        assert get_armed_store(store.directory) == "renamed-store"
+
+    def test_rename_when_store_not_armed_is_noop_for_armed_state(self, ctx_env):
+        from utils.context_store import rename_store
+
+        store = _make_root()
+        save_store(store)
+        update_index(store.directory, store.store_id)
+        arm_store("/home/OTHER/project", "other-store")
+
+        rename_store(store.directory, "mystore", "renamed-store")
+
+        assert get_armed_store("/home/OTHER/project") == "other-store"
+        assert get_armed_store(store.directory) is None
+
+    def test_rename_preserves_children(self, ctx_env):
+        from utils.context_store import rename_store
+
+        store = _make_root()
+        child = _make_node(entry_type="query", prompt="child-q", response="child-r")
+        store.children["L1"] = child
+        save_store(store)
+        update_index(store.directory, store.store_id)
+
+        rename_store(store.directory, "mystore", "renamed-store")
+
+        loaded = load_store(store.directory, "renamed-store")
+        assert loaded is not None
+        assert "L1" in loaded.children
+        assert loaded.children["L1"].prompt == "child-q"
+
+
+# ---------------------------------------------------------------------------
+# TestResolveNodeEdgeCases
+# ---------------------------------------------------------------------------
+
+
+class TestResolveNodeEdgeCases:
+    def test_partial_valid_path_then_invalid_segment_returns_none(self, ctx_env):
+        store = _make_root()
+        child = _make_node(entry_type="query", prompt="p", response="r")
+        store.children["L1"] = child
+        update_index(store.directory, store.store_id)
+
+        result = resolve_node(store, "mystore.L1.Q99")
+        assert result is None
+
+    def test_empty_children_at_intermediate_node_returns_none(self, ctx_env):
+        store = _make_root()
+        child = _make_node(entry_type="query", prompt="p", response="r")
+        store.children["L1"] = child
+        update_index(store.directory, store.store_id)
+
+        result = resolve_node(store, "mystore.L1.Q0")
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# TestAddChildEdgeCases
+# ---------------------------------------------------------------------------
+
+
+class TestAddChildEdgeCases:
+    def test_overwrite_existing_child_key_silently(self, ctx_env):
+        store = _make_root()
+        original = _make_node(entry_type="store", prompt="original", response="old")
+        replacement = _make_node(entry_type="query", prompt="new prompt", response="new response")
+
+        add_child(store, "mystore", "L1", original)
+        add_child(store, "mystore", "L1", replacement)
+
+        assert store.children["L1"].prompt == "new prompt"
+        assert store.children["L1"].entry_type == "query"
+
+    def test_deeply_nested_add_three_levels(self, ctx_env):
+        store = _make_root()
+
+        n1 = _make_node(entry_type="store", prompt="l1", response="r1")
+        add_child(store, "mystore", "L1", n1)
+        update_index(store.directory, store.store_id)
+
+        n2 = _make_node(entry_type="query", prompt="q0", response="rq0")
+        path2 = add_child(store, "mystore.L1", "Q0", n2)
+        assert path2 == "mystore.L1.Q0"
+
+        n3 = _make_node(entry_type="tool", prompt="tool-p", response="tool-r")
+        path3 = add_child(store, "mystore.L1.Q0", "thinkdeep", n3)
+        assert path3 == "mystore.L1.Q0.thinkdeep"
+
+        assert store.children["L1"].children["Q0"].children["thinkdeep"].prompt == "tool-p"
+
+
+# ---------------------------------------------------------------------------
+# TestWalkAncestryEdgeCases
+# ---------------------------------------------------------------------------
+
+
+class TestWalkAncestryEdgeCases:
+    def test_partial_walk_first_valid_second_missing(self, ctx_env):
+        store = _make_root()
+        child = _make_node(entry_type="store", prompt="p1", response="r1")
+        store.children["L1"] = child
+        update_index(store.directory, store.store_id)
+
+        result = walk_ancestry(store, "mystore.L1.Q0")
+        assert len(result) == 1
+        assert result[0].prompt == "p1"
+
+    def test_walk_through_mixed_entry_types(self, ctx_env):
+        store = _make_root()
+        n_store = _make_node(entry_type="store", prompt="store-p", response="store-r")
+        n_fork = _make_node(entry_type="fork", prompt="", response="")
+        n_query = _make_node(entry_type="query", prompt="query-p", response="query-r")
+        n_tool = _make_node(entry_type="tool", prompt="tool-p", response="tool-r")
+
+        n_query.children["thinkdeep"] = n_tool
+        n_fork.children["Q0"] = n_query
+        n_store.children["F0"] = n_fork
+        store.children["L1"] = n_store
+        update_index(store.directory, store.store_id)
+
+        result = walk_ancestry(store, "mystore.L1.F0.Q0.thinkdeep")
+        assert len(result) == 4
+        assert result[0].entry_type == "store"
+        assert result[1].entry_type == "fork"
+        assert result[2].entry_type == "query"
+        assert result[3].entry_type == "tool"
+
+
+# ---------------------------------------------------------------------------
+# TestGetNextKeyEdgeCases
+# ---------------------------------------------------------------------------
+
+
+class TestGetNextKeyEdgeCases:
+    def test_gap_in_numbering_returns_max_plus_one(self, ctx_env):
+        store = _make_root()
+        store.children["L1"] = _make_node()
+        store.children["L3"] = _make_node()
+
+        result = get_next_key(store, "mystore", "L")
+        assert result == "L4"
+
+    def test_nonexistent_parent_path_treats_as_empty_L(self, ctx_env):
+        store = _make_root()
+        result = get_next_key(store, "mystore.NONEXISTENT", "L")
+        assert result == "L1"
+
+    def test_nonexistent_parent_path_treats_as_empty_Q(self, ctx_env):
+        store = _make_root()
+        result = get_next_key(store, "mystore.NONEXISTENT", "Q")
+        assert result == "Q0"
+
+    def test_mixed_children_types_each_prefix_independent(self, ctx_env):
+        store = _make_root()
+        store.children["L1"] = _make_node()
+        store.children["L2"] = _make_node()
+        store.children["Q0"] = _make_node()
+        store.children["Q1"] = _make_node()
+        store.children["F0"] = _make_node()
+
+        assert get_next_key(store, "mystore", "L") == "L3"
+        assert get_next_key(store, "mystore", "Q") == "Q2"
+        assert get_next_key(store, "mystore", "F") == "F1"
+
+
+# ---------------------------------------------------------------------------
+# TestParseStorePathEdgeCases
+# ---------------------------------------------------------------------------
+
+
+class TestParseStorePathEdgeCases:
+    def test_store_id_with_hyphen(self, ctx_env):
+        update_index("/home/user/project", "my-store")
+        root, segments = parse_store_path("my-store.L1.Q0")
+        assert root == "my-store"
+        assert segments == ["L1", "Q0"]
+
+    def test_empty_string(self, ctx_env):
+        root, segments = parse_store_path("")
+        assert root == ""
+        assert segments == []
+
+
+# ---------------------------------------------------------------------------
+# TestResolveStoreLocationEdgeCases
+# ---------------------------------------------------------------------------
+
+
+class TestResolveStoreLocationEdgeCases:
+    def test_dotted_path_resolves_to_root(self, ctx_env):
+        store = _make_root()
+        save_store(store)
+        update_index(store.directory, store.store_id)
+
+        result = resolve_store_location("mystore.L1.Q0")
+        assert result is not None
+        directory, root_id = result
+        assert root_id == "mystore"
+        assert directory == store.directory
+
+    def test_stale_index_entry_falls_back_to_scan(self, ctx_env):
+        import os
+
+        from utils.context_store import get_store_path
+
+        store = _make_root()
+        save_store(store)
+        update_index(store.directory, store.store_id)
+
+        os.remove(get_store_path(store.directory, store.store_id))
+
+        result = resolve_store_location("mystore")
+        assert result is None
+
+    def test_unknown_store_with_empty_context_dir_returns_none(self, ctx_env):
+        result = resolve_store_location("completely-unknown-store-xyz")
+        assert result is None
+
+
+# ---------------------------------------------------------------------------
+# TestArmedOperationsEdgeCases
+# ---------------------------------------------------------------------------
+
+
+class TestArmedOperationsEdgeCases:
+    def test_arm_same_directory_twice_second_wins(self, ctx_env):
+        arm_store("/home/user/project", "store-a")
+        arm_store("/home/user/project", "store-b")
+
+        result = get_armed_store("/home/user/project")
+        assert result == "store-b"
+
+    def test_list_armed_stores_when_empty_returns_empty_dict(self, ctx_env):
+        result = list_armed_stores()
+        assert result == {}
+
+
+# ---------------------------------------------------------------------------
+# TestListStoresEdgeCases
+# ---------------------------------------------------------------------------
+
+
+class TestListStoresEdgeCases:
+    def test_multiple_stores_in_same_directory(self, ctx_env):
+        store_a = _make_root(store_id="store-a")
+        store_b = _make_root(store_id="store-b")
+        save_store(store_a)
+        save_store(store_b)
+
+        results = list_stores(directory="/home/user/project")
+        ids = {s.store_id for s in results}
+        assert "store-a" in ids
+        assert "store-b" in ids
+        assert len(results) == 2
+
+    def test_directory_with_no_json_files_returns_empty(self, ctx_env):
+        from utils.context_store import get_store_dir
+
+        folder = get_store_dir("/home/user/project")
+        os.makedirs(folder, exist_ok=True)
+        with open(os.path.join(folder, "not-a-store.txt"), "w") as f:
+            f.write("irrelevant content")
+
+        results = list_stores(directory="/home/user/project")
+        assert results == []
+
+
+# ---------------------------------------------------------------------------
+# TestListAllDirectories
+# ---------------------------------------------------------------------------
+
+
+class TestListAllDirectories:
+    def test_returns_indexed_directories(self, ctx_env):
+        from utils.context_store import list_all_directories
+
+        store = _make_root(store_id="store-a", directory="/home/user/proj-a")
+        save_store(store)
+        update_index(store.directory, store.store_id)
+
+        result = list_all_directories()
+        assert "/home/user/proj-a" in result
+
+    def test_returns_unindexed_directories_via_scan(self, ctx_env):
+        from utils.context_store import list_all_directories
+
+        store = _make_root(store_id="store-b", directory="/home/user/proj-b")
+        save_store(store)
+
+        result = list_all_directories()
+        assert "/home/user/proj-b" in result
+
+    def test_empty_context_directory_returns_empty(self, ctx_env):
+        from utils.context_store import list_all_directories
+
+        result = list_all_directories()
+        assert result == []
+
+
+# ---------------------------------------------------------------------------
+# TestHydrateThreadContext
+# ---------------------------------------------------------------------------
+
+
+class TestHydrateThreadContext:
+    def test_ancestor_with_content_used_as_user_turn(self, ctx_env):
+        from utils.context_builder import hydrate_thread_context
+
+        store = _make_root()
+        node = StoreNode(
+            entry_type="store",
+            timestamp="2026-01-01T00:00:00Z",
+            prompt="short prompt",
+            response="the response",
+            content="FULL CONTENT BLOB",
+        )
+        store.children["L1"] = node
+        update_index(store.directory, store.store_id)
+
+        thread = hydrate_thread_context(store, "mystore.L1")
+        assert len(thread.turns) == 1
+        assert thread.turns[0].role == "user"
+        assert thread.turns[0].content == "FULL CONTENT BLOB"
+
+    def test_ancestor_without_content_yields_separate_turns(self, ctx_env):
+        from utils.context_builder import hydrate_thread_context
+
+        store = _make_root()
+        node = _make_node(entry_type="query", prompt="the question", response="the answer")
+        store.children["L1"] = node
+        update_index(store.directory, store.store_id)
+
+        thread = hydrate_thread_context(store, "mystore.L1")
+        assert len(thread.turns) == 2
+        assert thread.turns[0].role == "user"
+        assert thread.turns[0].content == "the question"
+        assert thread.turns[1].role == "assistant"
+        assert thread.turns[1].content == "the answer"
+
+    def test_fork_nodes_are_skipped(self, ctx_env):
+        from utils.context_builder import hydrate_thread_context
+
+        store = _make_root()
+        n_store = _make_node(entry_type="store", prompt="q1", response="r1")
+        n_fork = _make_node(entry_type="fork", prompt="", response="")
+        n_query = _make_node(entry_type="query", prompt="q2", response="r2")
+
+        n_fork.children["Q0"] = n_query
+        n_store.children["F0"] = n_fork
+        store.children["L1"] = n_store
+        update_index(store.directory, store.store_id)
+
+        thread = hydrate_thread_context(store, "mystore.L1.F0.Q0")
+        roles = [t.role for t in thread.turns]
+        assert "fork" not in [t.content for t in thread.turns]
+        assert roles == ["user", "assistant", "user", "assistant"]
+
+    def test_root_path_yields_empty_thread(self, ctx_env):
+        from utils.context_builder import hydrate_thread_context
+
+        store = _make_root()
+        update_index(store.directory, store.store_id)
+
+        thread = hydrate_thread_context(store, "mystore")
+        assert len(thread.turns) == 0
+
+    def test_runtime_error_when_get_thread_returns_none(self, ctx_env, monkeypatch):
+        import utils.conversation_memory as cm
+        from utils.context_builder import hydrate_thread_context
+
+        monkeypatch.setattr(cm, "get_thread", lambda thread_id: None)
+
+        store = _make_root()
+        update_index(store.directory, store.store_id)
+
+        with pytest.raises(RuntimeError, match="Failed to retrieve hydrated thread"):
+            hydrate_thread_context(store, "mystore")
+
+
+# ---------------------------------------------------------------------------
+# TestBuildContextAdditional
+# ---------------------------------------------------------------------------
+
+
+class TestBuildContextAdditional:
+    def test_node_with_prompt_but_empty_response_filtered_out(self):
+        from utils.context_builder import build_context_from_ancestry
+
+        node = _make_node(entry_type="store", prompt="question only", response="")
+        result = build_context_from_ancestry([node])
+        assert result == ""
+
+    def test_node_with_empty_prompt_but_response_filtered_out(self):
+        from utils.context_builder import build_context_from_ancestry
+
+        node = _make_node(entry_type="query", prompt="", response="answer only")
+        result = build_context_from_ancestry([node])
+        assert result == ""
+
+    def test_five_node_chain_turns_numbered_one_through_five(self):
+        from utils.context_builder import build_context_from_ancestry
+
+        nodes = [
+            _make_node(entry_type="store", prompt=f"q{i}", response=f"r{i}") for i in range(1, 6)
+        ]
+        result = build_context_from_ancestry(nodes)
+        for i in range(1, 6):
+            assert f"Turn {i}" in result
+
+    def test_multi_node_chain_ordering_preserved(self):
+        from utils.context_builder import build_context_from_ancestry
+
+        nodes = [
+            _make_node(entry_type="store", prompt="first", response="f-resp"),
+            _make_node(entry_type="query", prompt="second", response="s-resp"),
+            _make_node(entry_type="tool", prompt="third", response="t-resp"),
+        ]
+        result = build_context_from_ancestry(nodes)
+        assert result.index("first") < result.index("second") < result.index("third")
+        assert "Turn 1" in result
+        assert "Turn 3" in result

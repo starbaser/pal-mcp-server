@@ -36,8 +36,15 @@ def build_context_from_ancestry(ancestors: list[StoreNode], include_files: bool 
     turn_num = 0
     for node in content_nodes:
         turn_num += 1
+        # Extract the full prompt (with file blobs) from content when available.
+        # content format: "{full_prompt}\n\n---\n\n{response}"
+        content = getattr(node, "content", "")
+        if content:
+            user_turn = content.split("\n\n---\n\n", 1)[0]
+        else:
+            user_turn = node.prompt
         parts.append(f"--- Turn {turn_num} (user) ---")
-        parts.append(node.prompt)
+        parts.append(user_turn)
         parts.append("")
         parts.append(f"--- Turn {turn_num} (assistant) ---")
         parts.append(node.response)

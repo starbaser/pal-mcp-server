@@ -23,7 +23,7 @@ def test_first_response_persisted_in_conversation_history(tmp_path):
     response_text = "Here is the initial answer."
 
     # Mimic the first tool invocation (no continuation_id supplied)
-    continuation_data = tool._create_continuation_offer(request, model_info={"model_name": "local-llama"})
+    continuation_data = tool._create_continuation_offer(request, _model_info={"model_name": "local-llama"})
     tool._create_continuation_offer_response(
         response_text,
         continuation_data,

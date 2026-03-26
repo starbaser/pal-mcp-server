@@ -74,6 +74,8 @@ from tools import (  # noqa: E402
 from tools.context import (
     CtxArmTool,
     CtxExportTool,
+    CtxFileListTool,
+    CtxFileReadTool,
     CtxForkTool,
     CtxInitTool,
     CtxListTool,
@@ -304,6 +306,8 @@ TOOLS = {
     "ctxarm": CtxArmTool(),  # Arm/disarm a store for auto-revival on SessionStart
     "ctxrename": CtxRenameTool(),  # Rename a root context store
     "ctxexport": CtxExportTool(),  # Export entire store to self-contained markdown
+    "ctxfilelist": CtxFileListTool(),  # List files attached across a store tree
+    "ctxfileread": CtxFileReadTool(),  # Read a specific file's content from a store node
 }
 TOOLS = filter_disabled_tools(TOOLS)
 
@@ -423,6 +427,16 @@ PROMPT_TEMPLATES = {
         "name": "ctxlist",
         "description": "List context stores for a directory",
         "template": "List context stores",
+    },
+    "ctxfilelist": {
+        "name": "ctxfilelist",
+        "description": "List files attached across a context store tree",
+        "template": "List files in context store",
+    },
+    "ctxfileread": {
+        "name": "ctxfileread",
+        "description": "Read stored file content from a context store node",
+        "template": "Read file from context store",
     },
 }
 

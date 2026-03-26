@@ -476,8 +476,13 @@ class SimpleTool(BaseTool):
             logger.info(f"Received response from {provider.get_provider_type().value} API for {self.get_name()}")
             _final_model_response = model_response
 
-            # Estimate context usage after model call (for first-call reporting)
-            if "_context_used" not in self._current_arguments:
+            # Use actual API-reported token counts when available; fall back to estimate.
+            _usage = model_response.usage if model_response.usage else {}
+            _api_input = _usage.get("input_tokens", 0)
+            _api_output = _usage.get("output_tokens", 0)
+            if _api_input or _api_output:
+                self._current_arguments["_context_used"] = _api_input + _api_output
+            elif "_context_used" not in self._current_arguments:
                 sys_tokens = estimate_tokens(system_prompt) if system_prompt else 0
                 prompt_tokens = estimated_tokens  # already computed above
                 resp_tokens = estimate_tokens(model_response.content) if model_response.content else 0

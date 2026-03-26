@@ -1,9 +1,10 @@
 """
-Context store tools — init, store, query, fork, list, read, and arm context stores.
+Context store tools — init, store, query, fork, list, read, arm, filelist, and fileread context stores.
 """
 
 import logging
 import os
+import re
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -549,14 +550,19 @@ class CtxQueryTool(ContextBaseTool):
         node = resolve_node(store, store_id)
 
         if node is None and store_id == store.store_id:
-            self._parent_path = store_id
+            # Root-level query: nest under last L-child if layers exist
+            l_children = sorted(
+                [(k, v) for k, v in store.children.items() if k.startswith("L") and k[1:].isdigit()],
+                key=lambda kv: int(kv[0][1:]),
+            )
+            if l_children:
+                last_key = l_children[-1][0]
+                self._parent_path = f"{store_id}.{last_key}"
+            else:
+                self._parent_path = store_id
             self._child_prefix = "Q"
             self._child_entry_type = "query"
-        elif node is not None and node.entry_type in ("store", "fork"):
-            self._parent_path = store_id
-            self._child_prefix = "Q"
-            self._child_entry_type = "query"
-        elif node is not None and node.entry_type in ("query", "tool"):
+        elif node is not None and node.entry_type in ("store", "fork", "query", "tool"):
             self._parent_path = store_id
             self._child_prefix = "Q"
             self._child_entry_type = "query"
@@ -1417,5 +1423,286 @@ class CtxExportTool(BaseTool):
             content=f"Exported store '{store.store_id}' ({n_layers} layers) to:\n{output_path}",
             content_type="text",
             metadata={"store_id": store_id, "output_path": output_path, "layers": n_layers},
+        )
+        return [TextContent(type="text", text=tool_output.model_dump_json())]
+
+
+# ---------------------------------------------------------------------------
+# ctxfilelist
+# ---------------------------------------------------------------------------
+
+
+class CtxFileListTool(BaseTool):
+    def get_name(self) -> str:
+        return "ctxfilelist"
+
+    def get_description(self) -> str:
+        return (
+            "List all files attached across a context store tree, grouped by node. "
+            "Shows which files were seeded into each layer. "
+            "Use ctxlist to find store_ids; use ctxfileread to retrieve stored file content."
+        )
+
+    def get_input_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "store_id": {
+                    "type": "string",
+                    "description": STORE_ID_DESCRIPTION,
+                },
+            },
+            "required": ["store_id"],
+            "additionalProperties": False,
+        }
+
+    def get_annotations(self) -> dict:
+        return {"readOnlyHint": True, "idempotentHint": True, "openWorldHint": False}
+
+    def get_system_prompt(self) -> str:
+        return ""
+
+    def get_request_model(self):
+        return ToolRequest
+
+    def requires_model(self) -> bool:
+        return False
+
+    def get_model_category(self):
+        from tools.models import ToolModelCategory
+
+        return ToolModelCategory.FAST_RESPONSE
+
+    async def prepare_prompt(self, _request: ToolRequest) -> str:
+        return ""
+
+    def format_response(self, response: str, _request: ToolRequest, _model_info: Optional[dict] = None) -> str:
+        return response
+
+    def _collect_files(self, nodes: dict, parent_path: str) -> list[tuple[str, str, str, list[str]]]:
+        """Recursively collect (node_path, timestamp, label, files) for nodes with files."""
+        results: list[tuple[str, str, str, list[str]]] = []
+        for key in sorted(nodes, key=_natural_sort_key):
+            node = nodes[key]
+            full_path = f"{parent_path}.{key}"
+            if node.files:
+                results.append((full_path, node.timestamp or "", node.label or "", list(node.files)))
+            if node.children:
+                results.extend(self._collect_files(node.children, full_path))
+        return results
+
+    async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
+        from tools.models import ToolOutput
+        from utils.context_store import load_store, resolve_node, resolve_store_location
+
+        store_id = arguments.get("store_id", "")
+
+        location = resolve_store_location(store_id)
+        if location is None:
+            error = ToolOutput(status="error", content=f'Store "{store_id}" not found.', content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        directory, root_id = location
+        store = load_store(directory, root_id)
+        if store is None:
+            error = ToolOutput(status="error", content=f'Store file not found: "{root_id}".', content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        node = resolve_node(store, store_id)
+        if node is None and store_id == store.store_id:
+            collected = self._collect_files(store.children, store.store_id)
+        elif node is not None:
+            collected = self._collect_files(node.children, store_id)
+            if node.files:
+                collected.insert(0, (store_id, node.timestamp or "", node.label or "", list(node.files)))
+        else:
+            error = ToolOutput(status="error", content=f"Node not found: {store_id}", content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        if not collected:
+            content = f"No files attached to any node in '{store_id}'."
+        else:
+            total_files = sum(len(files) for _, _, _, files in collected)
+            lines = [f"**{total_files} files across {len(collected)} nodes in '{store_id}':**", ""]
+            for node_path, timestamp, label, files in collected:
+                date = timestamp[:10] if timestamp else "unknown"
+                label_part = f' — "{_truncate_label(label, 60)}"' if label else ""
+                lines.append(f"**{node_path}**{label_part} — {date}")
+                for f in files:
+                    lines.append(f"  {f}")
+                lines.append("")
+            content = "\n".join(lines)
+
+        tool_output = ToolOutput(status="success", content=content, content_type="text")
+        return [TextContent(type="text", text=tool_output.model_dump_json())]
+
+
+# ---------------------------------------------------------------------------
+# ctxfileread
+# ---------------------------------------------------------------------------
+
+
+class CtxFileReadTool(BaseTool):
+    def get_name(self) -> str:
+        return "ctxfileread"
+
+    def get_description(self) -> str:
+        return (
+            "Read the content of a specific file as stored in a context store node. "
+            "Extracts from the stored content blob, falling back to reading from disk. "
+            "Use ctxfilelist to discover which files are attached to which nodes."
+        )
+
+    def get_input_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "store_id": {
+                    "type": "string",
+                    "description": STORE_ID_DESCRIPTION,
+                },
+                "file_path": {
+                    "type": "string",
+                    "description": "Absolute path of the file to read (must match a path in the node's files list).",
+                },
+            },
+            "required": ["store_id", "file_path"],
+            "additionalProperties": False,
+        }
+
+    def get_annotations(self) -> dict:
+        return {"readOnlyHint": True, "idempotentHint": True, "openWorldHint": False}
+
+    def get_system_prompt(self) -> str:
+        return ""
+
+    def get_request_model(self):
+        return ToolRequest
+
+    def requires_model(self) -> bool:
+        return False
+
+    def get_model_category(self):
+        from tools.models import ToolModelCategory
+
+        return ToolModelCategory.FAST_RESPONSE
+
+    async def prepare_prompt(self, _request: ToolRequest) -> str:
+        return ""
+
+    def format_response(self, response: str, _request: ToolRequest, _model_info: Optional[dict] = None) -> str:
+        return response
+
+    def _find_nodes_with_file(self, nodes: dict, parent_path: str, file_path: str) -> list[tuple[str, str, "Any"]]:
+        """Recursively find nodes referencing file_path. Returns (node_path, timestamp, node)."""
+        from utils.context_store import StoreNode
+
+        results: list[tuple[str, str, StoreNode]] = []
+        for key in sorted(nodes, key=_natural_sort_key):
+            node = nodes[key]
+            full_path = f"{parent_path}.{key}"
+            if node.files and file_path in node.files:
+                results.append((full_path, node.timestamp or "", node))
+            if node.children:
+                results.extend(self._find_nodes_with_file(node.children, full_path, file_path))
+        return results
+
+    def _extract_file_from_blob(self, content_blob: str, file_path: str) -> Optional[str]:
+        """Extract a single file's content from the node content blob."""
+        pattern = (
+            r"--- BEGIN FILE: "
+            + re.escape(file_path)
+            + r" \(Last modified:.*?\) ---\n"
+            + r"(.*?)\n"
+            + r"--- END FILE: "
+            + re.escape(file_path)
+            + r" ---"
+        )
+        match = re.search(pattern, content_blob, re.DOTALL)
+        if match:
+            return match.group(1)
+        return None
+
+    async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
+        from tools.models import ToolOutput
+        from utils.context_store import load_store, resolve_node, resolve_store_location
+
+        store_id = arguments.get("store_id", "")
+        file_path = arguments.get("file_path", "")
+
+        if not file_path:
+            error = ToolOutput(status="error", content="file_path is required.", content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        location = resolve_store_location(store_id)
+        if location is None:
+            error = ToolOutput(status="error", content=f'Store "{store_id}" not found.', content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        directory, root_id = location
+        store = load_store(directory, root_id)
+        if store is None:
+            error = ToolOutput(status="error", content=f'Store file not found: "{root_id}".', content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        # Search from root or subtree
+        node = resolve_node(store, store_id)
+        if node is None and store_id == store.store_id:
+            matches = self._find_nodes_with_file(store.children, store.store_id, file_path)
+        elif node is not None:
+            matches = self._find_nodes_with_file(node.children, store_id, file_path)
+            if node.files and file_path in node.files:
+                matches.insert(0, (store_id, node.timestamp or "", node))
+        else:
+            error = ToolOutput(status="error", content=f"Node not found: {store_id}", content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        if not matches:
+            error = ToolOutput(
+                status="error",
+                content=f"File '{file_path}' not found in any node under '{store_id}'. Use ctxfilelist to discover attached files.",
+                content_type="text",
+            )
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        # Use most recent node
+        matches.sort(key=lambda m: m[1], reverse=True)
+        node_path, timestamp, target_node = matches[0]
+
+        # Try extracting from content blob
+        extracted = None
+        if target_node.content:
+            extracted = self._extract_file_from_blob(target_node.content, file_path)
+
+        source = "store"
+        if extracted is None:
+            # Fall back to reading from disk
+            try:
+                with open(file_path, encoding="utf-8", errors="replace") as f:
+                    extracted = f.read()
+                source = "disk"
+            except OSError as e:
+                error = ToolOutput(
+                    status="error",
+                    content=f"File content not in store blob and cannot read from disk: {e}",
+                    content_type="text",
+                )
+                return [TextContent(type="text", text=error.model_dump_json())]
+
+        header = f"# {os.path.basename(file_path)}\n\n"
+        header += f"**Source:** {source} (node {node_path}, {timestamp[:10] if timestamp else 'unknown'})\n"
+        header += f"**Path:** {file_path}\n"
+        if len(matches) > 1:
+            other_nodes = ", ".join(m[0] for m in matches[1:])
+            header += f"**Also in:** {other_nodes}\n"
+        header += "\n---\n\n"
+
+        content = header + extracted
+
+        tool_output = ToolOutput(
+            status="success",
+            content=content,
+            content_type="text",
+            metadata={"store_id": store_id, "file_path": file_path, "source": source, "node_path": node_path},
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]

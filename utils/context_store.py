@@ -221,6 +221,20 @@ def get_last_layer_path(store: StoreRoot) -> str | None:
     return f"{store.store_id}.L{count}"
 
 
+def resolve_root_alias(store: StoreRoot, store_id: str) -> str:
+    """Resolve root store_id alias to the current top layer path.
+
+    Root store_id is shorthand for the latest L-child. Returns store_id
+    unchanged if it's not the root. Raises KeyError if root has no layers.
+    """
+    if store_id != store.store_id:
+        return store_id
+    last = get_last_layer_path(store)
+    if last is None:
+        raise KeyError("Store has no layers. Use ctxstore to add context first.")
+    return last
+
+
 def get_next_key(store: StoreRoot, parent_path: str, prefix: str) -> str:
     """Compute the next available child key for a given prefix at parent_path.
 

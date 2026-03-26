@@ -545,26 +545,17 @@ class CtxQueryTool(ContextBaseTool):
             error = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        from utils.context_store import resolve_node
+        from utils.context_store import resolve_node, resolve_root_alias
+
+        try:
+            store_id = resolve_root_alias(store, store_id)
+        except KeyError as exc:
+            error = ToolOutput(status="error", content=str(exc), content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
 
         node = resolve_node(store, store_id)
 
-        if node is None and store_id == store.store_id:
-            # Root is an alias for the current top layer
-            from utils.context_store import get_last_layer_path
-
-            last = get_last_layer_path(store)
-            if last is None:
-                error = ToolOutput(
-                    status="error",
-                    content="Store has no layers to query. Use ctxstore to add context first.",
-                    content_type="text",
-                )
-                return [TextContent(type="text", text=error.model_dump_json())]
-            self._parent_path = last
-            self._child_prefix = "Q"
-            self._child_entry_type = "query"
-        elif node is not None and node.entry_type in ("store", "fork", "query", "tool"):
+        if node is not None and node.entry_type in ("store", "fork", "query", "tool"):
             self._parent_path = store_id
             self._child_prefix = "Q"
             self._child_entry_type = "query"
@@ -749,19 +740,13 @@ class CtxForkTool(BaseTool):
             error = ToolOutput(status="error", content=f'Store file not found: "{root_id}".', content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        # Root is an alias for the current top layer
-        if store_id == store.store_id:
-            from utils.context_store import get_last_layer_path
+        from utils.context_store import resolve_root_alias
 
-            last = get_last_layer_path(store)
-            if last is None:
-                error = ToolOutput(
-                    status="error",
-                    content="Store has no layers to fork from. Use ctxstore to add context first.",
-                    content_type="text",
-                )
-                return [TextContent(type="text", text=error.model_dump_json())]
-            store_id = last
+        try:
+            store_id = resolve_root_alias(store, store_id)
+        except KeyError as exc:
+            error = ToolOutput(status="error", content=str(exc), content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
 
         next_key = get_next_key(store, store_id, "F")
         fork_node = StoreNode(
@@ -970,27 +955,23 @@ class CtxReadTool(BaseTool):
             error = ToolOutput(status="error", content=f'Store file not found: "{root_id}".', content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
+        from utils.context_store import resolve_root_alias
+
+        try:
+            store_id = resolve_root_alias(store, store_id)
+        except KeyError as exc:
+            error = ToolOutput(status="error", content=str(exc), content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
         node = resolve_node(store, store_id)
 
         if node is None:
-            if store_id == store.store_id:
-                lines = [
-                    f"# {store_id}",
-                    "",
-                    "**Type:** store root",
-                    f"**Directory:** {store.directory}",
-                    f"**Created:** {store.created_at}",
-                ]
-                if store.label:
-                    lines.append(f"**Label:** {store.label}")
-                content = "\n".join(lines)
-            else:
-                error = ToolOutput(
-                    status="error",
-                    content=f"Node not found: {store_id}",
-                    content_type="text",
-                )
-                return [TextContent(type="text", text=error.model_dump_json())]
+            error = ToolOutput(
+                status="error",
+                content=f"Node not found: {store_id}",
+                content_type="text",
+            )
+            return [TextContent(type="text", text=error.model_dump_json())]
         else:
             lines = [f"# {store_id}", ""]
             if node.label:

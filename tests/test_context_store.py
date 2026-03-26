@@ -22,6 +22,7 @@ from utils.context_store import (
     parse_store_path,
     rebuild_index,
     resolve_node,
+    resolve_root_alias,
     resolve_store_location,
     save_store,
     update_index,
@@ -1215,3 +1216,27 @@ class TestGetLastLayerPath:
         store.children["L5"] = _make_node()
         # count is 2, so returns L2 — assumes contiguous numbering
         assert get_last_layer_path(store) == "mystore.L2"
+
+
+# ---------------------------------------------------------------------------
+# TestResolveRootAlias
+# ---------------------------------------------------------------------------
+
+
+class TestResolveRootAlias:
+    def test_non_root_passes_through(self, ctx_env):
+        store = _make_root()
+        store.children["L1"] = _make_node()
+        assert resolve_root_alias(store, "mystore.L1") == "mystore.L1"
+
+    def test_root_resolves_to_last_layer(self, ctx_env):
+        store = _make_root()
+        store.children["L1"] = _make_node()
+        store.children["L2"] = _make_node()
+        store.children["L3"] = _make_node()
+        assert resolve_root_alias(store, "mystore") == "mystore.L3"
+
+    def test_root_with_no_layers_raises(self, ctx_env):
+        store = _make_root()
+        with pytest.raises(KeyError, match="no layers"):
+            resolve_root_alias(store, "mystore")

@@ -225,13 +225,13 @@ def resolve_root_alias(store: StoreRoot, store_id: str) -> str:
     """Resolve root store_id alias to the current top layer path.
 
     Root store_id is shorthand for the latest L-child. Returns store_id
-    unchanged if it's not the root. Raises KeyError if root has no layers.
+    unchanged if it's not the root, or if the root has no layers yet.
     """
     if store_id != store.store_id:
         return store_id
     last = get_last_layer_path(store)
     if last is None:
-        raise KeyError("Store has no layers. Use ctxstore to add context first.")
+        return store_id
     return last
 
 

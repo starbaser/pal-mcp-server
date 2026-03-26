@@ -1164,6 +1164,15 @@ class BaseWorkflowMixin(ABC):
                     "provider_used": provider_name,
                 }
 
+                context_window = arguments.get("_context_window")
+                context_used = arguments.get("_context_used")
+                if context_window is not None or context_used is not None:
+                    _window = context_window or 0
+                    _used = context_used or 0
+                    metadata["context_window"] = _window
+                    metadata["context_used"] = _used
+                    metadata["context_remaining"] = _window - _used
+
                 # Preserve existing metadata and add workflow metadata
                 if "metadata" not in response_data:
                     response_data["metadata"] = {}
@@ -1504,6 +1513,12 @@ class BaseWorkflowMixin(ABC):
                 thinking_mode=self.get_request_thinking_mode(request),
                 media=list(set(self.consolidated_findings.media)) if self.consolidated_findings.media else None,
             )
+
+            _usage = model_response.usage if model_response.usage else {}
+            _api_input = _usage.get("input_tokens", 0)
+            _api_output = _usage.get("output_tokens", 0)
+            if _api_input or _api_output:
+                arguments["_context_used"] = _api_input + _api_output
 
             if model_response.content:
                 content = model_response.content.strip()

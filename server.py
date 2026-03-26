@@ -853,10 +853,7 @@ def _resolve_store_continuation(tool_name: str, arguments: dict) -> str | None:
 
     from utils.context_store import resolve_root_alias
 
-    try:
-        continuation_id = resolve_root_alias(store, continuation_id)
-    except KeyError:
-        return None
+    continuation_id = resolve_root_alias(store, continuation_id)
 
     node = resolve_node(store, continuation_id)
 

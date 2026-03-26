@@ -1236,7 +1236,6 @@ class TestResolveRootAlias:
         store.children["L3"] = _make_node()
         assert resolve_root_alias(store, "mystore") == "mystore.L3"
 
-    def test_root_with_no_layers_raises(self, ctx_env):
+    def test_root_with_no_layers_returns_passthrough(self, ctx_env):
         store = _make_root()
-        with pytest.raises(KeyError, match="no layers"):
-            resolve_root_alias(store, "mystore")
+        assert resolve_root_alias(store, "mystore") == "mystore"

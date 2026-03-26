@@ -11,7 +11,6 @@ from typing import Any, Optional
 from mcp.types import TextContent
 from pydantic import Field
 
-from config import TEMPERATURE_ANALYTICAL
 from systemprompts import CONTEXT_PROMPT
 from tools.shared.base_models import COMMON_FIELD_DESCRIPTIONS, ToolRequest
 
@@ -134,7 +133,7 @@ class ContextBaseTool(SimpleTool):
         return ToolModelCategory.EXTENDED_REASONING
 
     def get_default_temperature(self) -> float:
-        return TEMPERATURE_ANALYTICAL
+        return 0.0
 
     def get_default_thinking_mode(self) -> str:
         return "max"
@@ -383,6 +382,7 @@ class CtxStoreTool(ContextBaseTool):
 
         arguments.pop("continuation_id", None)
         arguments["thinking_mode"] = "max"
+        arguments["temperature"] = 0
 
         return await super().execute(arguments)
 
@@ -482,9 +482,9 @@ class CtxQueryTool(ContextBaseTool):
 
     def get_description(self) -> str:
         return (
-            "Query a context store, sending stored layers to an external model and returning its response. "
-            "Safe to call multiple times — each query is recorded as a child node and a new store_id is returned. "
-            "Use ctxlist to discover store_ids; use ctxstore to add context before querying."
+            "Ask a question against a context store — sends all stored layers to an external model for analysis. "
+            "Use for targeted questions, not context revival. Each query is recorded as a child node. "
+            "For context revival, prefer ctxread (metadata + summary) + ctxfilelist → ctxfileread (selective file content)."
         )
 
     def get_request_model(self):
@@ -587,6 +587,7 @@ class CtxQueryTool(ContextBaseTool):
 
         arguments.pop("continuation_id", None)
         arguments["thinking_mode"] = "max"
+        arguments["temperature"] = 0
 
         return await super().execute(arguments)
 
@@ -898,8 +899,9 @@ class CtxReadTool(BaseTool):
 
     def get_description(self) -> str:
         return (
-            "Read the full content of a single context store node — prompt, response, metadata, and attached files. "
-            "Use ctxlist to discover available store_ids and node paths before reading."
+            "Read a context store node's metadata, prompt, and response — the primary tool for context revival. "
+            "Returns label, model, timestamp, file list, prompt text, and response text. "
+            "After reading, use ctxfilelist to see attached files, then ctxfileread to selectively load relevant ones."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -1436,8 +1438,8 @@ class CtxFileListTool(BaseTool):
     def get_description(self) -> str:
         return (
             "List all files attached across a context store tree, grouped by node. "
-            "Shows which files were seeded into each layer. "
-            "Use ctxlist to find store_ids; use ctxfileread to retrieve stored file content."
+            "Shows which files were seeded into each layer with timestamps and labels. "
+            "Part of the context revival flow: ctxread → ctxfilelist → ctxfileread on context-relevant files."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -1545,9 +1547,9 @@ class CtxFileReadTool(BaseTool):
 
     def get_description(self) -> str:
         return (
-            "Read the content of a specific file as stored in a context store node. "
-            "Extracts from the stored content blob, falling back to reading from disk. "
-            "Use ctxfilelist to discover which files are attached to which nodes."
+            "Read a specific file from a context store node's stored content blob (falls back to disk). "
+            "Use after ctxfilelist to selectively load only the files relevant to the current task. "
+            "This targeted approach avoids the token cost of ctxquery, which sends all layers to an external model."
         )
 
     def get_input_schema(self) -> dict[str, Any]:

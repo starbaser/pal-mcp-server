@@ -102,7 +102,7 @@ Models are resolved early at the MCP boundary in `handle_call_tool()`:
 
 Tools declare their preferred model tier via `get_model_category()` → `ToolModelCategory`:
 - `EXTENDED_REASONING` — most tools (codereview, debug, analyze, thinkdeep, ctxstore, ctxquery, etc.)
-- `FAST_RESPONSE` — chat, listmodels, version, ctxlist, ctxread, ctxarm, ctxfork, ctxinit, ctxrename, ctxexport
+- `FAST_RESPONSE` — chat, listmodels, version, ctxlist, ctxread, ctxarm, ctxfork, ctxinit, ctxrename, ctxexport, ctxfilelist, ctxfileread
 - `BALANCED` — perceive, clink
 - `IMAGE_GENERATION` — imagegen
 
@@ -127,7 +127,8 @@ Tools that override `requires_model() → False` bypass model resolution entirel
 **Context Tools** (`tools/context.py`) have a split inheritance:
 ```
 BaseTool (direct) ─── CtxInitTool, CtxForkTool, CtxListTool, CtxReadTool,
-                      CtxArmTool, CtxRenameTool, CtxExportTool
+                      CtxArmTool, CtxRenameTool, CtxExportTool,
+                      CtxFileListTool, CtxFileReadTool
                       (requires_model=False, pure filesystem)
 
 SimpleTool → ContextBaseTool ─── CtxStoreTool, CtxQueryTool

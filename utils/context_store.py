@@ -264,6 +264,76 @@ def get_next_key(store: StoreRoot, parent_path: str, prefix: str) -> str:
     raise ValueError(f"Unsupported prefix for get_next_key: {prefix!r}")
 
 
+def _get_key_prefix(key: str) -> str:
+    """Extract the alpha prefix from a node key. Returns '' for pure-numeric keys."""
+    m = re.match(r"^([A-Za-z]+)", key)
+    return m.group(1) if m else ""
+
+
+def _get_key_index(key: str) -> int:
+    """Extract the trailing integer from a node key."""
+    m = re.search(r"(\d+)$", key)
+    if m is None:
+        raise ValueError(f"Key has no trailing integer: {key!r}")
+    return int(m.group(1))
+
+
+def delete_node_with_shift(store: StoreRoot, node_path: str) -> dict:
+    """Delete a node and shift subsequent same-prefix siblings down by one.
+
+    Accepts a full dot-path like 'myproject.L5' or 'myproject.L2.F1'.
+    Returns a dict with:
+      - deleted: the full path that was removed
+      - shifted: list of (old_path, new_path) tuples
+      - had_children: bool
+
+    Raises KeyError if the node does not exist.
+    Raises ValueError if the path resolves to a root (no segments).
+    """
+    _, segments = parse_store_path(node_path)
+    if not segments:
+        raise ValueError(f"Cannot delete root store: {node_path}")
+
+    target_key = segments[-1]
+
+    if len(segments) == 1:
+        parent_container = store.children
+        parent_path = store.store_id
+    else:
+        parent_path_str = f"{store.store_id}.{'.'.join(segments[:-1])}"
+        parent_node = resolve_node(store, parent_path_str)
+        if parent_node is None:
+            raise KeyError(f"Parent path not found: {parent_path_str}")
+        parent_container = parent_node.children
+        parent_path = parent_path_str
+
+    if target_key not in parent_container:
+        raise KeyError(f"Node not found: {node_path}")
+
+    had_children = bool(parent_container[target_key].children)
+
+    prefix = _get_key_prefix(target_key)
+    target_index = _get_key_index(target_key)
+
+    pattern = re.compile(rf"^{re.escape(prefix)}(\d+)$") if prefix else re.compile(r"^(\d+)$")
+    higher_keys = sorted(
+        [k for k in parent_container if pattern.match(k) and _get_key_index(k) > target_index],
+        key=_get_key_index,
+    )
+
+    del parent_container[target_key]
+
+    shifted: list[tuple[str, str]] = []
+    for old_key in higher_keys:
+        old_index = _get_key_index(old_key)
+        new_key = f"{prefix}{old_index - 1}"
+        node = parent_container.pop(old_key)
+        parent_container[new_key] = node
+        shifted.append((f"{parent_path}.{old_key}", f"{parent_path}.{new_key}"))
+
+    return {"deleted": node_path, "shifted": shifted, "had_children": had_children}
+
+
 # ---------------------------------------------------------------------------
 # Index operations
 # ---------------------------------------------------------------------------

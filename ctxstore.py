@@ -1,12 +1,13 @@
-# PAL Context Store REPL — paste into a Python REPL
-# Full filesystem access, no LLM calls
+# PAL Context Store — IPython interface
+# %run ctxstore.py  or  exec(open("ctxstore.py").read())
 
-import sys, os, json, tempfile, re
+import json, os, re, tempfile
 from datetime import datetime, timezone
 from typing import Literal
+
 from pydantic import BaseModel
 
-# --- Storage config ---
+# ── Storage config ──────────────────────────────────────────────────────────
 PAL_STORAGE_DIR = os.environ.get("PAL_STORAGE_DIR") or os.path.join(
     os.environ.get("CLAUDE_CONFIG_DIR", os.path.expanduser("~/.claude")), "pal"
 )
@@ -14,7 +15,8 @@ CTX_DIR = os.path.join(PAL_STORAGE_DIR, "context")
 INDEX_PATH = os.path.join(CTX_DIR, "store-index.json")
 ARMED_PATH = os.path.join(CTX_DIR, "armed.json")
 
-# --- Data models ---
+
+# ── Data models ─────────────────────────────────────────────────────────────
 class StoreNode(BaseModel):
     entry_type: Literal["store", "query", "tool", "fork"]
     label: str | None = None
@@ -27,6 +29,7 @@ class StoreNode(BaseModel):
     tool_name: str | None = None
     children: dict[str, "StoreNode"] = {}
 
+
 class StoreRoot(BaseModel):
     store_id: str
     directory: str
@@ -34,7 +37,8 @@ class StoreRoot(BaseModel):
     created_at: str
     children: dict[str, StoreNode] = {}
 
-# --- Atomic write ---
+
+# ── Internals ───────────────────────────────────────────────────────────────
 def _atomic_write(path, data):
     d = os.path.dirname(path)
     os.makedirs(d, exist_ok=True)
@@ -44,18 +48,21 @@ def _atomic_write(path, data):
         tmp_path = tmp.name
     os.rename(tmp_path, path)
 
-# --- Path helpers ---
-def encode_directory(p):
+
+def _encode_directory(p):
     return p.replace("/", "-").replace(".", "-")
 
-def get_store_dir(directory):
-    return os.path.join(CTX_DIR, encode_directory(directory))
 
-def get_store_path(directory, store_id):
-    return os.path.join(get_store_dir(directory), f"{store_id}.json")
+def _get_store_dir(directory):
+    return os.path.join(CTX_DIR, _encode_directory(directory))
 
-# --- Index ---
-def load_index():
+
+def _get_store_path(directory, store_id):
+    return os.path.join(_get_store_dir(directory), f"{store_id}.json")
+
+
+# ── Index ───────────────────────────────────────────────────────────────────
+def _load_index():
     if not os.path.exists(INDEX_PATH):
         os.makedirs(CTX_DIR, exist_ok=True)
         return {"directories": {}, "stores": {}}
@@ -68,31 +75,36 @@ def load_index():
     except (json.JSONDecodeError, OSError):
         return {"directories": {}, "stores": {}}
 
-def save_index(data):
+
+def _save_index(data):
     _atomic_write(INDEX_PATH, data)
 
-def update_index(directory, store_id):
-    index = load_index()
-    index["directories"][directory] = encode_directory(directory)
-    index["stores"][store_id] = encode_directory(directory)
-    save_index(index)
 
-# --- Store I/O ---
-def load_store(directory, store_id):
-    path = get_store_path(directory, store_id)
+def _update_index(directory, store_id):
+    index = _load_index()
+    index["directories"][directory] = _encode_directory(directory)
+    index["stores"][store_id] = _encode_directory(directory)
+    _save_index(index)
+
+
+# ── Store I/O ───────────────────────────────────────────────────────────────
+def _load_store(directory, store_id):
+    path = _get_store_path(directory, store_id)
     if not os.path.exists(path):
         return None
     with open(path) as f:
         return StoreRoot.model_validate(json.load(f))
 
-def save_store(store):
-    _atomic_write(get_store_path(store.directory, store.store_id), store)
 
-# --- Parse / resolve ---
-def parse_store_path(store_id):
+def _save_store(store):
+    _atomic_write(_get_store_path(store.directory, store.store_id), store)
+
+
+# ── Parse / resolve ─────────────────────────────────────────────────────────
+def _parse_store_path(store_id):
     if "." not in store_id:
         return store_id, []
-    index = load_index()
+    index = _load_index()
     parts = store_id.split(".")
     for i in range(len(parts), 0, -1):
         candidate = ".".join(parts[:i])
@@ -100,19 +112,21 @@ def parse_store_path(store_id):
             return candidate, parts[i:]
     return parts[0], parts[1:]
 
-def resolve_store_location(store_id):
-    root, _ = parse_store_path(store_id)
-    index = load_index()
+
+def _resolve_store_location(store_id):
+    root, _ = _parse_store_path(store_id)
+    index = _load_index()
     encoded = index["stores"].get(root)
     if encoded:
         directory = next((d for d, e in index["directories"].items() if e == encoded), None)
-        if directory and os.path.exists(get_store_path(directory, root)):
+        if directory and os.path.exists(_get_store_path(directory, root)):
             return directory, root
     return None
 
-# --- Tree navigation ---
-def resolve_node(store, store_id):
-    _, segments = parse_store_path(store_id)
+
+# ── Tree navigation ─────────────────────────────────────────────────────────
+def _resolve_node(store, store_id):
+    _, segments = _parse_store_path(store_id)
     if not segments:
         return None
     current = store.children
@@ -124,8 +138,9 @@ def resolve_node(store, store_id):
         current = node.children
     return node
 
-def walk_ancestry(store, store_id):
-    _, segments = parse_store_path(store_id)
+
+def _walk_ancestry(store, store_id):
+    _, segments = _parse_store_path(store_id)
     if not segments:
         return []
     ancestry = []
@@ -138,11 +153,19 @@ def walk_ancestry(store, store_id):
         current = node.children
     return ancestry
 
-def get_next_key(store, parent_path, prefix):
+
+def _get_last_layer_path(store):
+    count = sum(1 for k in store.children if k.startswith("L") and k[1:].isdigit())
+    if not count:
+        return None
+    return f"{store.store_id}.L{count}"
+
+
+def _get_next_key(store, parent_path, prefix):
     if parent_path == store.store_id:
         siblings = store.children
     else:
-        parent = resolve_node(store, parent_path)
+        parent = _resolve_node(store, parent_path)
         siblings = parent.children if parent else {}
     if prefix == "":
         nums = [int(k) for k in siblings if re.fullmatch(r"\d+", k)]
@@ -154,26 +177,28 @@ def get_next_key(store, parent_path, prefix):
         return f"{prefix}{max(indices) + 1}" if indices else f"{prefix}{start}"
     raise ValueError(f"Unsupported prefix: {prefix!r}")
 
-def add_child(store, parent_path, child_key, node):
+
+def _add_child(store, parent_path, child_key, node):
     if parent_path == store.store_id:
         store.children[child_key] = node
     else:
-        parent = resolve_node(store, parent_path)
+        parent = _resolve_node(store, parent_path)
         if parent is None:
             raise KeyError(f"parent not found: {parent_path}")
         parent.children[child_key] = node
     return f"{parent_path}.{child_key}"
 
-# --- Listing ---
-def list_stores(directory=None):
+
+# ── Listing ─────────────────────────────────────────────────────────────────
+def _list_stores(directory=None):
     if directory is not None:
-        folder = get_store_dir(directory)
+        folder = _get_store_dir(directory)
         if not os.path.isdir(folder):
             return []
         roots = []
         for e in os.scandir(folder):
             if e.name.endswith(".json"):
-                s = load_store(directory, e.name[:-5])
+                s = _load_store(directory, e.name[:-5])
                 if s:
                     roots.append(s)
         return roots
@@ -193,12 +218,14 @@ def list_stores(directory=None):
                 continue
     return results
 
-def list_all_directories():
-    index = load_index()
+
+def _list_all_directories():
+    index = _load_index()
     return sorted(index["directories"].keys())
 
-# --- Armed state ---
-def load_armed():
+
+# ── Armed state ─────────────────────────────────────────────────────────────
+def _load_armed():
     if not os.path.exists(ARMED_PATH):
         return {}
     try:
@@ -207,18 +234,9 @@ def load_armed():
     except Exception:
         return {}
 
-def arm_store(directory, store_id):
-    armed = load_armed()
-    armed[directory] = store_id
-    _atomic_write(ARMED_PATH, armed)
 
-def disarm_store(directory):
-    armed = load_armed()
-    armed.pop(directory, None)
-    _atomic_write(ARMED_PATH, armed)
-
-# --- Context reconstruction (no LLM) ---
-def build_context_from_ancestry(ancestors, include_files=True):
+# ── Context reconstruction ──────────────────────────────────────────────────
+def _build_context(ancestors, include_files=True):
     nodes = [n for n in ancestors if n.entry_type != "fork" and n.prompt and n.response]
     if not nodes:
         return ""
@@ -229,7 +247,7 @@ def build_context_from_ancestry(ancestors, include_files=True):
     if include_files:
         files = []
         for n in nodes:
-            for f in (n.files or []):
+            for f in n.files or []:
                 if f not in files:
                     files.append(f)
         if files:
@@ -239,107 +257,212 @@ def build_context_from_ancestry(ancestors, include_files=True):
     parts.append("=== END CONVERSATION HISTORY ===")
     return "\n".join(parts)
 
-# --- Convenience: create a new store ---
-def create_store(store_id, directory, label=None):
-    if "." in store_id:
-        raise ValueError("Store names cannot contain dots")
-    store = StoreRoot(
-        store_id=store_id,
-        directory=directory,
-        label=label,
-        created_at=datetime.now(timezone.utc).isoformat(),
-    )
-    save_store(store)
-    update_index(directory, store_id)
-    return store
 
-# --- Convenience: add a layer ---
-def add_layer(store_id, prompt, response, files=None, label=None, model=None):
-    loc = resolve_store_location(store_id)
-    if loc is None:
-        raise KeyError(f"Store not found: {store_id}")
-    directory, root_id = loc
-    store = load_store(directory, root_id)
-    now = datetime.now(timezone.utc).isoformat()
-    file_blobs = ""
-    if files:
-        parts = ["=== CONTEXT FILES ==="]
-        for fp in files:
-            try:
-                with open(fp) as f:
-                    content = f.read()
-                parts.append(f"--- BEGIN FILE: {fp} ---")
-                parts.append(content)
-                parts.append(f"--- END FILE: {fp} ---")
-            except OSError as e:
-                parts.append(f"--- BEGIN FILE: {fp} (ERROR: {e}) ---")
-                parts.append(f"--- END FILE: {fp} ---")
-        file_blobs = "\n".join(parts) + "\n\n"
-    full_content = f"{file_blobs}{prompt}\n\n---\n\n{response}"
-    node = StoreNode(
-        entry_type="store", label=label, timestamp=now, model=model,
-        files=files or [], prompt=prompt, response=response, content=full_content,
-    )
-    key = get_next_key(store, store_id, "L")
-    full_path = add_child(store, store_id, key, node)
-    save_store(store)
-    return full_path
+# ── Tree rendering ──────────────────────────────────────────────────────────
+_TYPE_GLYPHS = {"store": "\033[34mL\033[0m", "query": "\033[33mQ\033[0m", "fork": "\033[35mF\033[0m", "tool": "\033[36mT\033[0m"}
+_DIM = "\033[2m"
+_BOLD = "\033[1m"
+_RST = "\033[0m"
+_CYAN = "\033[36m"
+_GREEN = "\033[32m"
+_YELLOW = "\033[33m"
 
-# --- Convenience: add a fork ---
-def add_fork(store_id, label=None):
-    loc = resolve_store_location(store_id)
-    if loc is None:
-        raise KeyError(f"Store not found: {store_id}")
-    directory, root_id = loc
-    store = load_store(directory, root_id)
-    node = StoreNode(
-        entry_type="fork", label=label,
-        timestamp=datetime.now(timezone.utc).isoformat(),
-    )
-    key = get_next_key(store, store_id, "F")
-    full_path = add_child(store, store_id, key, node)
-    save_store(store)
-    return full_path
 
-# --- Pretty print tree ---
-def print_tree(store_id=None, directory=None):
-    if store_id:
-        loc = resolve_store_location(store_id)
-        if not loc:
-            print(f"Store not found: {store_id}")
-            return
-        directory, root_id = loc
-        stores = [load_store(directory, root_id)]
-    else:
-        stores = list_stores(directory)
-    for store in stores:
-        if store is None:
-            continue
-        print(f"■ {store.store_id}  ({store.directory})")
-        if store.label:
-            print(f"  label: {store.label}")
-        print(f"  created: {store.created_at}")
-        _print_children(store.children, indent=2)
-        print()
-
-def _print_children(children, indent):
-    for key, node in children.items():
-        typ = {"store": "L", "query": "Q", "fork": "F", "tool": "T"}.get(node.entry_type, "?")
-        lbl = f' "{node.label}"' if node.label else ""
-        mdl = f" [{node.model}]" if node.model else ""
-        nf = f" ({len(node.files)} files)" if node.files else ""
-        plen = len(node.prompt)
-        rlen = len(node.response)
-        sz = f" p:{plen} r:{rlen}" if plen or rlen else ""
-        print(f"{' ' * indent}├─ {key} ({typ}){lbl}{mdl}{nf}{sz}")
+def _render_children(children, indent=2):
+    lines = []
+    keys = list(children.keys())
+    for i, key in enumerate(keys):
+        node = children[key]
+        last = i == len(keys) - 1
+        branch = "└─" if last else "├─"
+        glyph = _TYPE_GLYPHS.get(node.entry_type, "?")
+        lbl = f' {_DIM}"{node.label}"{_RST}' if node.label else ""
+        mdl = f" {_CYAN}[{node.model}]{_RST}" if node.model else ""
+        nf = f" {_GREEN}({len(node.files)} files){_RST}" if node.files else ""
+        plen, rlen = len(node.prompt), len(node.response)
+        sz = f" {_DIM}p:{plen} r:{rlen}{_RST}" if plen or rlen else ""
+        lines.append(f"{' ' * indent}{branch} {key} ({glyph}){lbl}{mdl}{nf}{sz}")
         if node.children:
-            _print_children(node.children, indent + 4)
+            lines += _render_children(node.children, indent + 4)
+    return lines
 
-# --- Ready ---
-print(f"CTX_DIR: {CTX_DIR}")
-print(f"Stores: {len(list_stores())}")
-print(f"Directories: {list_all_directories()}")
-print()
-print("Functions: create_store, load_store, save_store, add_layer, add_fork,")
-print("  resolve_store_location, resolve_node, walk_ancestry, build_context_from_ancestry,")
-print("  list_stores, list_all_directories, print_tree, arm_store, disarm_store, load_armed")
+
+def _render_store(store):
+    armed = _load_armed()
+    armed_marker = f" {_YELLOW}[armed]{_RST}" if armed.get(store.directory) == store.store_id else ""
+    lines = [
+        f"{_BOLD}■ {store.store_id}{_RST}  {_DIM}{store.directory}{_RST}{armed_marker}",
+    ]
+    if store.label:
+        lines.append(f"  {_DIM}label: {store.label}{_RST}")
+    lines.append(f"  {_DIM}created: {store.created_at}{_RST}")
+    lines += _render_children(store.children)
+    return "\n".join(lines)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Public API — tab-completable namespace
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class Ctx:
+    """PAL context store interface. Use `ctx.<tab>` to explore."""
+
+    # ── read ────────────────────────────────────────────────────────────────
+
+    def stores(self, directory=None):
+        """List all stores, optionally filtered by directory."""
+        return _list_stores(directory)
+
+    def directories(self):
+        """List all directories with stores."""
+        return _list_all_directories()
+
+    def load(self, store_id):
+        """Load a store by ID. Returns (StoreRoot, directory) or raises."""
+        loc = _resolve_store_location(store_id)
+        if loc is None:
+            raise KeyError(f"Store not found: {store_id}")
+        directory, root_id = loc
+        store = _load_store(directory, root_id)
+        if store is None:
+            raise KeyError(f"Store file missing: {root_id}")
+        return store
+
+    def node(self, store_id):
+        """Resolve a dotted path to its StoreNode (None for root)."""
+        store = self.load(store_id)
+        return _resolve_node(store, store_id)
+
+    def ancestry(self, store_id):
+        """Walk ancestor nodes from root to store_id."""
+        store = self.load(store_id)
+        return _walk_ancestry(store, store_id)
+
+    def history(self, store_id, include_files=True):
+        """Reconstruct conversation history string from ancestry."""
+        return _build_context(self.ancestry(store_id), include_files)
+
+    def read(self, store_id):
+        """Read a node's prompt and response."""
+        node = self.node(store_id)
+        if node is None:
+            store = self.load(store_id)
+            print(f"Root: {store.store_id}  dir: {store.directory}  created: {store.created_at}")
+            print(f"Children: {list(store.children.keys())}")
+            return
+        print(f"type: {node.entry_type}  label: {node.label}  model: {node.model}")
+        print(f"timestamp: {node.timestamp}")
+        if node.files:
+            print(f"files: {node.files}")
+        if node.prompt:
+            print(f"\n{'─' * 40} prompt {'─' * 40}")
+            print(node.prompt[:2000] + ("..." if len(node.prompt) > 2000 else ""))
+        if node.response:
+            print(f"\n{'─' * 40} response {'─' * 39}")
+            print(node.response[:2000] + ("..." if len(node.response) > 2000 else ""))
+        if node.children:
+            print(f"\nchildren: {list(node.children.keys())}")
+
+    def last(self, store_id):
+        """Get the dotted path to the last layer of a store."""
+        store = self.load(store_id)
+        return _get_last_layer_path(store)
+
+    def armed(self):
+        """Show armed stores."""
+        return _load_armed()
+
+    # ── write ───────────────────────────────────────────────────────────────
+
+    def create(self, store_id, directory, label=None):
+        """Create a new empty store."""
+        if "." in store_id:
+            raise ValueError("Store names cannot contain dots")
+        store = StoreRoot(
+            store_id=store_id, directory=directory, label=label,
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+        _save_store(store)
+        _update_index(directory, store_id)
+        return store
+
+    def layer(self, store_id, prompt, response, files=None, label=None, model=None):
+        """Append a layer node. Reads files from disk into the content blob."""
+        store = self.load(store_id)
+        now = datetime.now(timezone.utc).isoformat()
+        file_blobs = ""
+        if files:
+            parts = ["=== CONTEXT FILES ==="]
+            for fp in files:
+                try:
+                    with open(fp) as f:
+                        content = f.read()
+                    parts += [f"--- BEGIN FILE: {fp} ---", content, f"--- END FILE: {fp} ---"]
+                except OSError as e:
+                    parts += [f"--- BEGIN FILE: {fp} (ERROR: {e}) ---", f"--- END FILE: {fp} ---"]
+            file_blobs = "\n".join(parts) + "\n\n"
+        full_content = f"{file_blobs}{prompt}\n\n---\n\n{response}"
+        node = StoreNode(
+            entry_type="store", label=label, timestamp=now, model=model,
+            files=files or [], prompt=prompt, response=response, content=full_content,
+        )
+        key = _get_next_key(store, store_id, "L")
+        full_path = _add_child(store, store_id, key, node)
+        _save_store(store)
+        return full_path
+
+    def fork(self, store_id, label=None):
+        """Create a fork branch point."""
+        store = self.load(store_id)
+        node = StoreNode(
+            entry_type="fork", label=label,
+            timestamp=datetime.now(timezone.utc).isoformat(),
+        )
+        key = _get_next_key(store, store_id, "F")
+        full_path = _add_child(store, store_id, key, node)
+        _save_store(store)
+        return full_path
+
+    def arm(self, directory, store_id):
+        """Arm a store for auto-revival."""
+        armed = _load_armed()
+        armed[directory] = store_id
+        _atomic_write(ARMED_PATH, armed)
+
+    def disarm(self, directory):
+        """Remove armed state for a directory."""
+        armed = _load_armed()
+        armed.pop(directory, None)
+        _atomic_write(ARMED_PATH, armed)
+
+    def save(self, store):
+        """Persist a modified StoreRoot to disk."""
+        _save_store(store)
+
+    # ── display ─────────────────────────────────────────────────────────────
+
+    def tree(self, store_id=None, directory=None):
+        """Pretty-print store tree(s)."""
+        if store_id:
+            store = self.load(store_id)
+            print(_render_store(store))
+        else:
+            for store in _list_stores(directory):
+                print(_render_store(store))
+                print()
+
+    def __repr__(self):
+        n = len(_list_stores())
+        dirs = _list_all_directories()
+        return f"Ctx({n} stores, {len(dirs)} dirs)"
+
+
+ctx = Ctx()
+
+# ── IPython startup ─────────────────────────────────────────────────────────
+print(f"{_BOLD}PAL Context Store{_RST}  {_DIM}{CTX_DIR}{_RST}")
+print(f"{repr(ctx)}\n")
+print("Usage: ctx.<tab>")
+print("  .stores() .directories() .tree() .load(id) .node(id) .read(id)")
+print("  .ancestry(id) .history(id) .last(id) .armed()")
+print("  .create(id, dir) .layer(id, prompt, resp) .fork(id) .arm(dir, id) .disarm(dir) .save(store)")

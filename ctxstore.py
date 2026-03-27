@@ -149,6 +149,15 @@ def _walk_ancestry(store, store_id):
         node = current.get(seg)
         if node is None:
             break
+        if seg[0] == "L" and seg[1:].isdigit():
+            target_idx = int(seg[1:])
+            preceding = [
+                (int(k[1:]), v)
+                for k, v in current.items()
+                if k[0] == "L" and k[1:].isdigit() and int(k[1:]) < target_idx
+            ]
+            preceding.sort(key=lambda kv: kv[0])
+            ancestry.extend(v for _, v in preceding)
         ancestry.append(node)
         current = node.children
     return ancestry

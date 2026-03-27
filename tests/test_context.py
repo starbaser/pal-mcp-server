@@ -132,7 +132,8 @@ class TestCtxQueryTool:
         assert "prompt" in required
         assert "store_id" in required
         assert "directory" not in props
-        assert "absolute_file_paths" not in props
+        assert "absolute_file_paths" in props
+        assert "media" in props
         assert "context_label" not in props
 
     async def test_query_without_store_id_returns_error(self):

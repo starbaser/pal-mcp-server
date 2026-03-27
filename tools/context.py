@@ -116,6 +116,8 @@ class CtxStoreRequest(ToolRequest):
 
 class CtxQueryRequest(ToolRequest):
     prompt: str = Field(...)
+    absolute_file_paths: Optional[list[str]] = Field(default_factory=list)
+    media: Optional[list[str]] = Field(default_factory=list)
     store_id: str = Field(...)
 
 
@@ -520,6 +522,16 @@ class CtxQueryTool(ContextBaseTool):
                     "type": "string",
                     "description": "Question or instruction to run against the context store.",
                 },
+                "absolute_file_paths": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": COMMON_FIELD_DESCRIPTIONS["absolute_file_paths"],
+                },
+                "media": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": COMMON_FIELD_DESCRIPTIONS["media"],
+                },
                 "store_id": {"type": "string", "description": STORE_ID_DESCRIPTION},
                 "model": self.get_model_field_schema(),
                 "temperature": {
@@ -606,8 +618,21 @@ class CtxQueryTool(ContextBaseTool):
     async def prepare_prompt(self, request: CtxQueryRequest) -> str:
         user_content = self.handle_prompt_file_with_fallback(request)
 
+        files = self.get_request_files(request)
+        file_section = ""
+        if files:
+            file_content, processed = self._prepare_file_content_for_prompt(
+                files,
+                None,
+                "Context files",
+                model_context=getattr(self, "_model_context", None),
+            )
+            self._actually_processed_files = processed
+            if file_content:
+                file_section = f"\n\n=== CONTEXT FILES ===\n{file_content}\n=== END CONTEXT FILES ==="
+
         injected = getattr(self, "_injected_history", "")
-        base = f"=== CONTEXT STORE QUERY ===\n\n{user_content}"
+        base = f"=== CONTEXT STORE QUERY ===\n\n{user_content}{file_section}"
 
         full_prompt = f"{injected}\n\n{base}" if injected else base
         self._last_full_prompt = full_prompt
@@ -663,6 +688,7 @@ class CtxQueryTool(ContextBaseTool):
             label=_truncate_label(prompt) if prompt else None,
             timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             model=model_name,
+            files=self.get_request_files(request),
             prompt=prompt,
             response=raw,
             content=content,

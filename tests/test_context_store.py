@@ -263,6 +263,53 @@ class TestWalkAncestry:
         assert result[0].entry_type == "fork"
         assert result[1].prompt == "cp"
 
+    def test_cumulative_layers_at_root(self, ctx_env):
+        store = _make_root()
+        store.children["L0"] = _make_node(entry_type="store", prompt="p0", response="r0")
+        store.children["L1"] = _make_node(entry_type="store", prompt="p1", response="r1")
+        store.children["L2"] = _make_node(entry_type="store", prompt="p2", response="r2")
+
+        update_index(store.directory, store.store_id)
+
+        result = walk_ancestry(store, "mystore.L2")
+        assert len(result) == 3
+        assert result[0].prompt == "p0"
+        assert result[1].prompt == "p1"
+        assert result[2].prompt == "p2"
+
+    def test_cumulative_layers_with_fork_descendant(self, ctx_env):
+        store = _make_root()
+        store.children["L0"] = _make_node(entry_type="store", prompt="p0", response="r0")
+        store.children["L1"] = _make_node(entry_type="store", prompt="p1", response="r1")
+        l2 = _make_node(entry_type="store", prompt="p2", response="r2")
+        fork = _make_node(entry_type="fork", prompt="", response="")
+        l2.children["F0"] = fork
+        store.children["L2"] = l2
+
+        update_index(store.directory, store.store_id)
+
+        result = walk_ancestry(store, "mystore.L2.F0")
+        assert len(result) == 4
+        assert result[0].prompt == "p0"
+        assert result[1].prompt == "p1"
+        assert result[2].prompt == "p2"
+        assert result[3].entry_type == "fork"
+
+    def test_cumulative_layers_nested_under_fork(self, ctx_env):
+        store = _make_root()
+        fork = _make_node(entry_type="fork", prompt="", response="")
+        fork.children["L0"] = _make_node(entry_type="store", prompt="fp0", response="fr0")
+        fork.children["L1"] = _make_node(entry_type="store", prompt="fp1", response="fr1")
+        store.children["F0"] = fork
+
+        update_index(store.directory, store.store_id)
+
+        result = walk_ancestry(store, "mystore.F0.L1")
+        assert len(result) == 3
+        assert result[0].entry_type == "fork"
+        assert result[1].prompt == "fp0"
+        assert result[2].prompt == "fp1"
+
 
 # ---------------------------------------------------------------------------
 # TestGetNextKey

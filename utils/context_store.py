@@ -195,6 +195,10 @@ def add_child(store: StoreRoot, parent_path: str, child_key: str, node: StoreNod
 def walk_ancestry(store: StoreRoot, store_id: str) -> list[StoreNode]:
     """Return nodes from the root down to (and including) the target.
 
+    Layers are cumulative: when the target segment at any level is an L-node,
+    all numerically preceding L-siblings at that level are included in order.
+    For example, walking to ``L14.F0`` returns ``[L0, L1, ..., L14, F0]``.
+
     Fork nodes are included — they carry empty prompt/response so callers treat
     them as passthrough. Returns an empty list when store_id resolves to the root.
     """
@@ -208,6 +212,15 @@ def walk_ancestry(store: StoreRoot, store_id: str) -> list[StoreNode]:
         node = current.get(seg)
         if node is None:
             break
+        if seg[0] == "L" and seg[1:].isdigit():
+            target_idx = int(seg[1:])
+            preceding = [
+                (int(k[1:]), v)
+                for k, v in current.items()
+                if k[0] == "L" and k[1:].isdigit() and int(k[1:]) < target_idx
+            ]
+            preceding.sort(key=lambda kv: kv[0])
+            ancestry.extend(v for _, v in preceding)
         ancestry.append(node)
         current = node.children
     return ancestry

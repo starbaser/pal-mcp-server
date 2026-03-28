@@ -4,7 +4,6 @@ Context store tools — init, store, query, fork, list, read, arm, filelist, and
 
 import logging
 import os
-import re
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -378,9 +377,13 @@ class CtxStoreTool(ContextBaseTool):
             return [TextContent(type="text", text=error.model_dump_json())]
 
         from utils.context_builder import build_context_from_ancestry
-        from utils.context_store import walk_ancestry
+        from utils.context_store import resolve_root_alias, walk_ancestry
+        from utils.file_diff import build_file_state_from_ancestry
 
-        ancestors = walk_ancestry(store, store_id)
+        resolved_id = resolve_root_alias(store, store_id)
+        ancestors = walk_ancestry(store, resolved_id)
+        self._ancestors = ancestors
+        self._prior_file_state = build_file_state_from_ancestry(ancestors)
         self._injected_history = build_context_from_ancestry(ancestors)
         self._store = store
         self._store_id = store_id
@@ -400,15 +403,7 @@ class CtxStoreTool(ContextBaseTool):
         files = self.get_request_files(request)
         file_section = ""
         if files:
-            file_content, processed = self._prepare_file_content_for_prompt(
-                files,
-                None,
-                "Context files",
-                model_context=getattr(self, "_model_context", None),
-            )
-            self._actually_processed_files = processed
-            if file_content:
-                file_section = f"\n\n=== CONTEXT FILES ===\n{file_content}\n=== END CONTEXT FILES ==="
+            file_section = self._build_diff_aware_file_section(files)
 
         label_line = f"\n[Label: {request.context_label}]" if request.context_label else ""
         base = f"=== CONTEXT LAYER SUBMISSION ==={label_line}\n\n{user_content}{file_section}"
@@ -417,6 +412,49 @@ class CtxStoreTool(ContextBaseTool):
         full_prompt = f"{injected}\n\n{base}" if injected else base
         self._last_full_prompt = full_prompt
         return full_prompt
+
+    def _build_diff_aware_file_section(self, files: list[str]) -> str:
+        """Build the file section using diffs against prior ancestry state."""
+        import logging
+        import os
+        from datetime import datetime, timezone
+
+        from utils.file_diff import decide_file_representation, find_base_layer_key
+
+        prior_state = getattr(self, "_prior_file_state", {})
+        ancestors = getattr(self, "_ancestors", [])
+
+        file_parts: list[str] = []
+        actually_processed: list[str] = []
+
+        for file_path in files:
+            try:
+                with open(file_path, encoding="utf-8", errors="replace") as f:
+                    raw_content = f.read()
+            except OSError:
+                logging.getLogger(__name__).warning(f"[CTX] Cannot read file: {file_path}")
+                continue
+
+            try:
+                mtime = os.stat(file_path).st_mtime
+                modified_at = datetime.fromtimestamp(mtime, tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S %Z")
+            except OSError:
+                modified_at = "unknown"
+
+            old_content = prior_state.get(file_path)
+            base_key = find_base_layer_key(file_path, ancestors)
+
+            representation = decide_file_representation(
+                file_path, raw_content, old_content, base_key, modified_at
+            )
+            if representation:
+                file_parts.append(representation)
+                actually_processed.append(file_path)
+
+        self._actually_processed_files = actually_processed
+        if not file_parts:
+            return ""
+        return f"\n\n=== CONTEXT FILES ===\n{''.join(file_parts)}\n=== END CONTEXT FILES ==="
 
     def format_response(self, response: str, _request: CtxStoreRequest, _model_info: Optional[dict] = None) -> str:
         self._last_raw_response = response
@@ -1645,20 +1683,15 @@ class CtxFileReadTool(BaseTool):
         return results
 
     def _extract_file_from_blob(self, content_blob: str, file_path: str) -> Optional[str]:
-        """Extract a single file's content from the node content blob."""
-        pattern = (
-            r"--- BEGIN FILE: "
-            + re.escape(file_path)
-            + r" \(Last modified:.*?\) ---\n"
-            + r"(.*?)\n"
-            + r"--- END FILE: "
-            + re.escape(file_path)
-            + r" ---"
-        )
-        match = re.search(pattern, content_blob, re.DOTALL)
-        if match:
-            return match.group(1)
-        return None
+        """Extract a single file's content from the node content blob.
+
+        Handles BEGIN FILE markers (returns content directly).
+        Returns None for BEGIN DIFF markers or if the file is not found,
+        which causes the caller to fall back to reading from disk.
+        """
+        from utils.file_diff import extract_file_from_content_blob
+
+        return extract_file_from_content_blob(content_blob, file_path)
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput

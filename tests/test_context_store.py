@@ -623,6 +623,159 @@ class TestContextBuilder:
         # /shared.py must appear exactly once
         assert result.count("/shared.py") == 1
 
+    def test_file_blob_not_duplicated_in_cumulative_ancestry(self):
+        """Regression: when layers share a file via content blobs, the same
+        file body must NOT appear multiple times in the reconstructed history.
+        This is the core invariant that diff-based dedup protects."""
+        from utils.context_builder import build_context_from_ancestry
+        from utils.file_diff import decide_file_representation
+
+        file_body = "class Foo:\n    pass\n"
+        mtime = "2026-01-01 00:00:00 UTC"
+
+        # L1: first occurrence — full file embed
+        l1_file_block = decide_file_representation("/app.py", file_body, None, None, mtime)
+        l1_prompt = f"=== CONTEXT LAYER SUBMISSION ===\n\nsetup\n\n=== CONTEXT FILES ===\n{l1_file_block}\n=== END CONTEXT FILES ==="
+        l1 = StoreNode(
+            entry_type="store", timestamp="2026-01-01T00:00:00Z",
+            files=["/app.py"], prompt="setup", response="stored",
+            content=f"{l1_prompt}\n\n---\n\nstored",
+        )
+
+        # L2: same file unchanged — should be omitted
+        l2_file_block = decide_file_representation("/app.py", file_body, file_body, "L1", mtime)
+        assert l2_file_block == "", "unchanged file should produce empty representation"
+        l2_prompt = "=== CONTEXT LAYER SUBMISSION ===\n\nupdate"
+        l2 = StoreNode(
+            entry_type="store", timestamp="2026-01-02T00:00:00Z",
+            files=["/app.py"], prompt="update", response="ok",
+            content=f"{l2_prompt}\n\n---\n\nok",
+        )
+
+        history = build_context_from_ancestry([l1, l2])
+        assert history.count("class Foo:") == 1, (
+            f"file body appeared {history.count('class Foo:')} times, expected 1"
+        )
+
+    def test_small_file_change_produces_diff_not_full_duplicate(self):
+        """When a file has a small addition, the second layer should contain
+        a DIFF marker, not a second full copy of the file."""
+        from utils.file_diff import decide_file_representation
+
+        old = "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\n"
+        new = old + "added_line\n"
+
+        rep = decide_file_representation("/big.py", new, old, "L1", "2026-01-01 00:00:00 UTC")
+        assert "BEGIN DIFF:" in rep, "small addition should produce a DIFF block"
+        assert "BEGIN FILE:" not in rep, "small addition should NOT produce a full FILE block"
+        assert "+added_line" in rep
+
+    def test_large_file_change_embeds_full_file(self):
+        """When >=50% of a file changes by tokens, the full file should be
+        re-embedded rather than a diff."""
+        from utils.file_diff import decide_file_representation
+
+        old = "x\n"
+        new = "a\nb\nc\nd\ne\nf\ng\nh\ni\nj\n"
+
+        rep = decide_file_representation("/big.py", new, old, "L1", "2026-01-01 00:00:00 UTC")
+        assert "BEGIN FILE:" in rep, "major rewrite should produce a full FILE block"
+        assert "BEGIN DIFF:" not in rep
+
+    def test_ancestry_file_state_tracks_across_layers(self):
+        """build_file_state_from_ancestry should return the latest version
+        of each file across the ancestor chain."""
+        from utils.file_diff import build_file_state_from_ancestry
+
+        def _blob(path, content, resp="r"):
+            prompt = (
+                f"=== CONTEXT LAYER SUBMISSION ===\n\ntext"
+                f"\n\n=== CONTEXT FILES ===\n"
+                f"\n--- BEGIN FILE: {path} (Last modified: 2026-01-01 00:00:00 UTC) ---\n"
+                f"{content}\n"
+                f"--- END FILE: {path} ---\n"
+                f"\n=== END CONTEXT FILES ==="
+            )
+            return f"{prompt}\n\n---\n\n{resp}"
+
+        n1 = StoreNode(
+            entry_type="store", timestamp="2026-01-01T00:00:00Z",
+            files=["/a.py"], prompt="p", response="r",
+            content=_blob("/a.py", "v1"),
+        )
+        n2 = StoreNode(
+            entry_type="store", timestamp="2026-01-02T00:00:00Z",
+            files=["/a.py", "/b.py"], prompt="p", response="r",
+            content=_blob("/a.py", "v2") + _blob("/b.py", "b_content"),
+        )
+        n3 = StoreNode(
+            entry_type="store", timestamp="2026-01-03T00:00:00Z",
+            files=["/b.py"], prompt="p", response="r",
+            content=_blob("/b.py", "b_v2"),
+        )
+
+        state = build_file_state_from_ancestry([n1, n2, n3])
+        assert state["/a.py"] == "v2", "should have latest version from n2"
+        assert state["/b.py"] == "b_v2", "should have latest version from n3"
+
+    def test_migrated_store_round_trips_through_context_builder(self):
+        """After migration replaces duplicates with diffs, the context
+        builder should still reconstruct valid conversation history without
+        duplicate file content."""
+        from scripts.migrate_to_diff_stores import migrate_store
+        from utils.context_builder import build_context_from_ancestry
+
+        file_body = "def hello():\n    print('hi')\n"
+        def _make_layer(prompt_text, files_dict, response):
+            parts = []
+            for path, content in files_dict.items():
+                parts.append(
+                    f"\n--- BEGIN FILE: {path} (Last modified: 2026-01-01 00:00:00 UTC) ---\n"
+                    f"{content}\n"
+                    f"--- END FILE: {path} ---\n"
+                )
+            file_section = f"\n\n=== CONTEXT FILES ===\n{''.join(parts)}\n=== END CONTEXT FILES ===" if parts else ""
+            full_prompt = f"=== CONTEXT LAYER SUBMISSION ===\n\n{prompt_text}{file_section}"
+            return f"{full_prompt}\n\n---\n\n{response}"
+
+        store = StoreRoot(
+            store_id="regression", directory="/tmp/test", created_at="2026-01-01T00:00:00Z",
+            children={
+                "L1": StoreNode(
+                    entry_type="store", timestamp="2026-01-01T00:00:00Z",
+                    files=["/app.py"], prompt="initial", response="stored L1",
+                    content=_make_layer("initial", {"/app.py": file_body}, "stored L1"),
+                ),
+                "L2": StoreNode(
+                    entry_type="store", timestamp="2026-01-02T00:00:00Z",
+                    files=["/app.py"], prompt="update", response="stored L2",
+                    content=_make_layer("update", {"/app.py": file_body}, "stored L2"),
+                ),
+                "L3": StoreNode(
+                    entry_type="store", timestamp="2026-01-03T00:00:00Z",
+                    files=["/app.py"], prompt="final", response="stored L3",
+                    content=_make_layer("final", {"/app.py": file_body}, "stored L3"),
+                ),
+            },
+        )
+
+        savings, modified = migrate_store(store, dry_run=False)
+        assert savings > 0, "migration should yield token savings"
+        assert modified == 2, "L2 and L3 should be modified"
+
+        # Rebuild context from all 3 layers
+        ancestors = [store.children["L1"], store.children["L2"], store.children["L3"]]
+        history = build_context_from_ancestry(ancestors)
+
+        # The file body should appear exactly once (in L1's turn)
+        assert history.count("def hello():") == 1, (
+            f"file body appeared {history.count('def hello():')} times after migration, expected 1"
+        )
+        # All responses should still be present
+        assert "stored L1" in history
+        assert "stored L2" in history
+        assert "stored L3" in history
+
     def test_build_context_ends_with_end_marker(self):
         from utils.context_builder import build_context_from_ancestry
 

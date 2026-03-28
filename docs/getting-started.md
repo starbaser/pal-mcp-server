@@ -192,8 +192,7 @@ Edit `~/.config/opencode/opencode.json`:
     "pal": {
       "type": "local",
       "command": [
-        "/path/to/pal-mcp-server/.pal_venv/bin/python",
-        "/path/to/pal-mcp-server/server.py"
+        "/path/to/pal-mcp-server/.venv/bin/pal-mcp-server"
       ],
       "cwd": "/path/to/pal-mcp-server",
       "enabled": true,
@@ -204,6 +203,8 @@ Edit `~/.config/opencode/opencode.json`:
   }
 }
 ```
+
+Replace `/path/to/pal-mcp-server` with the absolute path to your clone. Run `uv sync` first to create the `.venv` and console script.
 
 Add any other API keys you rely on (`OPENAI_API_KEY`, `OPENROUTER_API_KEY`, etc.).
 
@@ -242,32 +243,34 @@ PAL works in GUI IDEs that speak MCP. The configuration mirrors the CLI examples
 
 ### Method B: Clone and Setup
 
+**Prerequisites**: [Install uv](https://docs.astral.sh/uv/getting-started/installation/)
+
 ```bash
 # Clone the repository
 git clone https://github.com/BeehiveInnovations/pal-mcp-server.git
 cd pal-mcp-server
 
-# One-command setup (handles everything)
-./run-server.sh
+# Create .venv and install all dependencies from pyproject.toml
+uv sync
 
-# Or for Windows PowerShell:
-./run-server.ps1
-
-# View configuration for Claude Desktop
-./run-server.sh -c
-
-# See all options
-./run-server.sh --help
+# Configure API keys
+cp .env.example .env
+# Edit .env with your API keys
 ```
 
-**What the setup script does:**
-- ✅ Creates Python virtual environment
-- ✅ Installs all dependencies  
-- ✅ Creates .env file for API keys
-- ✅ Configures Claude integrations
-- ✅ Provides copy-paste configuration
+**Running the server:**
 
-**After updates:** Always run `./run-server.sh` again after `git pull`.
+```bash
+# Run directly through uv (no activation needed)
+uv run pal-mcp-server
+```
+
+**After updates:**
+
+```bash
+git pull
+uv sync   # re-syncs deps if pyproject.toml changed
+```
 
 **Windows users**: See the [WSL Setup Guide](wsl-setup.md) for detailed WSL configuration.
 
@@ -443,8 +446,8 @@ Versions 0.2.1 and newer currently ignore values above ~60 seconds for some tran
 - Check PATH includes `/usr/local/bin` and `~/.local/bin`
 
 **For clone installations:**
-- Run `./run-server.sh` again to verify setup
-- Check virtual environment: `which python` should show `.pal_venv/bin/python`
+- Run `uv sync` to reinstall dependencies
+- Verify the environment: `uv run python --version` should succeed
 
 ### API Key Issues
 

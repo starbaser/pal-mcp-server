@@ -2597,6 +2597,21 @@ follow_logs() {
 # ----------------------------------------------------------------------------
 
 main() {
+    # Deprecation notice (stderr so it doesn't interfere with MCP stdio)
+    echo "" >&2
+    echo "WARNING: run-server.sh is deprecated and will be removed in a future release." >&2
+    echo "" >&2
+    echo "  Use uv instead:" >&2
+    echo "" >&2
+    echo "    git clone https://github.com/BeehiveInnovations/pal-mcp-server.git" >&2
+    echo "    cd pal-mcp-server" >&2
+    echo "    uv sync                    # creates .venv and installs deps" >&2
+    echo "    cp .env.example .env       # then edit .env with your API keys" >&2
+    echo "    uv run pal-mcp-server      # run the server" >&2
+    echo "" >&2
+    echo "  See docs/getting-started.md for full details." >&2
+    echo "" >&2
+
     # Parse command line arguments
     local arg="${1:-}"
 

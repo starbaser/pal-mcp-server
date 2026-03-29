@@ -127,6 +127,7 @@ class ChallengeTool(SimpleTool):
             # Return the wrapped prompt as the response
             response_data = {
                 "status": "challenge_accepted",
+                "content": wrapped_prompt,
                 "original_statement": request.prompt,
                 "challenge_prompt": wrapped_prompt,
                 "instructions": (

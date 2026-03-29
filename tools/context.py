@@ -444,9 +444,7 @@ class CtxStoreTool(ContextBaseTool):
             old_content = prior_state.get(file_path)
             base_key = find_base_layer_key(file_path, ancestors)
 
-            representation = decide_file_representation(
-                file_path, raw_content, old_content, base_key, modified_at
-            )
+            representation = decide_file_representation(file_path, raw_content, old_content, base_key, modified_at)
             if representation:
                 file_parts.append(representation)
                 actually_processed.append(file_path)
@@ -1051,24 +1049,18 @@ class CtxReadTool(BaseTool):
             )
             return [TextContent(type="text", text=error.model_dump_json())]
         else:
-            lines = [f"# {store_id}", ""]
-            if node.label:
-                lines.append(f"**Label:** {node.label}")
-            if node.entry_type:
-                lines.append(f"**Type:** {node.entry_type}")
-            if node.model:
-                lines.append(f"**Model:** {node.model}")
-            if node.timestamp:
-                lines.append(f"**Timestamp:** {node.timestamp}")
-            if node.files:
-                lines.append("**Files:**")
-                for f in node.files:
-                    lines.append(f"- {f}")
-            if node.prompt:
-                lines.extend(["", "## Prompt", "", node.prompt])
-            if node.response:
-                lines.extend(["", "## Response", "", node.response])
-            content = "\n".join(lines)
+            from utils.response_formatter import format_layer_markdown
+
+            content = format_layer_markdown(
+                store_id,
+                label=node.label,
+                entry_type=node.entry_type,
+                model=node.model,
+                timestamp=node.timestamp,
+                files=node.files,
+                prompt=node.prompt,
+                response=node.response,
+            )
 
         tool_output = ToolOutput(
             status="success",
@@ -1774,5 +1766,125 @@ class CtxFileReadTool(BaseTool):
             content=content,
             content_type="text",
             metadata={"store_id": store_id, "file_path": file_path, "source": source, "node_path": node_path},
+        )
+        return [TextContent(type="text", text=tool_output.model_dump_json())]
+
+
+# ---------------------------------------------------------------------------
+# ctxtraverse
+# ---------------------------------------------------------------------------
+
+
+class CtxTraverseTool(BaseTool):
+    def get_name(self) -> str:
+        return "ctxtraverse"
+
+    def get_description(self) -> str:
+        return (
+            "Traverse a context store path from start_node to end_node and render the exact "
+            "conversation history content that would be sent to the PAL model — full thread "
+            "rehydration with all turns, file blobs, and cumulative L-node inclusion. "
+            "The end_node must be a descendant (or cumulative L-successor) of start_node."
+        )
+
+    def get_input_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "store_id": {
+                    "type": "string",
+                    "description": "Root store name (e.g. 'myproject'). Use ctxlist to discover store names.",
+                },
+                "start_node": {
+                    "type": "string",
+                    "description": (
+                        "Segment path relative to store root for the start of the range "
+                        "(e.g. 'L1', 'L3.F0'). Inclusive."
+                    ),
+                },
+                "end_node": {
+                    "type": "string",
+                    "description": (
+                        "Segment path relative to store root for the end of the range "
+                        "(e.g. 'L5', 'L3.F0.L1.Q0'). Must be a descendant of start_node. Inclusive."
+                    ),
+                },
+            },
+            "required": ["store_id", "start_node", "end_node"],
+            "additionalProperties": False,
+        }
+
+    def get_annotations(self) -> dict:
+        return {"readOnlyHint": True, "idempotentHint": True, "openWorldHint": False}
+
+    def get_system_prompt(self) -> str:
+        return ""
+
+    def get_request_model(self):
+        return ToolRequest
+
+    def requires_model(self) -> bool:
+        return False
+
+    def get_model_category(self):
+        from tools.models import ToolModelCategory
+
+        return ToolModelCategory.FAST_RESPONSE
+
+    async def prepare_prompt(self, _request: ToolRequest) -> str:
+        return ""
+
+    def format_response(self, response: str, _request: ToolRequest, _model_info: Optional[dict] = None) -> str:
+        return response
+
+    async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
+        from tools.models import ToolOutput
+        from utils.context_builder import build_context_from_ancestry
+        from utils.context_store import load_store, resolve_store_location, walk_range
+
+        store_id = arguments.get("store_id", "")
+        start_node = arguments.get("start_node", "")
+        end_node = arguments.get("end_node", "")
+
+        if not start_node or not end_node:
+            error = ToolOutput(
+                status="error", content="Both start_node and end_node are required.", content_type="text"
+            )
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        location = resolve_store_location(store_id)
+        if location is None:
+            error = ToolOutput(status="error", content=f'Store "{store_id}" not found.', content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        directory, root_id = location
+        store = load_store(directory, root_id)
+        if store is None:
+            error = ToolOutput(status="error", content=f'Store file not found: "{root_id}".', content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        start_full = f"{root_id}.{start_node}"
+        end_full = f"{root_id}.{end_node}"
+
+        try:
+            range_nodes = walk_range(store, start_full, end_full)
+        except ValueError as exc:
+            error = ToolOutput(status="error", content=str(exc), content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        content = build_context_from_ancestry(range_nodes)
+        if not content:
+            content = "(No content nodes with prompt/response found in the traversed range.)"
+
+        tool_output = ToolOutput(
+            status="success",
+            content=content,
+            content_type="text",
+            metadata={
+                "store_id": store_id,
+                "start_node": start_node,
+                "end_node": end_node,
+                "traversed_path": f"{start_full} → {end_full}",
+            },
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]

@@ -7,6 +7,44 @@ logger = logging.getLogger("pal_mcp")
 _NEWLINE_THRESHOLD = 2
 
 
+def format_layer_markdown(
+    heading: str,
+    *,
+    label: str | None = None,
+    entry_type: str | None = None,
+    tool_name: str | None = None,
+    model: str | None = None,
+    timestamp: str | None = None,
+    files: list[str] | None = None,
+    prompt: str | None = None,
+    response: str | None = None,
+) -> str:
+    """Format a context layer or tool response as structured markdown.
+
+    Shared by ctxread (layer display) and content save (response persistence).
+    """
+    lines = [f"# {heading}", ""]
+    if label:
+        lines.append(f"**Label:** {label}")
+    if entry_type:
+        lines.append(f"**Type:** {entry_type}")
+    if tool_name:
+        lines.append(f"**Tool:** {tool_name}")
+    if model:
+        lines.append(f"**Model:** {model}")
+    if timestamp:
+        lines.append(f"**Timestamp:** {timestamp}")
+    if files:
+        lines.append("**Files:**")
+        for f in files:
+            lines.append(f"- {f}")
+    if prompt:
+        lines.extend(["", "## Prompt", "", prompt])
+    if response:
+        lines.extend(["", "## Response", "", response])
+    return "\n".join(lines)
+
+
 def _is_formatted_text(value: object) -> bool:
     """Return True if value is a string with >= _NEWLINE_THRESHOLD newlines."""
     return isinstance(value, str) and value.count("\n") >= _NEWLINE_THRESHOLD

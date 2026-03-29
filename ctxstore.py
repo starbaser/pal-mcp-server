@@ -1,7 +1,10 @@
 # PAL Context Store — IPython interface
 # %run ctxstore.py  or  exec(open("ctxstore.py").read())
 
-import json, os, re, tempfile
+import json
+import os
+import re
+import tempfile
 from datetime import datetime, timezone
 from typing import Literal
 
@@ -268,7 +271,12 @@ def _build_context(ancestors, include_files=True):
 
 
 # ── Tree rendering ──────────────────────────────────────────────────────────
-_TYPE_GLYPHS = {"store": "\033[34mL\033[0m", "query": "\033[33mQ\033[0m", "fork": "\033[35mF\033[0m", "tool": "\033[36mT\033[0m"}
+_TYPE_GLYPHS = {
+    "store": "\033[34mL\033[0m",
+    "query": "\033[33mQ\033[0m",
+    "fork": "\033[35mF\033[0m",
+    "tool": "\033[36mT\033[0m",
+}
 _DIM = "\033[2m"
 _BOLD = "\033[1m"
 _RST = "\033[0m"
@@ -312,6 +320,7 @@ def _render_store(store):
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 # Public API — tab-completable namespace
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 
 class Ctx:
     """PAL context store interface. Use `ctx.<tab>` to explore."""
@@ -388,7 +397,9 @@ class Ctx:
         if "." in store_id:
             raise ValueError("Store names cannot contain dots")
         store = StoreRoot(
-            store_id=store_id, directory=directory, label=label,
+            store_id=store_id,
+            directory=directory,
+            label=label,
             created_at=datetime.now(timezone.utc).isoformat(),
         )
         _save_store(store)
@@ -412,8 +423,14 @@ class Ctx:
             file_blobs = "\n".join(parts) + "\n\n"
         full_content = f"{file_blobs}{prompt}\n\n---\n\n{response}"
         node = StoreNode(
-            entry_type="store", label=label, timestamp=now, model=model,
-            files=files or [], prompt=prompt, response=response, content=full_content,
+            entry_type="store",
+            label=label,
+            timestamp=now,
+            model=model,
+            files=files or [],
+            prompt=prompt,
+            response=response,
+            content=full_content,
         )
         key = _get_next_key(store, store_id, "L")
         full_path = _add_child(store, store_id, key, node)
@@ -424,7 +441,8 @@ class Ctx:
         """Create a fork branch point."""
         store = self.load(store_id)
         node = StoreNode(
-            entry_type="fork", label=label,
+            entry_type="fork",
+            label=label,
             timestamp=datetime.now(timezone.utc).isoformat(),
         )
         key = _get_next_key(store, store_id, "F")

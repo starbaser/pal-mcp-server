@@ -226,6 +226,36 @@ def walk_ancestry(store: StoreRoot, store_id: str) -> list[StoreNode]:
     return ancestry
 
 
+def walk_range(store: StoreRoot, start_path: str, end_path: str) -> list[StoreNode]:
+    """Return the ancestor chain from start_path through end_path (inclusive).
+
+    Uses the same cumulative L-node logic as walk_ancestry. The start node must
+    appear in the ancestry of end_path — either as a direct tree ancestor or as
+    a preceding L-sibling at the same level. Raises ValueError when start is not
+    reachable from end's ancestry.
+    """
+    start_node = resolve_node(store, start_path)
+    if start_node is None:
+        raise ValueError(f"Start node not found: {start_path}")
+
+    end_node = resolve_node(store, end_path)
+    if end_node is None:
+        raise ValueError(f"End node not found: {end_path}")
+
+    ancestry = walk_ancestry(store, end_path)
+
+    start_idx = None
+    for i, node in enumerate(ancestry):
+        if node is start_node:
+            start_idx = i
+            break
+
+    if start_idx is None:
+        raise ValueError(f"Start node '{start_path}' is not an ancestor of end node '{end_path}'")
+
+    return ancestry[start_idx:]
+
+
 def get_last_layer_path(store: StoreRoot) -> str | None:
     """Return dotted path to the highest-numbered L-child, or None if no layers exist."""
     count = sum(1 for k in store.children if k.startswith("L") and k[1:].isdigit())

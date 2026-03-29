@@ -20,17 +20,13 @@ if TYPE_CHECKING:
 
 # Regex to extract all BEGIN FILE blocks from a content blob
 _FILE_BLOCK_RE = re.compile(
-    r"--- BEGIN FILE: (?P<path>.+?) \(Last modified:.*?\) ---\n"
-    r"(?P<content>.*?)\n"
-    r"--- END FILE: .+? ---",
+    r"--- BEGIN FILE: (?P<path>.+?) \(Last modified:.*?\) ---\n" r"(?P<content>.*?)\n" r"--- END FILE: .+? ---",
     re.DOTALL,
 )
 
 # Regex to extract a single BEGIN FILE block by path
 _FILE_BLOCK_SINGLE_TMPL = (
-    r"--- BEGIN FILE: {escaped_path} \(Last modified:.*?\) ---\n"
-    r"(.*?)\n"
-    r"--- END FILE: {escaped_path} ---"
+    r"--- BEGIN FILE: {escaped_path} \(Last modified:.*?\) ---\n" r"(.*?)\n" r"--- END FILE: {escaped_path} ---"
 )
 
 # Binary extensions that should always be embedded in full

@@ -98,9 +98,7 @@ def _migrate_node_content(
         file_content = match.group("content")
 
         old_content = state.get(file_path)
-        representation = decide_file_representation(
-            file_path, file_content, old_content, layer_key, mtime
-        )
+        representation = decide_file_representation(file_path, file_content, old_content, layer_key, mtime)
 
         # Update running state with current file content
         state[file_path] = file_content

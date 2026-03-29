@@ -74,11 +74,7 @@ class TestExtractFileBlobs:
         assert extract_file_blobs("") == {}
 
     def test_ignores_diff_markers(self):
-        blob = (
-            "--- BEGIN DIFF: /a.py (changes since layer L1) ---\n"
-            "+added\n"
-            "--- END DIFF: /a.py ---"
-        )
+        blob = "--- BEGIN DIFF: /a.py (changes since layer L1) ---\n" "+added\n" "--- END DIFF: /a.py ---"
         assert extract_file_blobs(blob) == {}
 
 
@@ -99,11 +95,7 @@ class TestExtractFileFromContentBlob:
         assert extract_file_from_content_blob("", "/foo.py") is None
 
     def test_returns_none_for_diff_marker(self):
-        blob = (
-            "--- BEGIN DIFF: /a.py (changes since layer L1) ---\n"
-            "+added\n"
-            "--- END DIFF: /a.py ---"
-        )
+        blob = "--- BEGIN DIFF: /a.py (changes since layer L1) ---\n" "+added\n" "--- END DIFF: /a.py ---"
         assert extract_file_from_content_blob(blob, "/a.py") is None
 
 

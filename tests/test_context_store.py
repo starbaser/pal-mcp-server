@@ -637,8 +637,11 @@ class TestContextBuilder:
         l1_file_block = decide_file_representation("/app.py", file_body, None, None, mtime)
         l1_prompt = f"=== CONTEXT LAYER SUBMISSION ===\n\nsetup\n\n=== CONTEXT FILES ===\n{l1_file_block}\n=== END CONTEXT FILES ==="
         l1 = StoreNode(
-            entry_type="store", timestamp="2026-01-01T00:00:00Z",
-            files=["/app.py"], prompt="setup", response="stored",
+            entry_type="store",
+            timestamp="2026-01-01T00:00:00Z",
+            files=["/app.py"],
+            prompt="setup",
+            response="stored",
             content=f"{l1_prompt}\n\n---\n\nstored",
         )
 
@@ -647,15 +650,16 @@ class TestContextBuilder:
         assert l2_file_block == "", "unchanged file should produce empty representation"
         l2_prompt = "=== CONTEXT LAYER SUBMISSION ===\n\nupdate"
         l2 = StoreNode(
-            entry_type="store", timestamp="2026-01-02T00:00:00Z",
-            files=["/app.py"], prompt="update", response="ok",
+            entry_type="store",
+            timestamp="2026-01-02T00:00:00Z",
+            files=["/app.py"],
+            prompt="update",
+            response="ok",
             content=f"{l2_prompt}\n\n---\n\nok",
         )
 
         history = build_context_from_ancestry([l1, l2])
-        assert history.count("class Foo:") == 1, (
-            f"file body appeared {history.count('class Foo:')} times, expected 1"
-        )
+        assert history.count("class Foo:") == 1, f"file body appeared {history.count('class Foo:')} times, expected 1"
 
     def test_small_file_change_produces_diff_not_full_duplicate(self):
         """When a file has a small addition, the second layer should contain
@@ -699,18 +703,27 @@ class TestContextBuilder:
             return f"{prompt}\n\n---\n\n{resp}"
 
         n1 = StoreNode(
-            entry_type="store", timestamp="2026-01-01T00:00:00Z",
-            files=["/a.py"], prompt="p", response="r",
+            entry_type="store",
+            timestamp="2026-01-01T00:00:00Z",
+            files=["/a.py"],
+            prompt="p",
+            response="r",
             content=_blob("/a.py", "v1"),
         )
         n2 = StoreNode(
-            entry_type="store", timestamp="2026-01-02T00:00:00Z",
-            files=["/a.py", "/b.py"], prompt="p", response="r",
+            entry_type="store",
+            timestamp="2026-01-02T00:00:00Z",
+            files=["/a.py", "/b.py"],
+            prompt="p",
+            response="r",
             content=_blob("/a.py", "v2") + _blob("/b.py", "b_content"),
         )
         n3 = StoreNode(
-            entry_type="store", timestamp="2026-01-03T00:00:00Z",
-            files=["/b.py"], prompt="p", response="r",
+            entry_type="store",
+            timestamp="2026-01-03T00:00:00Z",
+            files=["/b.py"],
+            prompt="p",
+            response="r",
             content=_blob("/b.py", "b_v2"),
         )
 
@@ -726,6 +739,7 @@ class TestContextBuilder:
         from utils.context_builder import build_context_from_ancestry
 
         file_body = "def hello():\n    print('hi')\n"
+
         def _make_layer(prompt_text, files_dict, response):
             parts = []
             for path, content in files_dict.items():
@@ -739,21 +753,32 @@ class TestContextBuilder:
             return f"{full_prompt}\n\n---\n\n{response}"
 
         store = StoreRoot(
-            store_id="regression", directory="/tmp/test", created_at="2026-01-01T00:00:00Z",
+            store_id="regression",
+            directory="/tmp/test",
+            created_at="2026-01-01T00:00:00Z",
             children={
                 "L1": StoreNode(
-                    entry_type="store", timestamp="2026-01-01T00:00:00Z",
-                    files=["/app.py"], prompt="initial", response="stored L1",
+                    entry_type="store",
+                    timestamp="2026-01-01T00:00:00Z",
+                    files=["/app.py"],
+                    prompt="initial",
+                    response="stored L1",
                     content=_make_layer("initial", {"/app.py": file_body}, "stored L1"),
                 ),
                 "L2": StoreNode(
-                    entry_type="store", timestamp="2026-01-02T00:00:00Z",
-                    files=["/app.py"], prompt="update", response="stored L2",
+                    entry_type="store",
+                    timestamp="2026-01-02T00:00:00Z",
+                    files=["/app.py"],
+                    prompt="update",
+                    response="stored L2",
                     content=_make_layer("update", {"/app.py": file_body}, "stored L2"),
                 ),
                 "L3": StoreNode(
-                    entry_type="store", timestamp="2026-01-03T00:00:00Z",
-                    files=["/app.py"], prompt="final", response="stored L3",
+                    entry_type="store",
+                    timestamp="2026-01-03T00:00:00Z",
+                    files=["/app.py"],
+                    prompt="final",
+                    response="stored L3",
                     content=_make_layer("final", {"/app.py": file_body}, "stored L3"),
                 ),
             },
@@ -768,9 +793,9 @@ class TestContextBuilder:
         history = build_context_from_ancestry(ancestors)
 
         # The file body should appear exactly once (in L1's turn)
-        assert history.count("def hello():") == 1, (
-            f"file body appeared {history.count('def hello():')} times after migration, expected 1"
-        )
+        assert (
+            history.count("def hello():") == 1
+        ), f"file body appeared {history.count('def hello():')} times after migration, expected 1"
         # All responses should still be present
         assert "stored L1" in history
         assert "stored L2" in history
@@ -1360,9 +1385,7 @@ class TestBuildContextAdditional:
     def test_five_node_chain_turns_numbered_one_through_five(self):
         from utils.context_builder import build_context_from_ancestry
 
-        nodes = [
-            _make_node(entry_type="store", prompt=f"q{i}", response=f"r{i}") for i in range(1, 6)
-        ]
+        nodes = [_make_node(entry_type="store", prompt=f"q{i}", response=f"r{i}") for i in range(1, 6)]
         result = build_context_from_ancestry(nodes)
         for i in range(1, 6):
             assert f"Turn {i}" in result

@@ -56,10 +56,12 @@ class TestMigrateStore:
         """L2 has exact same file as L1 — should be stripped from L2's content."""
         from scripts.migrate_to_diff_stores import migrate_store
 
-        store = _make_store([
-            {"files": {"/a.py": "line1\nline2\nline3\n"}},
-            {"files": {"/a.py": "line1\nline2\nline3\n"}},
-        ])
+        store = _make_store(
+            [
+                {"files": {"/a.py": "line1\nline2\nline3\n"}},
+                {"files": {"/a.py": "line1\nline2\nline3\n"}},
+            ]
+        )
 
         savings, modified = migrate_store(store, dry_run=False)
         assert savings > 0
@@ -76,10 +78,12 @@ class TestMigrateStore:
         old = "line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\nline9\nline10\n"
         new = old + "added_line\n"
 
-        store = _make_store([
-            {"files": {"/a.py": old}},
-            {"files": {"/a.py": new}},
-        ])
+        store = _make_store(
+            [
+                {"files": {"/a.py": old}},
+                {"files": {"/a.py": new}},
+            ]
+        )
 
         migrate_store(store, dry_run=False)
         l2_content = store.children["L2"].content
@@ -90,10 +94,12 @@ class TestMigrateStore:
         """L1 should never be modified (no prior state to diff against)."""
         from scripts.migrate_to_diff_stores import migrate_store
 
-        store = _make_store([
-            {"files": {"/a.py": "content"}},
-            {"files": {"/a.py": "content"}},
-        ])
+        store = _make_store(
+            [
+                {"files": {"/a.py": "content"}},
+                {"files": {"/a.py": "content"}},
+            ]
+        )
         original_l1 = store.children["L1"].content
 
         migrate_store(store, dry_run=False)
@@ -103,10 +109,12 @@ class TestMigrateStore:
         """Dry run should report savings but not modify content."""
         from scripts.migrate_to_diff_stores import migrate_store
 
-        store = _make_store([
-            {"files": {"/a.py": "same\n"}},
-            {"files": {"/a.py": "same\n"}},
-        ])
+        store = _make_store(
+            [
+                {"files": {"/a.py": "same\n"}},
+                {"files": {"/a.py": "same\n"}},
+            ]
+        )
         original_l2 = store.children["L2"].content
 
         savings, _ = migrate_store(store, dry_run=True)
@@ -117,10 +125,12 @@ class TestMigrateStore:
         """Store with no file attachments should have zero savings."""
         from scripts.migrate_to_diff_stores import migrate_store
 
-        store = _make_store([
-            {"files": {}, "prompt": "just text"},
-            {"files": {}, "prompt": "more text"},
-        ])
+        store = _make_store(
+            [
+                {"files": {}, "prompt": "just text"},
+                {"files": {}, "prompt": "more text"},
+            ]
+        )
         savings, modified = migrate_store(store, dry_run=True)
         assert savings == 0
         assert modified == 0
@@ -129,10 +139,12 @@ class TestMigrateStore:
         """L1 and L2 have different files — no dedup possible."""
         from scripts.migrate_to_diff_stores import migrate_store
 
-        store = _make_store([
-            {"files": {"/a.py": "aaa\n"}},
-            {"files": {"/b.py": "bbb\n"}},
-        ])
+        store = _make_store(
+            [
+                {"files": {"/a.py": "aaa\n"}},
+                {"files": {"/b.py": "bbb\n"}},
+            ]
+        )
         savings, _ = migrate_store(store, dry_run=True)
         assert savings == 0
 
@@ -140,9 +152,11 @@ class TestMigrateStore:
         """Migration should not corrupt the response portion."""
         from scripts.migrate_to_diff_stores import migrate_store
 
-        store = _make_store([
-            {"files": {"/a.py": "content\n"}, "response": "important response"},
-            {"files": {"/a.py": "content\n"}, "response": "also important"},
-        ])
+        store = _make_store(
+            [
+                {"files": {"/a.py": "content\n"}, "response": "important response"},
+                {"files": {"/a.py": "content\n"}, "response": "also important"},
+            ]
+        )
         migrate_store(store, dry_run=False)
         assert "also important" in store.children["L2"].content

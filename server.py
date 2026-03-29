@@ -83,6 +83,7 @@ from tools.context import (
     CtxReadTool,
     CtxRenameTool,
     CtxStoreTool,
+    CtxTraverseTool,
 )
 from tools.models import ToolOutput  # noqa: E402
 from tools.shared.exceptions import ToolExecutionError  # noqa: E402
@@ -303,6 +304,7 @@ TOOLS = {
     "ctxlist": CtxListTool(),  # List context stores and their full node trees
     "ctxfork": CtxForkTool(),  # Create a fork point in a context store tree
     "ctxread": CtxReadTool(),  # Read content of a specific context store node
+    "ctxtraverse": CtxTraverseTool(),  # Traverse a node range and render full thread rehydration
     "ctxarm": CtxArmTool(),  # Arm/disarm a store for auto-revival on SessionStart
     "ctxrename": CtxRenameTool(),  # Rename a root context store
     "ctxexport": CtxExportTool(),  # Export entire store to self-contained markdown
@@ -999,7 +1001,12 @@ def _inject_store_path_continuation(result: list, store_path: str, arguments: di
 
 
 def _save_response_content(
-    tool_name: str, result: list, continuation_id: str | None = None, prompt: str | None = None
+    tool_name: str,
+    result: list,
+    continuation_id: str | None = None,
+    prompt: str | None = None,
+    model: str | None = None,
+    files: list[str] | None = None,
 ) -> str | None:
     """Persist the AI request/response as a markdown file.
 
@@ -1010,6 +1017,7 @@ def _save_response_content(
 
     from config import CONTENT_STORAGE_DIR
     from utils.context_store import encode_directory
+    from utils.response_formatter import format_layer_markdown
 
     try:
         if not result or not hasattr(result[0], "text"):
@@ -1031,18 +1039,21 @@ def _save_response_content(
         content_dir = Path(CONTENT_STORAGE_DIR) / encode_directory(cwd)
         content_dir.mkdir(parents=True, exist_ok=True)
 
-        # Build markdown with request + response sections
-        parts = []
-        if prompt:
-            parts.append(f"# Request\n\n{prompt}")
-            parts.append("---")
-        parts.append(f"# Response\n\n{content}")
-        document = "\n\n".join(parts)
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H:%M:%S.%f")
+        heading = f"{tool_name} ({cid})" if cid else tool_name
+        document = format_layer_markdown(
+            heading,
+            tool_name=tool_name,
+            model=model,
+            timestamp=timestamp,
+            files=files,
+            prompt=prompt,
+            response=content,
+        )
 
         if cid:
             filename = f"{tool_name}_{cid}.md"
         else:
-            timestamp = datetime.now().strftime("%Y-%m-%d_%H:%M:%S.%f")
             filename = f"{tool_name}_{timestamp}.md"
         filepath = content_dir / filename
         filepath.write_text(document, encoding="utf-8")
@@ -1292,7 +1303,12 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
             result = _inject_store_path_continuation(result, _store_path, arguments)
 
         saved_path = _save_response_content(
-            name, result, arguments.get("continuation_id"), prompt=arguments.get("prompt")
+            name,
+            result,
+            arguments.get("continuation_id"),
+            prompt=arguments.get("prompt"),
+            model=model_name,
+            files=arguments.get("absolute_file_paths"),
         )
         if saved_path:
             result = _inject_saved_content_path(result, saved_path)

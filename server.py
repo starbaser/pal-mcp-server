@@ -1239,6 +1239,18 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
             result = await tool.execute(arguments)
             if _store_path and result:
                 result = _inject_store_path_continuation(result, _store_path, arguments)
+
+            saved_path = _save_response_content(
+                name,
+                result,
+                arguments.get("continuation_id"),
+                prompt=arguments.get("prompt"),
+                model=arguments.get("model"),
+                files=arguments.get("absolute_file_paths"),
+            )
+            if saved_path:
+                result = _inject_saved_content_path(result, saved_path)
+
             result = _apply_output_format(result, raw_output)
             return result
 

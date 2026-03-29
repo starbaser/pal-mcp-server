@@ -9,12 +9,12 @@ from .chat import ChatTool
 from .clink import CLinkTool
 from .codereview import CodeReviewTool
 from .consensus import ConsensusTool
-from .palstore import PalArmTool, PalForkTool, PalInitTool, PalListTool, PalQueryTool, PalReadTool, PalStoreTool
 from .debug import DebugIssueTool
 from .docgen import DocgenTool
 from .imagegen import ImageGenTool
 from .listmodels import ListModelsTool
 from .narrate import NarrateTool
+from .palstore import PalArmTool, PalForkTool, PalInitTool, PalListTool, PalQueryTool, PalReadTool, PalStoreTool
 from .perceive import PerceiveTool
 from .planner import PlannerTool
 from .precommit import PrecommitTool

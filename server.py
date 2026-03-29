@@ -71,21 +71,25 @@ from tools import (  # noqa: E402
     TracerTool,
     VersionTool,
 )
+from tools.models import ToolOutput  # noqa: E402
 from tools.palstore import (
     PalArmTool,
+    PalCopyTool,
+    PalDeleteTool,
     PalExportTool,
     PalFileListTool,
     PalFileReadTool,
+    PalFoldTool,
     PalForkTool,
     PalInitTool,
     PalListTool,
+    PalMoveTool,
     PalQueryTool,
     PalReadTool,
     PalRenameTool,
     PalStoreTool,
     PalTraverseTool,
 )
-from tools.models import ToolOutput  # noqa: E402
 from tools.shared.exceptions import ToolExecutionError  # noqa: E402
 from utils.env import env_override_enabled, get_env  # noqa: E402
 
@@ -310,8 +314,43 @@ TOOLS = {
     "palexport": PalExportTool(),  # Export entire store to self-contained markdown
     "palfilelist": PalFileListTool(),  # List files attached across a store tree
     "palfileread": PalFileReadTool(),  # Read a specific file's content from a store node
+    "palmove": PalMoveTool(),  # Move a node to a new tree location
+    "palcopy": PalCopyTool(),  # Deep copy a node to a new location
+    "palfold": PalFoldTool(),  # Fold ancestry range into single node + insert
+    "paldelete": PalDeleteTool(),  # Delete a node and shift siblings
 }
 TOOLS = filter_disabled_tools(TOOLS)
+
+# Tool profiles for dual HTTP server mode
+PALSTORE_TOOL_NAMES = {
+    "palinit",
+    "palstore",
+    "palquery",
+    "palfork",
+    "pallist",
+    "palread",
+    "paltraverse",
+    "palarm",
+    "palrename",
+    "palexport",
+    "palfilelist",
+    "palfileread",
+    "palmove",
+    "palcopy",
+    "palfold",
+    "paldelete",
+}
+
+
+def split_tools(all_tools: dict) -> tuple[dict, dict]:
+    """Split tools into (pal_tools, palstore_tools) for dual server mode."""
+    palstore = {k: v for k, v in all_tools.items() if k in PALSTORE_TOOL_NAMES}
+    pal = {k: v for k, v in all_tools.items() if k not in PALSTORE_TOOL_NAMES}
+    for k in ESSENTIAL_TOOLS:
+        if k in all_tools:
+            palstore[k] = all_tools[k]
+    return pal, palstore
+
 
 # Rich prompt templates for all tools
 PROMPT_TEMPLATES = {
@@ -713,20 +752,8 @@ def configure_providers():
             )
 
 
-@server.list_tools()
-async def handle_list_tools() -> list[Tool]:
-    """
-    List all available tools with their descriptions and input schemas.
-
-    This handler is called by MCP clients during initialization to discover
-    what tools are available. Each tool provides:
-    - name: Unique identifier for the tool
-    - description: Detailed explanation of what the tool does
-    - inputSchema: JSON Schema defining the expected parameters
-
-    Returns:
-        List of Tool objects representing all available tools
-    """
+async def _list_tools_impl(tools: dict) -> list[Tool]:
+    """Build the MCP tool list from the given tools dict."""
     logger.debug("MCP client requested tool list")
 
     # Try to log client info if available (this happens early in the handshake)
@@ -750,10 +777,10 @@ async def handle_list_tools() -> list[Tool]:
     except Exception as e:
         logger.debug(f"Could not log client info during list_tools: {e}")
 
-    tools = []
+    tool_list = []
 
-    # Add all registered AI-powered tools from the TOOLS registry
-    for tool in TOOLS.values():
+    # Add all registered AI-powered tools from the given tools dict
+    for tool in tools.values():
         # Get optional annotations from the tool
         annotations = tool.get_annotations()
         tool_annotations = ToolAnnotations(**annotations) if annotations else None
@@ -765,7 +792,7 @@ async def handle_list_tools() -> list[Tool]:
             "description": "Return raw JSON instead of rendered markdown. Default: false.",
         }
 
-        tools.append(
+        tool_list.append(
             Tool(
                 name=tool.name,
                 description=tool.description,
@@ -779,8 +806,25 @@ async def handle_list_tools() -> list[Tool]:
     if openrouter_key_for_cache and openrouter_key_for_cache != "your_openrouter_api_key_here":
         logger.debug("OpenRouter registry cache used efficiently across all tool schemas")
 
-    logger.debug(f"Returning {len(tools)} tools to MCP client")
-    return tools
+    logger.debug(f"Returning {len(tool_list)} tools to MCP client")
+    return tool_list
+
+
+@server.list_tools()
+async def handle_list_tools() -> list[Tool]:
+    """
+    List all available tools with their descriptions and input schemas.
+
+    This handler is called by MCP clients during initialization to discover
+    what tools are available. Each tool provides:
+    - name: Unique identifier for the tool
+    - description: Detailed explanation of what the tool does
+    - inputSchema: JSON Schema defining the expected parameters
+
+    Returns:
+        List of Tool objects representing all available tools
+    """
+    return await _list_tools_impl(TOOLS)
 
 
 def _build_store_listing() -> str:
@@ -829,7 +873,6 @@ def _resolve_store_continuation(tool_name: str, arguments: dict) -> str | None:
     """
     from datetime import datetime, timezone
 
-    from utils.palstore_builder import hydrate_thread_context
     from utils.palstore import (
         PalNode,
         add_palnode,
@@ -839,6 +882,7 @@ def _resolve_store_continuation(tool_name: str, arguments: dict) -> str | None:
         resolve_store_location,
         save_store,
     )
+    from utils.palstore_builder import hydrate_thread_context
 
     continuation_id = arguments.get("continuation_id", "")
     if not continuation_id:
@@ -1108,14 +1152,13 @@ def _apply_output_format(result: list, raw: bool) -> list:
     return formatted
 
 
-@server.call_tool()
-async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
+async def _call_tool_impl(name: str, arguments: dict[str, Any], tools: dict) -> list[TextContent]:
     """
     Handle incoming tool execution requests from MCP clients.
 
     This is the main request dispatcher that routes tool calls to their appropriate handlers.
-    It supports both AI-powered tools (from TOOLS registry) and utility tools (implemented as
-    static functions).
+    It supports both AI-powered tools (from the given tools dict) and utility tools (implemented
+    as static functions).
 
     CONVERSATION LIFECYCLE MANAGEMENT:
     This function serves as the central orchestrator for multi-turn AI-to-AI conversations:
@@ -1185,7 +1228,7 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
         _store_path = _resolve_store_continuation(name, arguments)
 
         # Check if tool declares ephemeral continuation (skips user turn recording)
-        _tool = TOOLS.get(name)
+        _tool = tools.get(name)
         if _tool and getattr(_tool, "ephemeral", False):
             arguments["_ephemeral_query"] = True
         continuation_id = arguments["continuation_id"]
@@ -1208,9 +1251,9 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
             logger.debug(f"[CONVERSATION_DEBUG] Remaining token budget: {arguments['_remaining_tokens']:,}")
 
     # Route to AI-powered tools that require Gemini API calls
-    if name in TOOLS:
+    if name in tools:
         logger.info(f"Executing tool '{name}' with {len(arguments)} parameter(s)")
-        tool = TOOLS[name]
+        tool = tools[name]
 
         # EARLY MODEL RESOLUTION AT MCP BOUNDARY
         # Resolve model before passing to tool - this ensures consistent model handling
@@ -1338,6 +1381,12 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
     # Handle unknown tool requests gracefully
     else:
         return [TextContent(type="text", text=f"Unknown tool: {name}")]
+
+
+@server.call_tool()
+async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
+    """Route tool calls through the parameterized implementation using the global TOOLS dict."""
+    return await _call_tool_impl(name, arguments, TOOLS)
 
 
 def parse_model_option(model_string: str) -> tuple[str, Optional[str]]:
@@ -1904,6 +1953,40 @@ async def handle_get_prompt(name: str, arguments: dict[str, Any] = None) -> GetP
     )
 
 
+def _build_handshake_instructions() -> str:
+    """Build dynamic MCP instructions for client handshake."""
+    from config import IS_AUTO_MODE
+
+    if IS_AUTO_MODE:
+        instructions = (
+            "When the user names a specific model (e.g. 'use chat with gpt5'), send that exact model in the tool call. "
+            "When no model is mentioned, first use the `listmodels` tool from PAL to obtain available models to choose the best one from."
+        )
+    else:
+        instructions = (
+            "When the user names a specific model (e.g. 'use chat with gpt5'), send that exact model in the tool call. "
+            f"When no model is mentioned, default to '{DEFAULT_MODEL}'."
+        )
+    instructions += _build_store_listing()
+    return instructions
+
+
+def create_mcp_server(name: str, tools: dict, instructions: str) -> Server:
+    """Create an MCP Server instance with the given tool subset."""
+    s = Server(name)
+    s.instructions = instructions
+
+    @s.list_tools()
+    async def _list_tools():
+        return await _list_tools_impl(tools)
+
+    @s.call_tool()
+    async def _call_tool(tool_name, arguments):
+        return await _call_tool_impl(tool_name, arguments, tools)
+
+    return s
+
+
 async def main():
     """
     Main entry point for the MCP server.
@@ -1941,20 +2024,7 @@ async def main():
     logger.info(f"Available tools: {list(TOOLS.keys())}")
     logger.info("Server ready - waiting for tool requests...")
 
-    # Prepare dynamic instructions for the MCP client based on model mode
-    if IS_AUTO_MODE:
-        handshake_instructions = (
-            "When the user names a specific model (e.g. 'use chat with gpt5'), send that exact model in the tool call. "
-            "When no model is mentioned, first use the `listmodels` tool from PAL to obtain available models to choose the best one from."
-        )
-    else:
-        handshake_instructions = (
-            "When the user names a specific model (e.g. 'use chat with gpt5'), send that exact model in the tool call. "
-            f"When no model is mentioned, default to '{DEFAULT_MODEL}'."
-        )
-
-    # Append context store snapshot for the current working directory
-    handshake_instructions += _build_store_listing()
+    handshake_instructions = _build_handshake_instructions()
 
     # Run the server using stdio transport (standard input/output)
     # This allows the server to be launched by MCP clients as a subprocess
@@ -1974,12 +2044,81 @@ async def main():
         )
 
 
+async def main_http(host: str = "127.0.0.1", port: int = 3001):
+    """Run dual MCP servers over streamable HTTP."""
+    import contextlib
+
+    import uvicorn
+    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+    from starlette.applications import Starlette
+    from starlette.routing import Mount
+
+    configure_providers()
+
+    logger.info("PAL MCP Server starting in HTTP mode...")
+    logger.info(f"Log level: {log_level}")
+
+    from config import IS_AUTO_MODE
+
+    if IS_AUTO_MODE:
+        logger.info("Model mode: AUTO")
+    else:
+        logger.info(f"Model mode: Fixed model '{DEFAULT_MODEL}'")
+
+    logger.info(f"Available tools: {list(TOOLS.keys())}")
+
+    handshake = _build_handshake_instructions()
+    pal_tools, palstore_tools = split_tools(TOOLS)
+
+    logger.info(f"PAL server tools ({len(pal_tools)}): {sorted(pal_tools.keys())}")
+    logger.info(f"PalStore server tools ({len(palstore_tools)}): {sorted(palstore_tools.keys())}")
+
+    pal_srv = create_mcp_server("pal", pal_tools, handshake)
+    palstore_srv = create_mcp_server("palstore", palstore_tools, handshake)
+
+    pal_manager = StreamableHTTPSessionManager(app=pal_srv, stateless=True)
+    palstore_manager = StreamableHTTPSessionManager(app=palstore_srv, stateless=True)
+
+    @contextlib.asynccontextmanager
+    async def lifespan(app):
+        async with pal_manager.run():
+            async with palstore_manager.run():
+                logger.info(f"HTTP server ready on {host}:{port}")
+                logger.info(f"  PAL:      http://{host}:{port}/pal/mcp")
+                logger.info(f"  PalStore: http://{host}:{port}/palstore/mcp")
+                yield
+
+    starlette_app = Starlette(
+        routes=[
+            Mount("/pal/mcp", app=pal_manager.handle_request),
+            Mount("/palstore/mcp", app=palstore_manager.handle_request),
+        ],
+        lifespan=lifespan,
+    )
+
+    config = uvicorn.Config(starlette_app, host=host, port=port, log_level="info")
+    uvi_server = uvicorn.Server(config)
+    await uvi_server.serve()
+
+
 def run():
     """Console script entry point for pal-mcp-server."""
+    import sys
+
     try:
-        asyncio.run(main())
+        if "--http" in sys.argv:
+            host = "127.0.0.1"
+            port = 3001
+            if "--host" in sys.argv:
+                idx = sys.argv.index("--host")
+                host = sys.argv[idx + 1]
+            if "--port" in sys.argv:
+                idx = sys.argv.index("--port")
+                port = int(sys.argv[idx + 1])
+            asyncio.run(main_http(host=host, port=port))
+        else:
+            asyncio.run(main())
     except KeyboardInterrupt:
-        # Handle graceful shutdown
         pass
 
 

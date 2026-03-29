@@ -31,15 +31,15 @@ _PROJECT_ROOT = os.path.dirname(_SCRIPT_DIR)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
+from utils.file_diff import (  # noqa: E402
+    decide_file_representation,
+    extract_file_blobs,
+)
 from utils.palstore import (  # noqa: E402
     PalNode,
     PalRoot,
     load_index,
     save_store,
-)
-from utils.file_diff import (  # noqa: E402
-    decide_file_representation,
-    extract_file_blobs,
 )
 from utils.token_utils import count_tokens  # noqa: E402
 

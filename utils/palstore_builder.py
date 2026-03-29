@@ -12,8 +12,8 @@ import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from utils.palstore import PalNode, PalRoot
     from utils.conversation_memory import ThreadContext
+    from utils.palstore import PalNode, PalRoot
 
 logger = logging.getLogger(__name__)
 
@@ -80,8 +80,8 @@ def hydrate_thread_context(store: PalRoot, node_path: str) -> ThreadContext:
 
     The hydrated thread is ephemeral; the store tree remains the source of truth.
     """
-    from utils.palstore import walk_palnode_ancestry
     from utils.conversation_memory import add_turn, create_thread, get_thread
+    from utils.palstore import walk_palnode_ancestry
 
     ancestors = walk_palnode_ancestry(store, node_path)
 

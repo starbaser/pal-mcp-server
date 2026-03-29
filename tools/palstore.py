@@ -376,9 +376,9 @@ class PalStoreTool(PalStoreBaseTool):
             error = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        from utils.palstore_builder import build_context_from_ancestry
-        from utils.palstore import resolve_root_alias, walk_palnode_ancestry
         from utils.file_diff import build_file_state_from_ancestry
+        from utils.palstore import resolve_root_alias, walk_palnode_ancestry
+        from utils.palstore_builder import build_context_from_ancestry
 
         resolved_id = resolve_root_alias(store, store_id)
         ancestors = walk_palnode_ancestry(store, resolved_id)
@@ -625,8 +625,8 @@ class PalQueryTool(PalStoreBaseTool):
             )
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        from utils.palstore_builder import build_context_from_ancestry
         from utils.palstore import walk_palnode_ancestry
+        from utils.palstore_builder import build_context_from_ancestry
 
         ancestors = walk_palnode_ancestry(store, store_id)
 
@@ -1837,8 +1837,8 @@ class PalTraverseTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
-        from utils.palstore_builder import build_context_from_ancestry
         from utils.palstore import load_store, resolve_store_location, walk_palnode_range
+        from utils.palstore_builder import build_context_from_ancestry
 
         store_id = arguments.get("store_id", "")
         start_node = arguments.get("start_node", "")
@@ -1883,6 +1883,507 @@ class PalTraverseTool(BaseTool):
                 "start_node": start_node,
                 "end_node": end_node,
                 "traversed_path": f"{start_full} → {end_full}",
+            },
+        )
+        return [TextContent(type="text", text=tool_output.model_dump_json())]
+
+
+# ---------------------------------------------------------------------------
+# palmove
+# ---------------------------------------------------------------------------
+
+
+class PalMoveTool(BaseTool):
+    def get_name(self) -> str:
+        return "palmove"
+
+    def get_description(self) -> str:
+        return (
+            "Move a context store node to a new location in the tree. Detaches from source and "
+            "reattaches at destination with rollback on failure. Use pallist to find node paths."
+        )
+
+    def get_input_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "source_path": {
+                    "type": "string",
+                    "description": "Full dot-path of the node to move (e.g. 'myproject.L1.F0.L2').",
+                },
+                "dest_parent": {
+                    "type": "string",
+                    "description": "Full dot-path of the destination parent (e.g. 'myproject' for root level).",
+                },
+                "dest_key": {
+                    "type": "string",
+                    "description": "Key name at destination (e.g. 'L3'). If omitted, auto-generates the next available key using the source node's key prefix.",
+                },
+            },
+            "required": ["source_path", "dest_parent"],
+            "additionalProperties": False,
+        }
+
+    def get_annotations(self) -> dict:
+        return {"readOnlyHint": False, "openWorldHint": False}
+
+    def get_system_prompt(self) -> str:
+        return ""
+
+    def get_request_model(self):
+        return ToolRequest
+
+    def requires_model(self) -> bool:
+        return False
+
+    def get_model_category(self):
+        from tools.models import ToolModelCategory
+
+        return ToolModelCategory.FAST_RESPONSE
+
+    async def prepare_prompt(self, _request: ToolRequest) -> str:
+        return ""
+
+    def format_response(self, response: str, _request: ToolRequest, _model_info: Optional[dict] = None) -> str:
+        return response
+
+    async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
+        from tools.models import ToolOutput
+        from utils.palstore import (
+            _get_key_prefix,
+            get_next_key,
+            load_store,
+            move_palnode,
+            parse_store_path,
+            resolve_root_alias,
+            resolve_store_location,
+            save_store,
+        )
+
+        source_path = arguments.get("source_path", "")
+        dest_parent = arguments.get("dest_parent", "")
+        dest_key = arguments.get("dest_key")
+
+        root_id, _ = parse_store_path(source_path)
+
+        location = resolve_store_location(root_id)
+        if location is None:
+            error = ToolOutput(status="error", content=f'Store "{root_id}" not found.', content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        directory, root_id = location
+        store = load_store(directory, root_id)
+        if store is None:
+            error = ToolOutput(status="error", content=f'Store file not found: "{root_id}".', content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        try:
+            source_path = resolve_root_alias(store, source_path)
+            dest_parent = resolve_root_alias(store, dest_parent)
+        except KeyError as exc:
+            error = ToolOutput(status="error", content=str(exc), content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        if dest_key is None:
+            _, src_segments = parse_store_path(source_path)
+            src_last_key = src_segments[-1] if src_segments else ""
+            prefix = _get_key_prefix(src_last_key) or "L"
+            dest_key = get_next_key(store, dest_parent, prefix)
+
+        try:
+            new_path = move_palnode(store, source_path, dest_parent, dest_key)
+        except (KeyError, ValueError) as exc:
+            error = ToolOutput(status="error", content=str(exc), content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        save_store(store)
+
+        tool_output = ToolOutput(
+            status="success",
+            content=f"Moved {source_path} to {new_path}.",
+            content_type="text",
+            metadata={"source_path": source_path, "new_path": new_path, "dest_parent": dest_parent},
+        )
+        return [TextContent(type="text", text=tool_output.model_dump_json())]
+
+
+# ---------------------------------------------------------------------------
+# palcopy
+# ---------------------------------------------------------------------------
+
+
+class PalCopyTool(BaseTool):
+    def get_name(self) -> str:
+        return "palcopy"
+
+    def get_description(self) -> str:
+        return (
+            "Deep copy a context store node to a new location, preserving the original. "
+            "Use pallist to find node paths."
+        )
+
+    def get_input_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "source_path": {
+                    "type": "string",
+                    "description": "Full dot-path of the node to copy (e.g. 'myproject.L1.F0.L2').",
+                },
+                "dest_parent": {
+                    "type": "string",
+                    "description": "Full dot-path of the destination parent (e.g. 'myproject' for root level).",
+                },
+                "dest_key": {
+                    "type": "string",
+                    "description": "Key name at destination (e.g. 'L3'). If omitted, auto-generates the next available key using the source node's key prefix.",
+                },
+            },
+            "required": ["source_path", "dest_parent"],
+            "additionalProperties": False,
+        }
+
+    def get_annotations(self) -> dict:
+        return {"readOnlyHint": False, "openWorldHint": False}
+
+    def get_system_prompt(self) -> str:
+        return ""
+
+    def get_request_model(self):
+        return ToolRequest
+
+    def requires_model(self) -> bool:
+        return False
+
+    def get_model_category(self):
+        from tools.models import ToolModelCategory
+
+        return ToolModelCategory.FAST_RESPONSE
+
+    async def prepare_prompt(self, _request: ToolRequest) -> str:
+        return ""
+
+    def format_response(self, response: str, _request: ToolRequest, _model_info: Optional[dict] = None) -> str:
+        return response
+
+    async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
+        from tools.models import ToolOutput
+        from utils.palstore import (
+            _get_key_prefix,
+            copy_palnode,
+            get_next_key,
+            load_store,
+            parse_store_path,
+            resolve_root_alias,
+            resolve_store_location,
+            save_store,
+        )
+
+        source_path = arguments.get("source_path", "")
+        dest_parent = arguments.get("dest_parent", "")
+        dest_key = arguments.get("dest_key")
+
+        root_id, _ = parse_store_path(source_path)
+
+        location = resolve_store_location(root_id)
+        if location is None:
+            error = ToolOutput(status="error", content=f'Store "{root_id}" not found.', content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        directory, root_id = location
+        store = load_store(directory, root_id)
+        if store is None:
+            error = ToolOutput(status="error", content=f'Store file not found: "{root_id}".', content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        try:
+            source_path = resolve_root_alias(store, source_path)
+            dest_parent = resolve_root_alias(store, dest_parent)
+        except KeyError as exc:
+            error = ToolOutput(status="error", content=str(exc), content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        if dest_key is None:
+            _, src_segments = parse_store_path(source_path)
+            src_last_key = src_segments[-1] if src_segments else ""
+            prefix = _get_key_prefix(src_last_key) or "L"
+            dest_key = get_next_key(store, dest_parent, prefix)
+
+        try:
+            new_path = copy_palnode(store, source_path, dest_parent, dest_key)
+        except (KeyError, ValueError) as exc:
+            error = ToolOutput(status="error", content=str(exc), content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        save_store(store)
+
+        tool_output = ToolOutput(
+            status="success",
+            content=f"Copied {source_path} to {new_path}.",
+            content_type="text",
+            metadata={"source_path": source_path, "new_path": new_path, "dest_parent": dest_parent},
+        )
+        return [TextContent(type="text", text=tool_output.model_dump_json())]
+
+
+# ---------------------------------------------------------------------------
+# palfold
+# ---------------------------------------------------------------------------
+
+
+class PalFoldTool(BaseTool):
+    def get_name(self) -> str:
+        return "palfold"
+
+    def get_description(self) -> str:
+        return (
+            "Fold an ancestry range of nodes into a single aggregated node and insert it into the tree. "
+            "Aggregates prompt/response content and unions file references. Use pallist to find node paths."
+        )
+
+    def get_input_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "start_path": {
+                    "type": "string",
+                    "description": "Full dot-path of range start (e.g. 'myproject.L1.F0.analyze'). Inclusive.",
+                },
+                "end_path": {
+                    "type": "string",
+                    "description": "Full dot-path of range end (e.g. 'myproject.L1.F0.analyze.F0.thinkdeep.F0.planner'). Must be a descendant of start. Inclusive.",
+                },
+                "dest_parent": {
+                    "type": "string",
+                    "description": "Where to insert the folded node. Defaults to the root store_id (promotes to layer).",
+                },
+                "dest_key": {
+                    "type": "string",
+                    "description": "Key for the folded node at destination. Defaults to next available L-key.",
+                },
+                "label": {
+                    "type": "string",
+                    "description": "Optional label for the folded node.",
+                },
+            },
+            "required": ["start_path", "end_path"],
+            "additionalProperties": False,
+        }
+
+    def get_annotations(self) -> dict:
+        return {"readOnlyHint": False, "openWorldHint": False}
+
+    def get_system_prompt(self) -> str:
+        return ""
+
+    def get_request_model(self):
+        return ToolRequest
+
+    def requires_model(self) -> bool:
+        return False
+
+    def get_model_category(self):
+        from tools.models import ToolModelCategory
+
+        return ToolModelCategory.FAST_RESPONSE
+
+    async def prepare_prompt(self, _request: ToolRequest) -> str:
+        return ""
+
+    def format_response(self, response: str, _request: ToolRequest, _model_info: Optional[dict] = None) -> str:
+        return response
+
+    async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
+        from tools.models import ToolOutput
+        from utils.palstore import (
+            add_palnode,
+            fold_palnode_range,
+            get_next_key,
+            load_store,
+            parse_store_path,
+            resolve_root_alias,
+            resolve_store_location,
+            save_store,
+        )
+
+        start_path = arguments.get("start_path", "")
+        end_path = arguments.get("end_path", "")
+        dest_parent = arguments.get("dest_parent")
+        dest_key = arguments.get("dest_key")
+        label = arguments.get("label")
+
+        root_id, _ = parse_store_path(start_path)
+
+        location = resolve_store_location(root_id)
+        if location is None:
+            error = ToolOutput(status="error", content=f'Store "{root_id}" not found.', content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        directory, root_id = location
+        store = load_store(directory, root_id)
+        if store is None:
+            error = ToolOutput(status="error", content=f'Store file not found: "{root_id}".', content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        try:
+            start_path = resolve_root_alias(store, start_path)
+            end_path = resolve_root_alias(store, end_path)
+        except KeyError as exc:
+            error = ToolOutput(status="error", content=str(exc), content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        try:
+            folded = fold_palnode_range(store, start_path, end_path)
+        except (KeyError, ValueError) as exc:
+            error = ToolOutput(status="error", content=str(exc), content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        if label is not None:
+            folded.label = label
+
+        if dest_parent is None:
+            dest_parent = store.store_id
+        else:
+            try:
+                dest_parent = resolve_root_alias(store, dest_parent)
+            except KeyError as exc:
+                error = ToolOutput(status="error", content=str(exc), content_type="text")
+                return [TextContent(type="text", text=error.model_dump_json())]
+
+        if dest_key is None:
+            dest_key = get_next_key(store, dest_parent, "L")
+
+        try:
+            new_path = add_palnode(store, dest_parent, dest_key, folded)
+        except (KeyError, ValueError) as exc:
+            error = ToolOutput(status="error", content=str(exc), content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        save_store(store)
+
+        content_len = len(folded.content or "")
+        file_count = len(folded.files)
+        tool_output = ToolOutput(
+            status="success",
+            content=f"Folded range {start_path}..{end_path} into {new_path} ({content_len} chars, {file_count} files).",
+            content_type="text",
+            metadata={
+                "new_path": new_path,
+                "start_path": start_path,
+                "end_path": end_path,
+                "content_length": content_len,
+                "file_count": file_count,
+            },
+        )
+        return [TextContent(type="text", text=tool_output.model_dump_json())]
+
+
+# ---------------------------------------------------------------------------
+# paldelete
+# ---------------------------------------------------------------------------
+
+
+class PalDeleteTool(BaseTool):
+    def get_name(self) -> str:
+        return "paldelete"
+
+    def get_description(self) -> str:
+        return (
+            "Delete a context store node and shift subsequent same-prefix siblings down to fill the gap. "
+            "Use pallist to find node paths."
+        )
+
+    def get_input_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "node_path": {
+                    "type": "string",
+                    "description": "Full dot-path of the node to delete (e.g. 'myproject.L3').",
+                },
+            },
+            "required": ["node_path"],
+            "additionalProperties": False,
+        }
+
+    def get_annotations(self) -> dict:
+        return {"readOnlyHint": False, "openWorldHint": False}
+
+    def get_system_prompt(self) -> str:
+        return ""
+
+    def get_request_model(self):
+        return ToolRequest
+
+    def requires_model(self) -> bool:
+        return False
+
+    def get_model_category(self):
+        from tools.models import ToolModelCategory
+
+        return ToolModelCategory.FAST_RESPONSE
+
+    async def prepare_prompt(self, _request: ToolRequest) -> str:
+        return ""
+
+    def format_response(self, response: str, _request: ToolRequest, _model_info: Optional[dict] = None) -> str:
+        return response
+
+    async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
+        from tools.models import ToolOutput
+        from utils.palstore import (
+            delete_palnode_with_shift,
+            load_store,
+            parse_store_path,
+            resolve_root_alias,
+            resolve_store_location,
+            save_store,
+        )
+
+        node_path = arguments.get("node_path", "")
+
+        root_id, _ = parse_store_path(node_path)
+
+        location = resolve_store_location(root_id)
+        if location is None:
+            error = ToolOutput(status="error", content=f'Store "{root_id}" not found.', content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        directory, root_id = location
+        store = load_store(directory, root_id)
+        if store is None:
+            error = ToolOutput(status="error", content=f'Store file not found: "{root_id}".', content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        try:
+            node_path = resolve_root_alias(store, node_path)
+        except KeyError as exc:
+            error = ToolOutput(status="error", content=str(exc), content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        try:
+            result = delete_palnode_with_shift(store, node_path)
+        except (KeyError, ValueError) as exc:
+            error = ToolOutput(status="error", content=str(exc), content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        save_store(store)
+
+        shifted_summary = [f"{old} -> {new}" for old, new in result["shifted"]]
+        lines = [f"Deleted {result['deleted']}."]
+        if shifted_summary:
+            lines.append(f"Shifted {len(shifted_summary)} sibling(s): {', '.join(shifted_summary)}.")
+        if result["had_children"]:
+            lines.append("Warning: deleted node had children — subtree removed.")
+
+        tool_output = ToolOutput(
+            status="success",
+            content=" ".join(lines),
+            content_type="text",
+            metadata={
+                "deleted": result["deleted"],
+                "shifted": shifted_summary,
+                "had_children": result["had_children"],
             },
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]

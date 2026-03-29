@@ -6,12 +6,12 @@ from .analyze_prompt import ANALYZE_PROMPT
 from .chat_prompt import CHAT_PROMPT
 from .codereview_prompt import CODEREVIEW_PROMPT
 from .consensus_prompt import CONSENSUS_PROMPT
-from .palstore_prompt import CONTEXT_PROMPT
 from .debug_prompt import DEBUG_ISSUE_PROMPT
 from .docgen_prompt import DOCGEN_PROMPT
 from .generate_code_prompt import GENERATE_CODE_PROMPT
 from .imagegen_prompt import IMAGEGEN_PROMPT
 from .narrate_prompt import NARRATE_PROMPT
+from .palstore_prompt import CONTEXT_PROMPT
 from .perceive_prompt import PERCEIVE_PROMPT
 from .planner_prompt import PLANNER_PROMPT
 from .precommit_prompt import PRECOMMIT_PROMPT

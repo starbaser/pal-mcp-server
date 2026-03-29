@@ -637,8 +637,8 @@ class TestContextBuilder:
         """Regression: when layers share a file via content blobs, the same
         file body must NOT appear multiple times in the reconstructed history.
         This is the core invariant that diff-based dedup protects."""
-        from utils.palstore_builder import build_context_from_ancestry
         from utils.file_diff import decide_file_representation
+        from utils.palstore_builder import build_context_from_ancestry
 
         file_body = "class Foo:\n    pass\n"
         mtime = "2026-01-01 00:00:00 UTC"

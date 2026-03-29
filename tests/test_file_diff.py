@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from utils.palstore import PalNode
 from utils.file_diff import (
     build_file_state_from_ancestry,
     compute_additions_only_diff,
@@ -13,6 +12,7 @@ from utils.file_diff import (
     format_diff_block,
     format_file_block,
 )
+from utils.palstore import PalNode
 
 
 def _make_node(

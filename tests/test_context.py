@@ -7,8 +7,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from tools.palstore import PalInitTool, PalListTool, PalQueryTool, PalStoreRequest, PalStoreTool
 from tools.models import ToolModelCategory
+from tools.palstore import PalInitTool, PalListTool, PalQueryTool, PalStoreRequest, PalStoreTool
 
 
 class TestPalInitTool:

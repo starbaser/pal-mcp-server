@@ -36,6 +36,7 @@ def main() -> None:
 
     # Back up store file before any modification
     from utils.context_store import get_store_path
+
     store_path = get_store_path(directory, store_id)
     bak_path = store_path + ".bak"
     shutil.copy2(store_path, bak_path)

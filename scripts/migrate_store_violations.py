@@ -12,8 +12,7 @@ import sys
 
 sys.path.insert(0, ".")
 
-from utils.context_store import StoreNode, load_store, resolve_store_location, get_store_path, save_store
-
+from utils.context_store import StoreNode, get_store_path, load_store, resolve_store_location, save_store
 
 # ---------------------------------------------------------------------------
 # Key helpers
@@ -137,8 +136,7 @@ def fix_tool_under_q(store_name: str, l_key: str, q_key: str, tool_key: str) -> 
 
     save_store(store)
     print(
-        f"  {store_name}.{l_key}.{q_key}.{tool_key}"
-        f"  →  {store_name}.{l_key}.{q_key}.{f_key}.{canonical_tool_name}"
+        f"  {store_name}.{l_key}.{q_key}.{tool_key}" f"  →  {store_name}.{l_key}.{q_key}.{f_key}.{canonical_tool_name}"
     )
 
 

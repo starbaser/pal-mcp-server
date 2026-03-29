@@ -135,6 +135,22 @@ SimpleTool → ContextBaseTool ─── CtxStoreTool, CtxQueryTool
                                  (requires_model=True, thinking_mode="max")
 ```
 
+**Context Store Tree Rules** (`utils/context_store.py`):
+
+`add_child()` enforces structural node rules via `VALID_CHILD_KEYS`. Each parent type allows only specific child key categories:
+
+```
+           │ L-child │ Q-child │ F-child │ numeric │ tool-child
+──────────┼─────────┼─────────┼─────────┼─────────┼───────────
+root      │    ✓    │    ✗    │    ✓    │    ✗    │    ✗
+store     │    ✗    │    ✓    │    ✓    │    ✗    │    ✗
+query     │    ✗    │    ✓    │    ✓    │    ✓    │    ✗
+fork      │    ✓    │    ✓    │    ✓    │    ✗    │    ✓
+tool      │    ✗    │    ✗    │    ✓    │    ✓    │    ✗
+```
+
+Key rule: **L-nodes cannot have L-children**. `CtxStoreTool` uses `resolve_layer_insertion_point()` to find the correct sibling-level parent when called on an L-node path (e.g., `myproject.L7` → inserts `L8` at root, not `L7.L1`).
+
 ### MCP Transport Limits
 
 `MCP_PROMPT_SIZE_LIMIT` (~60K chars default) limits **user input** crossing MCP transport. It does NOT limit system prompts, file content embedded by tools, conversation history, or prompts sent to external models.

@@ -459,19 +459,17 @@ class CtxStoreTool(ContextBaseTool):
         return f"{response}\n\n---\n\nAGENT'S TURN: Context layer stored. Use the store_id to add more layers or query this store."
 
     def _create_continuation_offer(self, _request, _model_info: Optional[dict] = None):
-        from utils.context_store import get_next_key
+        from utils.context_store import get_next_key, resolve_layer_insertion_point
 
         store = getattr(self, "_store", None)
         store_id = getattr(self, "_store_id", None)
         if store is None or store_id is None:
             return None
 
-        self._next_key = get_next_key(store, store_id, "L")
-        root_id = store.store_id
-        if store_id == root_id:
-            self._new_store_path = f"{root_id}.{self._next_key}"
-        else:
-            self._new_store_path = f"{store_id}.{self._next_key}"
+        insertion_parent = resolve_layer_insertion_point(store, store_id)
+        self._insertion_parent = insertion_parent
+        self._next_key = get_next_key(store, insertion_parent, "L")
+        self._new_store_path = f"{insertion_parent}.{self._next_key}"
 
         context_window, context_used = self._get_context_token_info()
         return {
@@ -487,9 +485,9 @@ class CtxStoreTool(ContextBaseTool):
         from utils.context_store import StoreNode, add_child, save_store
 
         store = getattr(self, "_store", None)
-        store_id = getattr(self, "_store_id", None)
+        insertion_parent = getattr(self, "_insertion_parent", None)
         next_key = getattr(self, "_next_key", None)
-        if store is None or store_id is None or next_key is None:
+        if store is None or insertion_parent is None or next_key is None:
             logger.warning("ctxstore: missing store state in _record_assistant_turn, skipping write")
             return
 
@@ -511,7 +509,7 @@ class CtxStoreTool(ContextBaseTool):
             content=content,
         )
 
-        add_child(store, store_id, next_key, node)
+        add_child(store, insertion_parent, next_key, node)
         save_store(store)
 
 

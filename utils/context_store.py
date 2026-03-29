@@ -36,6 +36,38 @@ _ARMED_PATH = os.path.join(_CTX_DIR, "armed.json")
 
 
 # ---------------------------------------------------------------------------
+# Key helpers
+# ---------------------------------------------------------------------------
+
+
+def _categorize_key(key: str) -> str:
+    """Categorize a node key: 'L', 'Q', 'F', 'numeric', or 'tool'."""
+    if key.startswith("L") and key[1:].isdigit():
+        return "L"
+    if key.startswith("Q") and key[1:].isdigit():
+        return "Q"
+    if key.startswith("F") and key[1:].isdigit():
+        return "F"
+    if key.isdigit():
+        return "numeric"
+    return "tool"
+
+
+VALID_CHILD_KEYS: dict[str, set[str]] = {
+    "root": {"L", "F"},
+    "store": {"Q", "F"},
+    "query": {"Q", "numeric", "F"},
+    "fork": {"L", "Q", "F", "tool"},
+    "tool": {"F", "numeric"},
+}
+
+
+def _is_l_node_key(key: str) -> bool:
+    """Return True if key is an L-node key (e.g. 'L1', 'L14')."""
+    return key.startswith("L") and key[1:].isdigit()
+
+
+# ---------------------------------------------------------------------------
 # Data models
 # ---------------------------------------------------------------------------
 
@@ -181,14 +213,30 @@ def add_child(store: StoreRoot, parent_path: str, child_key: str, node: StoreNod
     When parent_path equals the store root id, the node is added directly to
     store.children. Otherwise the parent is resolved and the node is appended to
     its children dict.
+
+    Raises ValueError when the child key category violates the tree structure
+    rules defined in VALID_CHILD_KEYS.
     """
+    child_cat = _categorize_key(child_key)
     if parent_path == store.store_id:
-        store.children[child_key] = node
+        parent_type = "root"
     else:
         parent = resolve_node(store, parent_path)
         if parent is None:
             raise KeyError(f"parent path not found in store: {parent_path}")
-        parent.children[child_key] = node
+        parent_type = parent.entry_type
+
+    allowed = VALID_CHILD_KEYS.get(parent_type, set())
+    if child_cat not in allowed:
+        raise ValueError(
+            f"Invalid tree structure: {child_cat}-node '{child_key}' "
+            f"cannot be a child of {parent_type}-node at '{parent_path}'"
+        )
+
+    if parent_path == store.store_id:
+        store.children[child_key] = node
+    else:
+        resolve_node(store, parent_path).children[child_key] = node
     return f"{parent_path}.{child_key}"
 
 
@@ -212,13 +260,9 @@ def walk_ancestry(store: StoreRoot, store_id: str) -> list[StoreNode]:
         node = current.get(seg)
         if node is None:
             break
-        if seg[0] == "L" and seg[1:].isdigit():
+        if _is_l_node_key(seg):
             target_idx = int(seg[1:])
-            preceding = [
-                (int(k[1:]), v)
-                for k, v in current.items()
-                if k[0] == "L" and k[1:].isdigit() and int(k[1:]) < target_idx
-            ]
+            preceding = [(int(k[1:]), v) for k, v in current.items() if _is_l_node_key(k) and int(k[1:]) < target_idx]
             preceding.sort(key=lambda kv: kv[0])
             ancestry.extend(v for _, v in preceding)
         ancestry.append(node)
@@ -256,12 +300,21 @@ def walk_range(store: StoreRoot, start_path: str, end_path: str) -> list[StoreNo
     return ancestry[start_idx:]
 
 
-def get_last_layer_path(store: StoreRoot) -> str | None:
+def get_last_layer_path(store: StoreRoot, parent_path: str | None = None) -> str | None:
     """Return dotted path to the highest-numbered L-child, or None if no layers exist."""
-    count = sum(1 for k in store.children if k.startswith("L") and k[1:].isdigit())
-    if not count:
+    if parent_path is None:
+        parent_path = store.store_id
+
+    if parent_path == store.store_id:
+        container = store.children
+    else:
+        parent_node = resolve_node(store, parent_path)
+        container = parent_node.children if parent_node is not None else {}
+
+    indices = [int(k[1:]) for k in container if _is_l_node_key(k)]
+    if not indices:
         return None
-    return f"{store.store_id}.L{count}"
+    return f"{parent_path}.L{max(indices)}"
 
 
 def resolve_root_alias(store: StoreRoot, store_id: str) -> str:
@@ -305,6 +358,25 @@ def get_next_key(store: StoreRoot, parent_path: str, prefix: str) -> str:
         return f"{prefix}{max(indices) + 1}" if indices else f"{prefix}{start}"
 
     raise ValueError(f"Unsupported prefix for get_next_key: {prefix!r}")
+
+
+def resolve_layer_insertion_point(store: StoreRoot, store_id: str) -> str:
+    """Return the parent path where the next L-node should be inserted.
+
+    When store_id points directly to an L-node (e.g. 'myproject.L7'), the next
+    L-node is a sibling — return L7's parent path. For root, fork, query, or tool
+    nodes, the next L-node is a child — return store_id itself.
+    """
+    _, segments = parse_store_path(store_id)
+    if not segments:
+        return store_id
+
+    last_seg = segments[-1]
+    if _is_l_node_key(last_seg):
+        if len(segments) == 1:
+            return store.store_id
+        return f"{store.store_id}.{'.'.join(segments[:-1])}"
+    return store_id
 
 
 def _get_key_prefix(key: str) -> str:

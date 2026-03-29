@@ -21,12 +21,14 @@ from utils.context_store import (
     load_store,
     parse_store_path,
     rebuild_index,
+    resolve_layer_insertion_point,
     resolve_node,
     resolve_root_alias,
     resolve_store_location,
     save_store,
     update_index,
     walk_ancestry,
+    walk_range,
 )
 
 # ---------------------------------------------------------------------------
@@ -1063,15 +1065,15 @@ class TestAddChildEdgeCases:
         add_child(store, "mystore", "L1", n1)
         update_index(store.directory, store.store_id)
 
-        n2 = _make_node(entry_type="query", prompt="q0", response="rq0")
-        path2 = add_child(store, "mystore.L1", "Q0", n2)
-        assert path2 == "mystore.L1.Q0"
+        n2 = _make_node(entry_type="fork", prompt="", response="")
+        path2 = add_child(store, "mystore.L1", "F0", n2)
+        assert path2 == "mystore.L1.F0"
 
         n3 = _make_node(entry_type="tool", prompt="tool-p", response="tool-r")
-        path3 = add_child(store, "mystore.L1.Q0", "thinkdeep", n3)
-        assert path3 == "mystore.L1.Q0.thinkdeep"
+        path3 = add_child(store, "mystore.L1.F0", "thinkdeep", n3)
+        assert path3 == "mystore.L1.F0.thinkdeep"
 
-        assert store.children["L1"].children["Q0"].children["thinkdeep"].prompt == "tool-p"
+        assert store.children["L1"].children["F0"].children["thinkdeep"].prompt == "tool-p"
 
 
 # ---------------------------------------------------------------------------
@@ -1437,8 +1439,8 @@ class TestGetLastLayerPath:
         store = _make_root()
         store.children["L1"] = _make_node()
         store.children["L5"] = _make_node()
-        # count is 2, so returns L2 — assumes contiguous numbering
-        assert get_last_layer_path(store) == "mystore.L2"
+        # Returns the highest-indexed L-node
+        assert get_last_layer_path(store) == "mystore.L5"
 
 
 # ---------------------------------------------------------------------------
@@ -1462,3 +1464,352 @@ class TestResolveRootAlias:
     def test_root_with_no_layers_returns_passthrough(self, ctx_env):
         store = _make_root()
         assert resolve_root_alias(store, "mystore") == "mystore"
+
+
+# ---------------------------------------------------------------------------
+# TestNodeRulesMatrix
+# ---------------------------------------------------------------------------
+
+
+def _build_parent_scaffold(store, parent_type):
+    """Return the parent_path string for add_child tests given parent_type."""
+    if parent_type == "root":
+        return store.store_id
+    if parent_type == "store":
+        store.children["L1"] = _make_node(entry_type="store")
+        return "mystore.L1"
+    if parent_type == "query":
+        store.children["L1"] = _make_node(entry_type="store")
+        store.children["L1"].children["Q0"] = _make_node(entry_type="query")
+        return "mystore.L1.Q0"
+    if parent_type == "fork":
+        store.children["F0"] = _make_node(entry_type="fork")
+        return "mystore.F0"
+    if parent_type == "tool":
+        store.children["F0"] = _make_node(entry_type="fork")
+        store.children["F0"].children["thinkdeep"] = _make_node(entry_type="tool")
+        return "mystore.F0.thinkdeep"
+    raise ValueError(f"Unknown parent_type: {parent_type}")
+
+
+class TestNodeRulesMatrix:
+    @pytest.mark.parametrize(
+        "parent_type,child_key,child_entry_type,description",
+        [
+            ("root", "L1", "store", "L at root"),
+            ("root", "F0", "fork", "F at root"),
+            ("store", "Q0", "query", "Q at store"),
+            ("store", "F0", "fork", "F at store"),
+            ("query", "Q0", "query", "Q at query"),
+            ("query", "1", "query", "numeric at query"),
+            ("query", "F0", "fork", "F at query"),
+            ("fork", "L1", "store", "L at fork"),
+            ("fork", "Q0", "query", "Q at fork"),
+            ("fork", "F0", "fork", "F at fork"),
+            ("fork", "thinkdeep", "tool", "tool at fork"),
+            ("tool", "F0", "fork", "F at tool"),
+            ("tool", "1", "query", "numeric at tool"),
+        ],
+    )
+    def test_valid_child(self, ctx_env, parent_type, child_key, child_entry_type, description):
+        store = _make_root()
+        parent_path = _build_parent_scaffold(store, parent_type)
+        child = _make_node(entry_type=child_entry_type)
+        result = add_child(store, parent_path, child_key, child)
+        assert result == f"{parent_path}.{child_key}"
+
+    @pytest.mark.parametrize(
+        "parent_type,child_key,child_entry_type,description",
+        [
+            ("root", "Q0", "query", "Q at root"),
+            ("root", "1", "query", "numeric at root"),
+            ("root", "thinkdeep", "tool", "tool at root"),
+            ("store", "L1", "store", "L at store"),
+            ("store", "1", "query", "numeric at store"),
+            ("store", "thinkdeep", "tool", "tool at store"),
+            ("query", "L1", "store", "L at query"),
+            ("query", "thinkdeep", "tool", "tool at query"),
+            ("tool", "L1", "store", "L at tool"),
+            ("tool", "Q0", "query", "Q at tool"),
+            ("tool", "thinkdeep", "tool", "tool at tool"),
+            ("fork", "1", "query", "numeric at fork"),
+        ],
+    )
+    def test_invalid_child(self, ctx_env, parent_type, child_key, child_entry_type, description):
+        store = _make_root()
+        parent_path = _build_parent_scaffold(store, parent_type)
+        child = _make_node(entry_type=child_entry_type)
+        with pytest.raises(ValueError):
+            add_child(store, parent_path, child_key, child)
+
+
+# ---------------------------------------------------------------------------
+# TestReferenceTree
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def ref_tree(ctx_env):
+    """Build the reference tree using add_child for every node."""
+    store = _make_root()
+    update_index(store.directory, store.store_id)
+
+    # Root level: L1, L2, L3, F0
+    add_child(store, "mystore", "L1", _make_node(entry_type="store", prompt="p1"))
+    add_child(store, "mystore", "L2", _make_node(entry_type="store", prompt="p2"))
+    add_child(store, "mystore", "L3", _make_node(entry_type="store", prompt="p3"))
+    add_child(store, "mystore", "F0", _make_node(entry_type="fork"))
+
+    # L1 subtree
+    add_child(store, "mystore.L1", "Q0", _make_node(entry_type="query", prompt="what is X?"))
+    add_child(store, "mystore.L1", "F0", _make_node(entry_type="fork"))
+
+    # L1.Q0 subtree
+    add_child(store, "mystore.L1.Q0", "Q0", _make_node(entry_type="query", prompt="sub-question"))
+    add_child(store, "mystore.L1.Q0", "1", _make_node(entry_type="query", prompt="follow-up 1"))
+    add_child(store, "mystore.L1.Q0", "2", _make_node(entry_type="query", prompt="follow-up 2"))
+    add_child(store, "mystore.L1.Q0", "F0", _make_node(entry_type="fork"))
+    add_child(store, "mystore.L1.Q0.F0", "thinkdeep", _make_node(entry_type="tool", prompt="td"))
+
+    # L1.F0 subtree
+    add_child(store, "mystore.L1.F0", "L1", _make_node(entry_type="store", prompt="branch1"))
+    add_child(store, "mystore.L1.F0", "L2", _make_node(entry_type="store", prompt="branch2"))
+    add_child(store, "mystore.L1.F0", "F0", _make_node(entry_type="fork"))
+    add_child(store, "mystore.L1.F0.L1", "Q0", _make_node(entry_type="query", prompt="branch query"))
+    add_child(store, "mystore.L1.F0.F0", "L1", _make_node(entry_type="store", prompt="deep branch"))
+
+    # L2 subtree
+    add_child(store, "mystore.L2", "Q0", _make_node(entry_type="query", prompt="query on L2"))
+    add_child(store, "mystore.L2", "F0", _make_node(entry_type="fork"))
+    add_child(store, "mystore.L2.F0", "analyze", _make_node(entry_type="tool", prompt="analyze"))
+    add_child(store, "mystore.L2.F0.analyze", "F0", _make_node(entry_type="fork"))
+    add_child(store, "mystore.L2.F0.analyze.F0", "chat", _make_node(entry_type="tool", prompt="chat"))
+
+    # Root F0 subtree
+    add_child(store, "mystore.F0", "L1", _make_node(entry_type="store", prompt="root fork layer"))
+    add_child(store, "mystore.F0", "Q0", _make_node(entry_type="query", prompt="root fork query"))
+    add_child(store, "mystore.F0", "thinkdeep", _make_node(entry_type="tool", prompt="root fork td"))
+
+    return store
+
+
+# ---------------------------------------------------------------------------
+# TestWalkAncestryComplex
+# ---------------------------------------------------------------------------
+
+
+class TestWalkAncestryComplex:
+    @pytest.mark.parametrize(
+        "path,expected_count,expected_types",
+        [
+            ("mystore.L1", 1, ["store"]),
+            ("mystore.L2", 2, ["store", "store"]),
+            ("mystore.L3", 3, ["store", "store", "store"]),
+            ("mystore.L1.Q0", 2, ["store", "query"]),
+            ("mystore.L1.Q0.Q0", 3, ["store", "query", "query"]),
+            ("mystore.L1.Q0.1", 3, ["store", "query", "query"]),
+            ("mystore.L1.Q0.2", 3, ["store", "query", "query"]),
+            ("mystore.L1.Q0.F0", 3, ["store", "query", "fork"]),
+            ("mystore.L1.Q0.F0.thinkdeep", 4, ["store", "query", "fork", "tool"]),
+            ("mystore.L1.F0", 2, ["store", "fork"]),
+            ("mystore.L1.F0.L1", 3, ["store", "fork", "store"]),
+            ("mystore.L1.F0.L2", 4, ["store", "fork", "store", "store"]),
+            ("mystore.L1.F0.L1.Q0", 4, ["store", "fork", "store", "query"]),
+            ("mystore.L1.F0.F0", 3, ["store", "fork", "fork"]),
+            ("mystore.L1.F0.F0.L1", 4, ["store", "fork", "fork", "store"]),
+            ("mystore.L2.Q0", 3, ["store", "store", "query"]),
+            ("mystore.L2.F0", 3, ["store", "store", "fork"]),
+            ("mystore.L2.F0.analyze", 4, ["store", "store", "fork", "tool"]),
+            ("mystore.L2.F0.analyze.F0", 5, ["store", "store", "fork", "tool", "fork"]),
+            ("mystore.L2.F0.analyze.F0.chat", 6, ["store", "store", "fork", "tool", "fork", "tool"]),
+            ("mystore.F0", 1, ["fork"]),
+            ("mystore.F0.L1", 2, ["fork", "store"]),
+            ("mystore.F0.Q0", 2, ["fork", "query"]),
+            ("mystore.F0.thinkdeep", 2, ["fork", "tool"]),
+        ],
+    )
+    def test_walk_path(self, ref_tree, path, expected_count, expected_types):
+        result = walk_ancestry(ref_tree, path)
+        assert len(result) == expected_count, f"path={path}: expected {expected_count} nodes, got {len(result)}"
+        assert [n.entry_type for n in result] == expected_types, f"path={path}: type mismatch"
+
+
+# ---------------------------------------------------------------------------
+# TestWalkRangeComplex
+# ---------------------------------------------------------------------------
+
+
+class TestWalkRangeComplex:
+    @pytest.mark.parametrize(
+        "start,end,expected_count,expected_types",
+        [
+            ("mystore.L1", "mystore.L3", 3, ["store", "store", "store"]),
+            ("mystore.L1", "mystore.L1.Q0.F0.thinkdeep", 4, ["store", "query", "fork", "tool"]),
+            ("mystore.L1.Q0", "mystore.L1.Q0.2", 2, ["query", "query"]),
+            ("mystore.L1.Q0", "mystore.L1.Q0.F0.thinkdeep", 3, ["query", "fork", "tool"]),
+            ("mystore.L1.F0", "mystore.L1.F0.L2", 3, ["fork", "store", "store"]),
+            ("mystore.L1.F0", "mystore.L1.F0.F0.L1", 3, ["fork", "fork", "store"]),
+            ("mystore.L2", "mystore.L2.F0.analyze.F0.chat", 5, ["store", "fork", "tool", "fork", "tool"]),
+            ("mystore.F0", "mystore.F0.thinkdeep", 2, ["fork", "tool"]),
+            ("mystore.L1", "mystore.L2.Q0", 3, ["store", "store", "query"]),
+        ],
+    )
+    def test_valid_range(self, ref_tree, start, end, expected_count, expected_types):
+        result = walk_range(ref_tree, start, end)
+        assert len(result) == expected_count, f"start={start}, end={end}: expected {expected_count}, got {len(result)}"
+        assert [n.entry_type for n in result] == expected_types, f"start={start}, end={end}: type mismatch"
+
+    @pytest.mark.parametrize(
+        "start,end",
+        [
+            ("mystore.L2", "mystore.L1"),
+            ("mystore.L1.Q0", "mystore.L2.Q0"),
+            ("mystore.L1.F0.L1", "mystore.L2"),
+            ("mystore.F0", "mystore.L1"),
+            ("mystore.NONEXIST", "mystore.L1"),
+            ("mystore.L1", "mystore.NONEXIST"),
+        ],
+    )
+    def test_invalid_range(self, ref_tree, start, end):
+        with pytest.raises(ValueError):
+            walk_range(ref_tree, start, end)
+
+
+# ---------------------------------------------------------------------------
+# TestInsertionOrder
+# ---------------------------------------------------------------------------
+
+
+def _build_minimal_ref_tree(store):
+    """Build a subset of the reference tree used for insertion-order checks."""
+    add_child(store, "mystore", "L1", _make_node(entry_type="store", prompt="p1"))
+    add_child(store, "mystore", "L2", _make_node(entry_type="store", prompt="p2"))
+    add_child(store, "mystore", "L3", _make_node(entry_type="store", prompt="p3"))
+    add_child(store, "mystore", "F0", _make_node(entry_type="fork"))
+    add_child(store, "mystore.L1", "F0", _make_node(entry_type="fork"))
+    add_child(store, "mystore.L1.F0", "L1", _make_node(entry_type="store", prompt="branch1"))
+    add_child(store, "mystore.L1.F0", "L2", _make_node(entry_type="store", prompt="branch2"))
+    add_child(store, "mystore.L2", "F0", _make_node(entry_type="fork"))
+    add_child(store, "mystore.L2.F0", "analyze", _make_node(entry_type="tool", prompt="analyze"))
+    add_child(store, "mystore.L2.F0.analyze", "F0", _make_node(entry_type="fork"))
+    add_child(store, "mystore.L2.F0.analyze.F0", "chat", _make_node(entry_type="tool", prompt="chat"))
+
+
+def _assert_insertion_order_queries(store):
+    r1 = walk_ancestry(store, "mystore.L3")
+    assert len(r1) == 3
+    assert [n.prompt for n in r1] == ["p1", "p2", "p3"]
+
+    r2 = walk_ancestry(store, "mystore.L1.F0.L2")
+    assert len(r2) == 4
+    assert [n.entry_type for n in r2] == ["store", "fork", "store", "store"]
+
+    r3 = walk_ancestry(store, "mystore.L2.F0.analyze.F0.chat")
+    assert len(r3) == 6
+
+
+class TestInsertionOrder:
+    def test_forward_order(self, ctx_env):
+        store = _make_root()
+        update_index(store.directory, store.store_id)
+        _build_minimal_ref_tree(store)
+        _assert_insertion_order_queries(store)
+
+    def test_reverse_order(self, ctx_env):
+        store = _make_root()
+        update_index(store.directory, store.store_id)
+
+        # Build bottom-up, right-to-left where possible using direct assignment
+        # for nodes that must exist before their parents can be referenced.
+        # Nodes at same level can be added in any order; only parent→child ordering matters.
+        add_child(store, "mystore", "L3", _make_node(entry_type="store", prompt="p3"))
+        add_child(store, "mystore", "L2", _make_node(entry_type="store", prompt="p2"))
+        add_child(store, "mystore", "L1", _make_node(entry_type="store", prompt="p1"))
+        add_child(store, "mystore", "F0", _make_node(entry_type="fork"))
+
+        add_child(store, "mystore.L2", "F0", _make_node(entry_type="fork"))
+        add_child(store, "mystore.L2.F0", "analyze", _make_node(entry_type="tool", prompt="analyze"))
+        add_child(store, "mystore.L2.F0.analyze", "F0", _make_node(entry_type="fork"))
+        add_child(store, "mystore.L2.F0.analyze.F0", "chat", _make_node(entry_type="tool", prompt="chat"))
+
+        add_child(store, "mystore.L1", "F0", _make_node(entry_type="fork"))
+        add_child(store, "mystore.L1.F0", "L2", _make_node(entry_type="store", prompt="branch2"))
+        add_child(store, "mystore.L1.F0", "L1", _make_node(entry_type="store", prompt="branch1"))
+
+        _assert_insertion_order_queries(store)
+
+    def test_interleaved_order(self, ctx_env):
+        store = _make_root()
+        update_index(store.directory, store.store_id)
+
+        add_child(store, "mystore", "L1", _make_node(entry_type="store", prompt="p1"))
+        add_child(store, "mystore", "L2", _make_node(entry_type="store", prompt="p2"))
+        add_child(store, "mystore.L1", "F0", _make_node(entry_type="fork"))
+        add_child(store, "mystore", "L3", _make_node(entry_type="store", prompt="p3"))
+        add_child(store, "mystore.L2", "F0", _make_node(entry_type="fork"))
+        add_child(store, "mystore.L1.F0", "L1", _make_node(entry_type="store", prompt="branch1"))
+        add_child(store, "mystore.L2.F0", "analyze", _make_node(entry_type="tool", prompt="analyze"))
+        add_child(store, "mystore.L1.F0", "L2", _make_node(entry_type="store", prompt="branch2"))
+        add_child(store, "mystore.L2.F0.analyze", "F0", _make_node(entry_type="fork"))
+        add_child(store, "mystore", "F0", _make_node(entry_type="fork"))
+        add_child(store, "mystore.L2.F0.analyze.F0", "chat", _make_node(entry_type="tool", prompt="chat"))
+
+        _assert_insertion_order_queries(store)
+
+
+# ---------------------------------------------------------------------------
+# TestResolveLayerInsertionPoint
+# ---------------------------------------------------------------------------
+
+
+class TestResolveLayerInsertionPoint:
+    @pytest.mark.parametrize(
+        "store_id,expected_parent",
+        [
+            ("mystore", "mystore"),
+            ("mystore.L7", "mystore"),
+            ("mystore.L2", "mystore"),
+            ("mystore.F0", "mystore.F0"),
+            ("mystore.F0.L3", "mystore.F0"),
+            ("mystore.L1.F0.L2", "mystore.L1.F0"),
+            ("mystore.L1.F0.F0.L1", "mystore.L1.F0.F0"),
+            ("mystore.L2.Q0", "mystore.L2.Q0"),
+            ("mystore.L2.F0.analyze", "mystore.L2.F0.analyze"),
+        ],
+    )
+    def test_insertion_point(self, ctx_env, store_id, expected_parent):
+        store = _make_root()
+        result = resolve_layer_insertion_point(store, store_id)
+        assert result == expected_parent
+
+
+# ---------------------------------------------------------------------------
+# TestCtxStoreSiblingBug
+# ---------------------------------------------------------------------------
+
+
+class TestCtxStoreSiblingBug:
+    def test_l7_sibling_at_root(self, ctx_env):
+        store = _make_root()
+        update_index(store.directory, store.store_id)
+        for i in range(1, 8):
+            add_child(store, "mystore", f"L{i}", _make_node(entry_type="store", prompt=f"p{i}"))
+
+        parent = resolve_layer_insertion_point(store, "mystore.L7")
+        assert parent == "mystore"
+
+        next_key = get_next_key(store, parent, "L")
+        assert next_key == "L8"
+
+    def test_fork_l3_sibling_within_fork(self, ctx_env):
+        store = _make_root()
+        update_index(store.directory, store.store_id)
+        add_child(store, "mystore", "F0", _make_node(entry_type="fork"))
+        for i in range(1, 4):
+            add_child(store, "mystore.F0", f"L{i}", _make_node(entry_type="store", prompt=f"fp{i}"))
+
+        parent = resolve_layer_insertion_point(store, "mystore.F0.L3")
+        assert parent == "mystore.F0"
+
+        next_key = get_next_key(store, parent, "L")
+        assert next_key == "L4"

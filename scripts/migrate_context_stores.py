@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import CONVERSATION_STORAGE_DIR, PAL_STORAGE_DIR
-from utils.context_store import StoreNode, StoreRoot, save_store, update_index
+from utils.palstore import PalNode, PalRoot, save_store, update_index
 
 _OLD_REGISTRY_PATH = os.path.join(PAL_STORAGE_DIR, "context", "stores.json")
 _THREADS_DIR = CONVERSATION_STORAGE_DIR
@@ -117,7 +117,7 @@ def _entry_timestamp(entry: dict) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _build_layer_nodes(root_entry: dict) -> dict[str, StoreNode]:
+def _build_layer_nodes(root_entry: dict) -> dict[str, PalNode]:
     """Build the L-keyed layer nodes for a root store entry.
 
     The root entry and all its .LN siblings share the same thread_id and
@@ -129,7 +129,7 @@ def _build_layer_nodes(root_entry: dict) -> dict[str, StoreNode]:
         _stats["threads_missing"] += 1
         return {}
 
-    nodes: dict[str, StoreNode] = {}
+    nodes: dict[str, PalNode] = {}
     pair_count = (len(turns) + 1) // 2  # ceil division
 
     for pair_idx in range(0, pair_count):
@@ -138,7 +138,7 @@ def _build_layer_nodes(root_entry: dict) -> dict[str, StoreNode]:
             continue
         prompt, response, label, model, timestamp = pair
         key = f"L{pair_idx + 1}"
-        nodes[key] = StoreNode(
+        nodes[key] = PalNode(
             entry_type="store",
             label=label or None,
             timestamp=timestamp or _entry_timestamp(root_entry),
@@ -151,8 +151,8 @@ def _build_layer_nodes(root_entry: dict) -> dict[str, StoreNode]:
     return nodes
 
 
-def _build_query_node(q_entry: dict, all_entries: dict[str, dict]) -> StoreNode | None:
-    """Build a query StoreNode with optional numeric follow-up children.
+def _build_query_node(q_entry: dict, all_entries: dict[str, dict]) -> PalNode | None:
+    """Build a query PalNode with optional numeric follow-up children.
 
     Q entries that share a thread_id with their parent have their turns
     interleaved in the same thread file; those with a distinct thread_id
@@ -164,7 +164,7 @@ def _build_query_node(q_entry: dict, all_entries: dict[str, dict]) -> StoreNode 
     turns = load_thread_file(thread_id)
     if turns is None:
         _stats["threads_missing"] += 1
-        return StoreNode(
+        return PalNode(
             entry_type="query",
             label=q_entry.get("label") or "⚠ thread data missing",
             timestamp=_entry_timestamp(q_entry),
@@ -189,7 +189,7 @@ def _build_query_node(q_entry: dict, all_entries: dict[str, dict]) -> StoreNode 
     effective_label = q_entry.get("label") or label or None
 
     # Build numeric follow-up children from additional pairs in the same thread
-    children: dict[str, StoreNode] = {}
+    children: dict[str, PalNode] = {}
     pair_count = (len(turns) + 1) // 2
     for pair_idx in range(1, pair_count):
         pair = _extract_turn_pair(turns, pair_idx)
@@ -197,7 +197,7 @@ def _build_query_node(q_entry: dict, all_entries: dict[str, dict]) -> StoreNode 
             continue
         fp, fr, fl, fm, fts = pair
         key = str(pair_idx)
-        children[key] = StoreNode(
+        children[key] = PalNode(
             entry_type="query",
             label=fl or None,
             timestamp=fts or _entry_timestamp(q_entry),
@@ -224,7 +224,7 @@ def _build_query_node(q_entry: dict, all_entries: dict[str, dict]) -> StoreNode 
                 fu_pair = _extract_turn_pair(fu_turns, 0)
                 if fu_pair:
                     fp, fr, fl, fm, fts = fu_pair
-                    children[suffix] = StoreNode(
+                    children[suffix] = PalNode(
                         entry_type="query",
                         label=fl or None,
                         timestamp=fts or _entry_timestamp(other_entry),
@@ -234,7 +234,7 @@ def _build_query_node(q_entry: dict, all_entries: dict[str, dict]) -> StoreNode 
                     )
                     _stats["nodes_migrated"] += 1
 
-    node = StoreNode(
+    node = PalNode(
         entry_type="query",
         label=effective_label,
         timestamp=timestamp or _entry_timestamp(q_entry),
@@ -247,13 +247,13 @@ def _build_query_node(q_entry: dict, all_entries: dict[str, dict]) -> StoreNode 
     return node
 
 
-def _build_tool_node(tool_entry: dict) -> StoreNode | None:
-    """Build a tool StoreNode from the first turn pair of its thread."""
+def _build_tool_node(tool_entry: dict) -> PalNode | None:
+    """Build a tool PalNode from the first turn pair of its thread."""
     thread_id = tool_entry["thread_id"]
     turns = load_thread_file(thread_id)
     if turns is None:
         _stats["threads_missing"] += 1
-        return StoreNode(
+        return PalNode(
             entry_type="tool",
             label="⚠ thread data missing",
             timestamp=_entry_timestamp(tool_entry),
@@ -268,7 +268,7 @@ def _build_tool_node(tool_entry: dict) -> StoreNode | None:
         return None
 
     prompt, response, label, model, timestamp = first_pair
-    node = StoreNode(
+    node = PalNode(
         entry_type="tool",
         label=label or tool_entry.get("label") or None,
         timestamp=timestamp or _entry_timestamp(tool_entry),
@@ -289,9 +289,9 @@ def _build_tool_node(tool_entry: dict) -> StoreNode | None:
 def _build_children(
     parent_id: str,
     all_entries: dict[str, dict],
-) -> dict[str, StoreNode]:
+) -> dict[str, PalNode]:
     """Recursively build the children dict for a node at parent_id."""
-    children: dict[str, StoreNode] = {}
+    children: dict[str, PalNode] = {}
 
     # Collect direct children only (immediate children whose store_id is
     # exactly parent_id + "." + one segment).
@@ -334,8 +334,8 @@ def _build_children(
     return children
 
 
-def build_tree_for_root(root_entry: dict, all_entries: dict[str, dict]) -> StoreRoot:
-    """Construct a StoreRoot with a fully populated node tree."""
+def build_tree_for_root(root_entry: dict, all_entries: dict[str, dict]) -> PalRoot:
+    """Construct a PalRoot with a fully populated node tree."""
     thread_id = root_entry["thread_id"]
     turns = load_thread_file(thread_id)
 
@@ -364,7 +364,7 @@ def build_tree_for_root(root_entry: dict, all_entries: dict[str, dict]) -> Store
         key=lambda kv: _natural_key(kv[0]),
     )
 
-    root_children: dict[str, StoreNode] = {}
+    root_children: dict[str, PalNode] = {}
     for key in sorted(layer_nodes.keys(), key=_natural_key):
         root_children[key] = layer_nodes[key]
 
@@ -382,7 +382,7 @@ def build_tree_for_root(root_entry: dict, all_entries: dict[str, dict]) -> Store
         else:
             root_children[q_key] = q_node
 
-    store = StoreRoot(
+    store = PalRoot(
         store_id=root_entry["store_id"],
         directory=root_entry["directory"],
         label=root_label,
@@ -483,8 +483,8 @@ def migrate(dry_run: bool = False) -> None:
         print("\n[dry-run] No changes written to disk.")
 
 
-def _count_nodes(store: StoreRoot) -> int:
-    """Count total StoreNode instances recursively in a StoreRoot."""
+def _count_nodes(store: PalRoot) -> int:
+    """Count total PalNode instances recursively in a PalRoot."""
 
     def _recurse(children: dict) -> int:
         total = 0

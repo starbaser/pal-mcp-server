@@ -21,7 +21,7 @@ def format_layer_markdown(
 ) -> str:
     """Format a context layer or tool response as structured markdown.
 
-    Shared by ctxread (layer display) and content save (response persistence).
+    Shared by palread (layer display) and content save (response persistence).
     """
     lines = [f"# {heading}", ""]
     if label:

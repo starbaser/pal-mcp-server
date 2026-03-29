@@ -12,7 +12,7 @@ import sys
 
 sys.path.insert(0, "/home/eigenmage/dev/opt/pal-mcp-server")
 
-from utils.context_store import load_store, resolve_store_location, save_store
+from utils.palstore import load_store, resolve_store_location, save_store
 
 
 def max_l_index(children: dict) -> int:
@@ -35,7 +35,7 @@ def main() -> None:
         sys.exit(1)
 
     # Back up store file before any modification
-    from utils.context_store import get_store_path
+    from utils.palstore import get_store_path
 
     store_path = get_store_path(directory, store_id)
     bak_path = store_path + ".bak"

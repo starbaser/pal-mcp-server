@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 from utils.token_utils import count_tokens
 
 if TYPE_CHECKING:
-    from utils.context_store import StoreNode
+    from utils.palstore import PalNode
 
 # Regex to extract all BEGIN FILE blocks from a content blob
 _FILE_BLOCK_RE = re.compile(
@@ -182,7 +182,7 @@ def decide_file_representation(
     return format_diff_block(file_path, diff_body, base_layer_key or "unknown")
 
 
-def build_file_state_from_ancestry(ancestors: list[StoreNode]) -> dict[str, str]:
+def build_file_state_from_ancestry(ancestors: list[PalNode]) -> dict[str, str]:
     """Build a map of file paths to their latest content from ancestor nodes.
 
     Walks ancestors in order (oldest to newest), extracting file content
@@ -204,7 +204,7 @@ def build_file_state_from_ancestry(ancestors: list[StoreNode]) -> dict[str, str]
 
 def find_base_layer_key(
     file_path: str,
-    ancestors: list[StoreNode],
+    ancestors: list[PalNode],
     ancestor_keys: list[str] | None = None,
 ) -> str | None:
     """Find the key of the most recent ancestor node that contained a file.

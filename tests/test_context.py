@@ -1,5 +1,5 @@
 """
-Tests for context store tools — ctxinit, ctxstore, ctxquery, ctxlist, and context_registry.
+Tests for palstore tools — palinit, palstore, palquery, pallist.
 """
 
 import json
@@ -7,16 +7,16 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from tools.context import CtxInitTool, CtxListTool, CtxQueryTool, CtxStoreRequest, CtxStoreTool
+from tools.palstore import PalInitTool, PalListTool, PalQueryTool, PalStoreRequest, PalStoreTool
 from tools.models import ToolModelCategory
 
 
-class TestCtxInitTool:
+class TestPalInitTool:
     def setup_method(self):
-        self.tool = CtxInitTool()
+        self.tool = PalInitTool()
 
     def test_tool_metadata(self):
-        assert self.tool.get_name() == "ctxinit"
+        assert self.tool.get_name() == "palinit"
         assert "create" in self.tool.get_description().lower()
         assert self.tool.requires_model() is False
         assert self.tool.get_model_category() is ToolModelCategory.FAST_RESPONSE
@@ -36,9 +36,9 @@ class TestCtxInitTool:
         assert annotations["readOnlyHint"] is False
 
     async def test_create_store(self):
-        with patch("utils.context_store.resolve_store_location", return_value=None):
-            with patch("utils.context_store.save_store") as mock_save:
-                with patch("utils.context_store.update_index") as mock_update:
+        with patch("utils.palstore.resolve_store_location", return_value=None):
+            with patch("utils.palstore.save_store") as mock_save:
+                with patch("utils.palstore.update_index") as mock_update:
                     result = await self.tool.execute({"store_name": "myproject", "directory": "/tmp/proj"})
 
         assert len(result) == 1
@@ -49,7 +49,7 @@ class TestCtxInitTool:
         mock_update.assert_called_once_with("/tmp/proj", "myproject")
 
     async def test_collision_existing_store(self):
-        with patch("utils.context_store.resolve_store_location", return_value=("/tmp/proj", "myproject")):
+        with patch("utils.palstore.resolve_store_location", return_value=("/tmp/proj", "myproject")):
             result = await self.tool.execute({"store_name": "myproject", "directory": "/tmp/proj"})
 
         assert len(result) == 1
@@ -66,12 +66,12 @@ class TestCtxInitTool:
         assert "dot" in payload["content"].lower()
 
 
-class TestCtxStoreTool:
+class TestPalStoreTool:
     def setup_method(self):
-        self.tool = CtxStoreTool()
+        self.tool = PalStoreTool()
 
     def test_tool_metadata(self):
-        assert self.tool.get_name() == "ctxstore"
+        assert self.tool.get_name() == "palstore"
         assert "layer" in self.tool.get_description().lower()
         assert self.tool.get_model_category() is ToolModelCategory.EXTENDED_REASONING
 
@@ -91,10 +91,10 @@ class TestCtxStoreTool:
         assert len(result) == 1
         payload = json.loads(result[0].text)
         assert payload["status"] == "error"
-        assert "ctxinit" in payload["content"].lower()
+        assert "palinit" in payload["content"].lower()
 
     async def test_store_id_not_found(self):
-        with patch("utils.context_store.resolve_store_location", return_value=None):
+        with patch("utils.palstore.resolve_store_location", return_value=None):
             result = await self.tool.execute({"store_id": "nonexistent", "prompt": "test"})
 
         assert len(result) == 1
@@ -106,7 +106,7 @@ class TestCtxStoreTool:
         assert self.tool.get_default_thinking_mode() == "max"
 
     async def test_prepare_prompt_includes_header(self):
-        request = CtxStoreRequest(prompt="ignored", store_id="myproject")
+        request = PalStoreRequest(prompt="ignored", store_id="myproject")
 
         with patch.object(self.tool, "handle_prompt_file_with_fallback", return_value="test content"):
             with patch.object(self.tool, "get_request_files", return_value=[]):
@@ -116,12 +116,12 @@ class TestCtxStoreTool:
         assert "test content" in prompt
 
 
-class TestCtxQueryTool:
+class TestPalQueryTool:
     def setup_method(self):
-        self.tool = CtxQueryTool()
+        self.tool = PalQueryTool()
 
     def test_tool_metadata(self):
-        assert self.tool.get_name() == "ctxquery"
+        assert self.tool.get_name() == "palquery"
         assert "query" in self.tool.get_description().lower()
 
     def test_schema_structure(self):
@@ -144,7 +144,7 @@ class TestCtxQueryTool:
         assert payload["status"] == "error"
 
     async def test_query_store_id_not_found(self):
-        with patch("utils.context_store.resolve_store_location", return_value=None):
+        with patch("utils.palstore.resolve_store_location", return_value=None):
             result = await self.tool.execute({"store_id": "missing", "prompt": "test"})
 
         assert len(result) == 1
@@ -152,12 +152,12 @@ class TestCtxQueryTool:
         assert payload["status"] == "error"
 
 
-class TestCtxListTool:
+class TestPalListTool:
     def setup_method(self):
-        self.tool = CtxListTool()
+        self.tool = PalListTool()
 
     def test_tool_metadata(self):
-        assert self.tool.get_name() == "ctxlist"
+        assert self.tool.get_name() == "pallist"
 
     def test_requires_model_false(self):
         assert self.tool.requires_model() is False
@@ -172,7 +172,7 @@ class TestCtxListTool:
         assert annotations["readOnlyHint"] is True
 
     async def test_execute_empty_registry(self):
-        with patch("utils.context_store.list_stores", return_value=[]):
+        with patch("utils.palstore.list_stores", return_value=[]):
             result = await self.tool.execute({})
 
         assert len(result) == 1
@@ -181,13 +181,13 @@ class TestCtxListTool:
         assert "No context stores found" in payload["content"]
 
     async def test_execute_with_stores(self):
-        from utils.context_store import StoreRoot
+        from utils.palstore import PalRoot
 
         stores = [
-            StoreRoot(store_id="myproject", directory="/tmp/proj", created_at="2026-01-01T00:00:00Z"),
+            PalRoot(store_id="myproject", directory="/tmp/proj", created_at="2026-01-01T00:00:00Z"),
         ]
 
-        with patch("utils.context_store.list_stores", return_value=stores):
+        with patch("utils.palstore.list_stores", return_value=stores):
             result = await self.tool.execute({})
 
         assert len(result) == 1
@@ -212,7 +212,7 @@ class TestContextEphemeralGuard:
         from server import reconstruct_thread_context
         from utils.conversation_memory import add_turn, create_thread, get_thread
 
-        thread_id = create_thread("ctxstore", {"prompt": "init"}, model_name="test-model")
+        thread_id = create_thread("palstore", {"prompt": "init"}, model_name="test-model")
         add_turn(thread_id, "assistant", "Stored initial context", model_name="test-model", model_provider="custom")
 
         arguments = {
@@ -236,7 +236,7 @@ class TestContextEphemeralGuard:
         from server import reconstruct_thread_context
         from utils.conversation_memory import add_turn, create_thread, get_thread
 
-        thread_id = create_thread("ctxstore", {"prompt": "init"}, model_name="test-model")
+        thread_id = create_thread("palstore", {"prompt": "init"}, model_name="test-model")
         add_turn(thread_id, "assistant", "Stored initial context", model_name="test-model", model_provider="custom")
 
         arguments = {
@@ -257,15 +257,15 @@ class TestContextEphemeralGuard:
         assert thread.turns[1].role == "user"
         assert thread.turns[1].content == "follow-up query"
 
-    def test_ctxquery_registered_in_tools(self):
+    def test_palquery_registered_in_tools(self):
         from server import TOOLS
 
-        assert "ctxquery" in TOOLS
+        assert "palquery" in TOOLS
 
-    def test_ctxstore_registered_in_tools(self):
+    def test_palstore_registered_in_tools(self):
         from server import TOOLS
 
-        assert "ctxstore" in TOOLS
+        assert "palstore" in TOOLS
 
 
 class TestContextForkChain:
@@ -274,11 +274,11 @@ class TestContextForkChain:
     async def test_fork_creates_parent_chain(self):
         from utils.conversation_memory import add_turn, create_thread, get_thread_chain
 
-        parent_id = create_thread("ctxstore", {"prompt": "parent init"}, model_name="gemini-test")
+        parent_id = create_thread("palstore", {"prompt": "parent init"}, model_name="gemini-test")
         add_turn(parent_id, "user", "Store this context")
         add_turn(parent_id, "assistant", "Context stored", model_name="gemini-test", model_provider="google")
 
-        fork_id = create_thread("ctxquery", {"prompt": "fork start"}, parent_thread_id=parent_id)
+        fork_id = create_thread("palquery", {"prompt": "fork start"}, parent_thread_id=parent_id)
 
         chain = get_thread_chain(fork_id)
 
@@ -289,7 +289,7 @@ class TestContextForkChain:
     async def test_fork_does_not_modify_parent(self):
         from utils.conversation_memory import add_turn, create_thread, get_thread
 
-        parent_id = create_thread("ctxstore", {"prompt": "parent"}, model_name="gemini-test")
+        parent_id = create_thread("palstore", {"prompt": "parent"}, model_name="gemini-test")
         add_turn(parent_id, "user", "Initial store")
         add_turn(parent_id, "assistant", "Acknowledged", model_name="gemini-test", model_provider="google")
 
@@ -297,7 +297,7 @@ class TestContextForkChain:
         assert parent_before is not None
         parent_turn_count = len(parent_before.turns)
 
-        fork_id = create_thread("ctxquery", {"prompt": "fork"}, parent_thread_id=parent_id)
+        fork_id = create_thread("palquery", {"prompt": "fork"}, parent_thread_id=parent_id)
         add_turn(fork_id, "user", "Fork query 1")
         add_turn(fork_id, "assistant", "Fork answer 1", model_name="gemini-test", model_provider="google")
         add_turn(fork_id, "user", "Fork query 2")
@@ -309,13 +309,13 @@ class TestContextForkChain:
     async def test_multi_level_fork_chain(self):
         from utils.conversation_memory import add_turn, create_thread, get_thread_chain
 
-        id_a = create_thread("ctxstore", {"prompt": "root"}, model_name="test-model")
+        id_a = create_thread("palstore", {"prompt": "root"}, model_name="test-model")
         add_turn(id_a, "assistant", "Root context", model_name="test-model", model_provider="custom")
 
-        id_b = create_thread("ctxquery", {"prompt": "fork-b"}, parent_thread_id=id_a)
+        id_b = create_thread("palquery", {"prompt": "fork-b"}, parent_thread_id=id_a)
         add_turn(id_b, "assistant", "Fork B context", model_name="test-model", model_provider="custom")
 
-        id_c = create_thread("ctxquery", {"prompt": "fork-c"}, parent_thread_id=id_b)
+        id_c = create_thread("palquery", {"prompt": "fork-c"}, parent_thread_id=id_b)
 
         chain = get_thread_chain(id_c)
 
@@ -329,20 +329,20 @@ class TestResolveStoreContinuation:
     """Tests for _resolve_store_continuation in server.py."""
 
     def _make_store(self, tmp_path, monkeypatch, store_id: str, directory: str):
-        """Create, save, and index a StoreRoot under tmp_path."""
+        """Create, save, and index a PalRoot under tmp_path."""
         import os
 
-        from utils import context_store
-        from utils.context_store import StoreRoot, save_store, update_index
+        from utils import palstore
+        from utils.palstore import PalRoot, save_store, update_index
 
         ctx_dir = str(tmp_path / "context")
-        monkeypatch.setattr(context_store, "_CTX_DIR", ctx_dir)
-        monkeypatch.setattr(context_store, "_INDEX_PATH", os.path.join(ctx_dir, "store-index.json"))
-        monkeypatch.setattr(context_store, "_ARMED_PATH", os.path.join(ctx_dir, "armed.json"))
+        monkeypatch.setattr(palstore, "_CTX_DIR", ctx_dir)
+        monkeypatch.setattr(palstore, "_INDEX_PATH", os.path.join(ctx_dir, "store-index.json"))
+        monkeypatch.setattr(palstore, "_ARMED_PATH", os.path.join(ctx_dir, "armed.json"))
 
         from datetime import datetime, timezone
 
-        store = StoreRoot(
+        store = PalRoot(
             store_id=store_id,
             directory=directory,
             created_at=datetime.now(timezone.utc).isoformat(),
@@ -355,12 +355,12 @@ class TestResolveStoreContinuation:
         import os
 
         from server import _resolve_store_continuation
-        from utils import context_store
+        from utils import palstore
 
         ctx_dir = str(tmp_path / "context")
-        monkeypatch.setattr(context_store, "_CTX_DIR", ctx_dir)
-        monkeypatch.setattr(context_store, "_INDEX_PATH", os.path.join(ctx_dir, "store-index.json"))
-        monkeypatch.setattr(context_store, "_ARMED_PATH", os.path.join(ctx_dir, "armed.json"))
+        monkeypatch.setattr(palstore, "_CTX_DIR", ctx_dir)
+        monkeypatch.setattr(palstore, "_INDEX_PATH", os.path.join(ctx_dir, "store-index.json"))
+        monkeypatch.setattr(palstore, "_ARMED_PATH", os.path.join(ctx_dir, "armed.json"))
 
         args = {"continuation_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"}
         result = _resolve_store_continuation("thinkdeep", args)
@@ -391,18 +391,18 @@ class TestResolveStoreContinuation:
         from datetime import datetime, timezone
 
         from server import _resolve_store_continuation
-        from utils.context_store import StoreNode, save_store
+        from utils.palstore import PalNode, save_store
 
         store = self._make_store(tmp_path, monkeypatch, "myproject", "/tmp/proj")
 
         # Simulate the structure a prior FORK call would have created:
         # myproject.F0 (fork) → myproject.F0.thinkdeep (tool)
-        fork_node = StoreNode(
+        fork_node = PalNode(
             entry_type="fork",
             label="thinkdeep",
             timestamp=datetime.now(timezone.utc).isoformat(),
         )
-        thinkdeep_node = StoreNode(
+        thinkdeep_node = PalNode(
             entry_type="tool",
             tool_name="thinkdeep",
             timestamp=datetime.now(timezone.utc).isoformat(),
@@ -429,18 +429,18 @@ class TestResolveStoreContinuation:
         from datetime import datetime, timezone
 
         from server import _resolve_store_continuation
-        from utils.context_store import StoreNode, save_store
+        from utils.palstore import PalNode, save_store
 
         store = self._make_store(tmp_path, monkeypatch, "myproject", "/tmp/proj")
 
         # Simulate the structure from a prior FORK call:
         # myproject.F0 (fork) → myproject.F0.thinkdeep (tool)
-        fork_node = StoreNode(
+        fork_node = PalNode(
             entry_type="fork",
             label="thinkdeep",
             timestamp=datetime.now(timezone.utc).isoformat(),
         )
-        thinkdeep_node = StoreNode(
+        thinkdeep_node = PalNode(
             entry_type="tool",
             tool_name="thinkdeep",
             timestamp=datetime.now(timezone.utc).isoformat(),
@@ -467,11 +467,11 @@ class TestResolveStoreContinuation:
         from datetime import datetime, timezone
 
         from server import _resolve_store_continuation
-        from utils.context_store import StoreNode, save_store
+        from utils.palstore import PalNode, save_store
 
         store = self._make_store(tmp_path, monkeypatch, "myproject", "/tmp/proj")
 
-        query_node = StoreNode(
+        query_node = PalNode(
             entry_type="query",
             timestamp=datetime.now(timezone.utc).isoformat(),
             prompt="query prompt",
@@ -494,11 +494,11 @@ class TestResolveStoreContinuation:
         from datetime import datetime, timezone
 
         from server import _resolve_store_continuation
-        from utils.context_store import StoreNode, save_store
+        from utils.palstore import PalNode, save_store
 
         store = self._make_store(tmp_path, monkeypatch, "myproject", "/tmp/proj")
 
-        layer_node = StoreNode(
+        layer_node = PalNode(
             entry_type="store",
             timestamp=datetime.now(timezone.utc).isoformat(),
             prompt="layer prompt",
@@ -687,7 +687,7 @@ class TestStrictHistoryEnforcement:
             thread_id="test-strict",
             created_at="2026-01-01T00:00:00Z",
             last_updated_at="2026-01-01T00:00:00Z",
-            tool_name="ctxstore",
+            tool_name="palstore",
             turns=turns,
             initial_context={},
         )
@@ -770,7 +770,7 @@ class TestStrictHistoryEnforcement:
             thread_id="test-fits",
             created_at="2026-01-01T00:00:00Z",
             last_updated_at="2026-01-01T00:00:01Z",
-            tool_name="ctxstore",
+            tool_name="palstore",
             turns=turns,
             initial_context={},
         )

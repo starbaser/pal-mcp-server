@@ -2,17 +2,17 @@
 set -euo pipefail
 
 # Read a context store node by its dot-path (e.g. lsp-spec.L1.Q0.F0.analyze)
-# Usage: ctxread.sh <store_id_path>
+# Usage: palread.sh <store_id_path>
 
 if [[ $# -lt 1 ]]; then
-    echo "Usage: ctxread.sh <store_id_path>" >&2
-    echo "  e.g. ctxread.sh lsp-spec.L1.Q0.F0.analyze" >&2
+    echo "Usage: palread.sh <store_id_path>" >&2
+    echo "  e.g. palread.sh lsp-spec.L1.Q0.F0.analyze" >&2
     exit 1
 fi
 
 exec uv run python3 -c "
 import sys
-from utils.context_store import load_store, resolve_node, resolve_store_location
+from utils.palstore import load_store, resolve_palnode, resolve_store_location
 
 store_id = sys.argv[1]
 location = resolve_store_location(store_id)
@@ -26,7 +26,7 @@ if store is None:
     print(f'Error: Store file not found: \"{root_id}\".', file=sys.stderr)
     sys.exit(1)
 
-node = resolve_node(store, store_id)
+node = resolve_palnode(store, store_id)
 if node is None:
     if store_id == store.store_id:
         print(f'# {store_id}')

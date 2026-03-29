@@ -71,19 +71,19 @@ from tools import (  # noqa: E402
     TracerTool,
     VersionTool,
 )
-from tools.context import (
-    CtxArmTool,
-    CtxExportTool,
-    CtxFileListTool,
-    CtxFileReadTool,
-    CtxForkTool,
-    CtxInitTool,
-    CtxListTool,
-    CtxQueryTool,
-    CtxReadTool,
-    CtxRenameTool,
-    CtxStoreTool,
-    CtxTraverseTool,
+from tools.palstore import (
+    PalArmTool,
+    PalExportTool,
+    PalFileListTool,
+    PalFileReadTool,
+    PalForkTool,
+    PalInitTool,
+    PalListTool,
+    PalQueryTool,
+    PalReadTool,
+    PalRenameTool,
+    PalStoreTool,
+    PalTraverseTool,
 )
 from tools.models import ToolOutput  # noqa: E402
 from tools.shared.exceptions import ToolExecutionError  # noqa: E402
@@ -298,18 +298,18 @@ TOOLS = {
     "version": VersionTool(),  # Display server version and system information
     "imagegen": ImageGenTool(),  # Native AI image generation and editing
     "perceive": PerceiveTool(),  # Structured media intelligence extraction (image, video, audio)
-    "ctxinit": CtxInitTool(),  # Create a named context store
-    "ctxstore": CtxStoreTool(),  # Store context layers in a persistent store
-    "ctxquery": CtxQueryTool(),  # Query against a context store
-    "ctxlist": CtxListTool(),  # List context stores and their full node trees
-    "ctxfork": CtxForkTool(),  # Create a fork point in a context store tree
-    "ctxread": CtxReadTool(),  # Read content of a specific context store node
-    "ctxtraverse": CtxTraverseTool(),  # Traverse a node range and render full thread rehydration
-    "ctxarm": CtxArmTool(),  # Arm/disarm a store for auto-revival on SessionStart
-    "ctxrename": CtxRenameTool(),  # Rename a root context store
-    "ctxexport": CtxExportTool(),  # Export entire store to self-contained markdown
-    "ctxfilelist": CtxFileListTool(),  # List files attached across a store tree
-    "ctxfileread": CtxFileReadTool(),  # Read a specific file's content from a store node
+    "palinit": PalInitTool(),  # Create a named context store
+    "palstore": PalStoreTool(),  # Store context layers in a persistent store
+    "palquery": PalQueryTool(),  # Query against a context store
+    "pallist": PalListTool(),  # List context stores and their full node trees
+    "palfork": PalForkTool(),  # Create a fork point in a context store tree
+    "palread": PalReadTool(),  # Read content of a specific context store node
+    "paltraverse": PalTraverseTool(),  # Traverse a node range and render full thread rehydration
+    "palarm": PalArmTool(),  # Arm/disarm a store for auto-revival on SessionStart
+    "palrename": PalRenameTool(),  # Rename a root context store
+    "palexport": PalExportTool(),  # Export entire store to self-contained markdown
+    "palfilelist": PalFileListTool(),  # List files attached across a store tree
+    "palfileread": PalFileReadTool(),  # Read a specific file's content from a store node
 }
 TOOLS = filter_disabled_tools(TOOLS)
 
@@ -410,33 +410,33 @@ PROMPT_TEMPLATES = {
         "description": "Show server version and system information",
         "template": "Show PAL MCP Server version",
     },
-    "ctxinit": {
-        "name": "ctxinit",
+    "palinit": {
+        "name": "palinit",
         "description": "Create a named context store",
         "template": "Initialize context store",
     },
-    "ctxstore": {
-        "name": "ctxstore",
+    "palstore": {
+        "name": "palstore",
         "description": "Store context layers in a persistent store",
         "template": "Store context with {model}",
     },
-    "ctxquery": {
-        "name": "ctxquery",
+    "palquery": {
+        "name": "palquery",
         "description": "Query a context store without changing its state",
         "template": "Query context store with {model}",
     },
-    "ctxlist": {
-        "name": "ctxlist",
+    "pallist": {
+        "name": "pallist",
         "description": "List context stores for a directory",
         "template": "List context stores",
     },
-    "ctxfilelist": {
-        "name": "ctxfilelist",
+    "palfilelist": {
+        "name": "palfilelist",
         "description": "List files attached across a context store tree",
         "template": "List files in context store",
     },
-    "ctxfileread": {
-        "name": "ctxfileread",
+    "palfileread": {
+        "name": "palfileread",
         "description": "Read stored file content from a context store node",
         "template": "Read file from context store",
     },
@@ -787,7 +787,7 @@ def _build_store_listing() -> str:
     """Build a compact context store snapshot for MCP handshake instructions."""
     import os
 
-    from utils.context_store import get_armed_store, list_stores
+    from utils.palstore import get_armed_store, list_stores
 
     cwd = os.getcwd()
     stores = list_stores(directory=cwd)
@@ -797,7 +797,7 @@ def _build_store_listing() -> str:
 
     armed_store = get_armed_store(cwd)
 
-    lines = [f"\n\nctxStores: Context stores for {cwd}:"]
+    lines = [f"\n\npalStores: Context stores for {cwd}:"]
     for store in stores:
         sid = store.store_id
         armed_marker = " [armed]" if (armed_store and sid == armed_store) else ""
@@ -829,13 +829,13 @@ def _resolve_store_continuation(tool_name: str, arguments: dict) -> str | None:
     """
     from datetime import datetime, timezone
 
-    from utils.context_builder import hydrate_thread_context
-    from utils.context_store import (
-        StoreNode,
-        add_child,
+    from utils.palstore_builder import hydrate_thread_context
+    from utils.palstore import (
+        PalNode,
+        add_palnode,
         get_next_key,
         load_store,
-        resolve_node,
+        resolve_palnode,
         resolve_store_location,
         save_store,
     )
@@ -853,11 +853,11 @@ def _resolve_store_continuation(tool_name: str, arguments: dict) -> str | None:
     if not store:
         return None
 
-    from utils.context_store import resolve_root_alias
+    from utils.palstore import resolve_root_alias
 
     continuation_id = resolve_root_alias(store, continuation_id)
 
-    node = resolve_node(store, continuation_id)
+    node = resolve_palnode(store, continuation_id)
 
     if node and node.entry_type == "tool" and node.tool_name == tool_name:
         # CONTINUE: same tool on same tool node — agent keeps the same path
@@ -881,19 +881,19 @@ def _resolve_store_continuation(tool_name: str, arguments: dict) -> str | None:
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
         fork_key = get_next_key(store, continuation_id, "F")
-        fork_node = StoreNode(
+        fork_node = PalNode(
             entry_type="fork",
             label=tool_name,
             timestamp=now,
         )
-        fork_path = add_child(store, continuation_id, fork_key, fork_node)
+        fork_path = add_palnode(store, continuation_id, fork_key, fork_node)
 
-        tool_node = StoreNode(
+        tool_node = PalNode(
             entry_type="tool",
             tool_name=tool_name,
             timestamp=now,
         )
-        tool_path = add_child(store, fork_path, tool_name, tool_node)
+        tool_path = add_palnode(store, fork_path, tool_name, tool_node)
 
         save_store(store)
 
@@ -979,10 +979,10 @@ def _inject_store_path_continuation(result: list, store_path: str, arguments: di
 
     # Persist tool response back to store tree
     if bridge and response_text is not None:
-        from utils.context_store import resolve_node, save_store
+        from utils.palstore import resolve_palnode, save_store
 
         try:
-            tool_node = resolve_node(bridge["store"], bridge["tool_path"])
+            tool_node = resolve_palnode(bridge["store"], bridge["tool_path"])
             if tool_node is not None:
                 # Update the existing tool node with the response content
                 tool_node.prompt = arguments.get("prompt", "") if arguments else ""
@@ -1016,7 +1016,7 @@ def _save_response_content(
     from datetime import datetime
 
     from config import CONTENT_STORAGE_DIR
-    from utils.context_store import encode_directory
+    from utils.palstore import encode_directory
     from utils.response_formatter import format_layer_markdown
 
     try:
@@ -1233,7 +1233,7 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
         # Consensus tool handles its own model configuration validation
         # No special handling needed at server level
 
-        # Skip model resolution for tools that don't require models (e.g., ctxinit, ctxlist)
+        # Skip model resolution for tools that don't require models (e.g., palinit, pallist)
         if not tool.requires_model():
             logger.debug(f"Tool {name} doesn't require model resolution - skipping model validation")
             result = await tool.execute(arguments)

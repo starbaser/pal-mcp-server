@@ -68,7 +68,7 @@ CLI Client (Claude/Gemini/Codex)
 - Response post-processing pipeline: `_inject_store_path_continuation()` → `_save_response_content()` → `_apply_output_format()`
 
 **`tools/`** — MCP tool implementations. Two base classes:
-- `SimpleTool` (`tools/simple/base.py`) — single request/response (chat, clink, imagegen, perceive, ctx tools)
+- `SimpleTool` (`tools/simple/base.py`) — single request/response (chat, clink, imagegen, perceive, pal tools)
 - `WorkflowTool` (`tools/workflow/base.py`) — multi-step workflows with expert analysis (analyze, codereview, debug, planner, etc.)
 
 Both inherit from `BaseTool` (`tools/shared/base_tool.py`). Required methods: `get_name()`, `get_description()`, `get_input_schema()`, `get_system_prompt()`, `execute()`.
@@ -86,7 +86,7 @@ Both inherit from `BaseTool` (`tools/shared/base_tool.py`). Required methods: `g
 - `build_conversation_history()`: Phase 1 collects turns in REVERSE chronological order (newest-first for token budgeting), Phase 2 reverses back to chronological for LLM presentation
 - `get_conversation_file_list()`: deduplicates files across turns, newest reference wins
 
-**`systemprompts/`** — Each tool has a corresponding `*_prompt.py` file (1:1 naming convention). Tools without prompts (clink, ctx*, listmodels, version, apilookup, challenge) return `""` from `get_system_prompt()`.
+**`systemprompts/`** — Each tool has a corresponding `*_prompt.py` file (1:1 naming convention). Tools without prompts (clink, pal*, listmodels, version, apilookup, challenge) return `""` from `get_system_prompt()`.
 
 **`config.py`** — Central configuration: version, model defaults, token limits, storage paths, timeouts
 
@@ -101,12 +101,12 @@ Models are resolved early at the MCP boundary in `handle_call_tool()`:
 4. Pass resolved context to tool
 
 Tools declare their preferred model tier via `get_model_category()` → `ToolModelCategory`:
-- `EXTENDED_REASONING` — most tools (codereview, debug, analyze, thinkdeep, ctxstore, ctxquery, etc.)
-- `FAST_RESPONSE` — chat, listmodels, version, ctxlist, ctxread, ctxarm, ctxfork, ctxinit, ctxrename, ctxexport, ctxfilelist, ctxfileread
+- `EXTENDED_REASONING` — most tools (codereview, debug, analyze, thinkdeep, palstore, palquery, etc.)
+- `FAST_RESPONSE` — chat, listmodels, version, pallist, palread, palarm, palfork, palinit, palrename, palexport, palfilelist, palfileread
 - `BALANCED` — perceive, clink
 - `IMAGE_GENERATION` — imagegen
 
-Tools that override `requires_model() → False` bypass model resolution entirely: clink, planner, consensus, docgen, tracer, challenge, apilookup, listmodels, version, and all ctx* tools except ctxstore and ctxquery.
+Tools that override `requires_model() → False` bypass model resolution entirely: clink, planner, consensus, docgen, tracer, challenge, apilookup, listmodels, version, and all pal* tools except palstore and palquery.
 
 ### Tool System
 
@@ -124,20 +124,20 @@ Tools that override `requires_model() → False` bypass model resolution entirel
 - `should_call_expert_analysis()` decides whether to invoke the expert model
 - `is_continuation_workflow()` — when `continuation_id` is present, skips multi-step and runs as single request
 
-**Context Tools** (`tools/context.py`) have a split inheritance:
+**Context Tools** (`tools/palstore.py`) have a split inheritance:
 ```
-BaseTool (direct) ─── CtxInitTool, CtxForkTool, CtxListTool, CtxReadTool,
-                      CtxArmTool, CtxRenameTool, CtxExportTool,
-                      CtxFileListTool, CtxFileReadTool
+BaseTool (direct) ─── PalInitTool, PalForkTool, PalListTool, PalReadTool,
+                      PalArmTool, PalRenameTool, PalExportTool,
+                      PalFileListTool, PalFileReadTool
                       (requires_model=False, pure filesystem)
 
-SimpleTool → ContextBaseTool ─── CtxStoreTool, CtxQueryTool
-                                 (requires_model=True, thinking_mode="max")
+SimpleTool → PalStoreBaseTool ─── PalStoreTool, PalQueryTool
+                                  (requires_model=True, thinking_mode="max")
 ```
 
-**Context Store Tree Rules** (`utils/context_store.py`):
+**Context Store Tree Rules** (`utils/palstore.py`):
 
-`add_child()` enforces structural node rules via `VALID_CHILD_KEYS`. Each parent type allows only specific child key categories:
+`add_palnode()` enforces structural node rules via `VALID_CHILD_KEYS`. Each parent type allows only specific child key categories:
 
 ```
            │ L-child │ Q-child │ F-child │ numeric │ tool-child
@@ -149,7 +149,7 @@ fork      │    ✓    │    ✓    │    ✓    │    ✗    │    ✓
 tool      │    ✗    │    ✗    │    ✓    │    ✓    │    ✗
 ```
 
-Key rule: **L-nodes cannot have L-children**. `CtxStoreTool` uses `resolve_layer_insertion_point()` to find the correct sibling-level parent when called on an L-node path (e.g., `myproject.L7` → inserts `L8` at root, not `L7.L1`).
+Key rule: **L-nodes cannot have L-children**. `PalStoreTool` uses `resolve_layer_insertion_point()` to find the correct sibling-level parent when called on an L-node path (e.g., `myproject.L7` → inserts `L8` at root, not `L7.L1`).
 
 ### MCP Transport Limits
 
@@ -194,16 +194,16 @@ class MyTool(BaseTool):
 
 Register in `server.py` TOOLS dict. Tools that bypass model resolution override `requires_model() -> False`.
 
-## Context Revival (ctxarm)
+## Context Revival (palarm)
 
-The `ctxarm` tool is a single-fire tripwire: it arms a context store for revival on the next user prompt, then automatically disarms. When armed, a `SessionStart` hook injects `additionalContext` forcing Claude to run `ctxlist` + `ctxquery` to restore project context, then removes the armed entry so subsequent prompts proceed normally.
+The `palarm` tool is a single-fire tripwire: it arms a context store for revival on the next user prompt, then automatically disarms. When armed, a `SessionStart` hook injects `additionalContext` forcing Claude to run `pallist` + `palquery` to restore project context, then removes the armed entry so subsequent prompts proceed normally.
 
 After compaction, a `PostCompact` hook auto-arms the most recently used store for the project, so the next tool call triggers a full revival from the store (compaction summaries are lossy).
 
 ### How It Works
 
 ```
-ctxarm tool ──▶ ~/.claude/pal/context/armed.json
+palarm tool ──▶ ~/.claude/pal/context/armed.json
                 { "/path/to/project": "my-project" }
 
 SessionStart hook ──▶ reads armed.json
@@ -224,10 +224,10 @@ The tripwire uses two separate armed files and hook events:
 
 | Scenario | Armed file | Hook | Fires on resume? |
 |----------|-----------|------|-------------------|
-| Manual arm (ctxarm) | `armed.json` | `SessionStart` | No |
+| Manual arm (palarm) | `armed.json` | `SessionStart` | No |
 | Post-compact auto-arm | `compact-armed.json` | `PreToolUse` | N/A (same session) |
 
-Hook scripts are at `scripts/ctx-arm.sh` and `scripts/ctx-compact.sh`.
+Hook scripts are at `scripts/pal-arm.sh` and `scripts/pal-compact.sh`.
 
 ### Storage
 

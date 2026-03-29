@@ -30,39 +30,39 @@ Debug server issues: add `--server-logs` to see server stderr.
 
 ```sh
 # List all stores
-mcp call ctxlist pal
+mcp call pallist pal
 
 # List stores for a specific project
-mcp call ctxlist pal -p '{"directory": "/abs/path/to/project"}'
+mcp call pallist pal -p '{"directory": "/abs/path/to/project"}'
 
 # Drill into a specific store
-mcp call ctxlist pal -p '{"store_id": "myproject"}'
+mcp call pallist pal -p '{"store_id": "myproject"}'
 ```
 
 ### Read
 
 ```sh
 # Read a node (metadata, prompt, response)
-mcp call ctxread pal -p '{"store_id": "myproject.L1"}'
+mcp call palread pal -p '{"store_id": "myproject.L1"}'
 
 # List files attached to a store tree
-mcp call ctxfilelist pal -p '{"store_id": "myproject"}'
+mcp call palfilelist pal -p '{"store_id": "myproject"}'
 
 # Read a specific stored file
-mcp call ctxfileread pal -p '{"store_id": "myproject.L1", "file_path": "/abs/path/to/file.py"}'
+mcp call palfileread pal -p '{"store_id": "myproject.L1", "file_path": "/abs/path/to/file.py"}'
 
 # Export store to markdown
-mcp call ctxexport pal -p '{"store_id": "myproject", "output_path": "/abs/path/export.md"}'
+mcp call palexport pal -p '{"store_id": "myproject", "output_path": "/abs/path/export.md"}'
 ```
 
 ### Create & Write
 
 ```sh
 # Initialize a new store
-mcp call ctxinit pal -p '{"store_name": "myproject", "directory": "/abs/path/to/project"}'
+mcp call palinit pal -p '{"store_name": "myproject", "directory": "/abs/path/to/project"}'
 
 # Add a layer (AI-synthesized — sends prompt + files to external model)
-mcp call ctxstore pal -p '{
+mcp call palstore pal -p '{
   "store_id": "myproject",
   "model": "gemini-2.5-pro",
   "prompt": "Project architecture overview",
@@ -71,7 +71,7 @@ mcp call ctxstore pal -p '{
 }'
 
 # Add a layer to an existing node
-mcp call ctxstore pal -p '{
+mcp call palstore pal -p '{
   "store_id": "myproject.L1",
   "model": "gemini-2.5-pro",
   "prompt": "Deep dive into the auth subsystem",
@@ -84,14 +84,14 @@ mcp call ctxstore pal -p '{
 
 ```sh
 # Query a store (AI answers from stored context)
-mcp call ctxquery pal -p '{
+mcp call palquery pal -p '{
   "store_id": "myproject",
   "model": "gemini-2.5-pro",
   "prompt": "What are the main architectural decisions?"
 }'
 
 # Follow-up query on a previous query result
-mcp call ctxquery pal -p '{
+mcp call palquery pal -p '{
   "store_id": "myproject.L3.Q0",
   "model": "gemini-2.5-pro",
   "prompt": "Which files implement that decision?"
@@ -102,16 +102,16 @@ mcp call ctxquery pal -p '{
 
 ```sh
 # Fork a store (branch for experimentation)
-mcp call ctxfork pal -p '{"store_id": "myproject.L2", "label": "experiment"}'
+mcp call palfork pal -p '{"store_id": "myproject.L2", "label": "experiment"}'
 
 # Arm for auto-revival on next Claude session
-mcp call ctxarm pal -p '{"store_id": "myproject", "directory": "/abs/path/to/project"}'
+mcp call palarm pal -p '{"store_id": "myproject", "directory": "/abs/path/to/project"}'
 
 # Disarm
-mcp call ctxarm pal -p '{"store_id": "myproject", "directory": "/abs/path/to/project", "disarm": true}'
+mcp call palarm pal -p '{"store_id": "myproject", "directory": "/abs/path/to/project", "disarm": true}'
 
 # Rename a store
-mcp call ctxrename pal -p '{"store_id": "myproject", "new_name": "proj-v2", "directory": "/abs/path"}'
+mcp call palrename pal -p '{"store_id": "myproject", "new_name": "proj-v2", "directory": "/abs/path"}'
 ```
 
 ## Other PAL Tools
@@ -153,9 +153,9 @@ mcp shell pal
 Then type tool names with JSON params directly:
 
 ```
-mcp > ctxlist {"directory": "/home/eigenmage/dev/opt/pal-mcp-server"}
-mcp > ctxread {"store_id": "pal-mcp-server.L1"}
-mcp > ctxstore {"store_id": "pal-mcp-server", "model": "gemini-2.5-pro", "prompt": "...", "context_label": "..."}
+mcp > pallist {"directory": "/home/eigenmage/dev/opt/pal-mcp-server"}
+mcp > palread {"store_id": "pal-mcp-server.L1"}
+mcp > palstore {"store_id": "pal-mcp-server", "model": "gemini-2.5-pro", "prompt": "...", "context_label": "..."}
 ```
 
 ## Troubleshooting

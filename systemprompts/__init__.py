@@ -6,7 +6,7 @@ from .analyze_prompt import ANALYZE_PROMPT
 from .chat_prompt import CHAT_PROMPT
 from .codereview_prompt import CODEREVIEW_PROMPT
 from .consensus_prompt import CONSENSUS_PROMPT
-from .context_prompt import CONTEXT_PROMPT
+from .palstore_prompt import CONTEXT_PROMPT
 from .debug_prompt import DEBUG_ISSUE_PROMPT
 from .docgen_prompt import DOCGEN_PROMPT
 from .generate_code_prompt import GENERATE_CODE_PROMPT

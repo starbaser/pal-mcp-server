@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from utils.context_store import StoreNode, StoreRoot
+from utils.palstore import PalNode, PalRoot
 
 
 def _make_content_blob(files: dict[str, str], prompt: str = "user text", response: str = "ok") -> str:
@@ -22,7 +22,7 @@ def _make_content_blob(files: dict[str, str], prompt: str = "user text", respons
     return f"{full_prompt}\n\n---\n\n{response}"
 
 
-def _make_store(layers: list[dict]) -> StoreRoot:
+def _make_store(layers: list[dict]) -> PalRoot:
     """Build a store with L-nodes from a list of layer specs.
 
     Each spec: {"files": {path: content}, "prompt": str, "response": str}
@@ -35,7 +35,7 @@ def _make_store(layers: list[dict]) -> StoreRoot:
             spec.get("prompt", f"layer {i} prompt"),
             spec.get("response", f"layer {i} response"),
         )
-        children[f"L{i}"] = StoreNode(
+        children[f"L{i}"] = PalNode(
             entry_type="store",
             timestamp=f"2026-01-0{i}T00:00:00Z",
             files=list(files_dict.keys()),
@@ -43,7 +43,7 @@ def _make_store(layers: list[dict]) -> StoreRoot:
             response=spec.get("response", f"layer {i} response"),
             content=content_blob,
         )
-    return StoreRoot(
+    return PalRoot(
         store_id="test-store",
         directory="/tmp/test",
         created_at="2026-01-01T00:00:00Z",

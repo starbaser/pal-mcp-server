@@ -374,7 +374,7 @@ class SimpleTool(BaseTool):
 
                         # Build conversation history with updated thread context
                         # Context store tools require strict mode — no silent truncation
-                        _strict_history = self.get_name() in ("ctxstore", "ctxquery")
+                        _strict_history = self.get_name() in ("palstore", "palquery")
                         conversation_history, conversation_tokens = build_conversation_history(
                             thread_context, self._model_context, strict=_strict_history
                         )

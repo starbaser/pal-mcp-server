@@ -32,7 +32,7 @@ if mcp tools pal &>/dev/null; then
     echo "Done. PAL registered as 'pal' in mcptools."
     echo ""
     echo "  mcp tools pal              # list tools"
-    echo "  mcp call ctxlist pal       # call a tool"
+    echo "  mcp call pallist pal       # call a tool"
     echo "  mcp shell pal              # interactive session"
     echo ""
     echo "See docs/mcptools-cli.md for the full reference."

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from utils.context_store import StoreNode
+from utils.palstore import PalNode
 from utils.file_diff import (
     build_file_state_from_ancestry,
     compute_additions_only_diff,
@@ -21,8 +21,8 @@ def _make_node(
     content: str = "",
     prompt: str = "p",
     response: str = "r",
-) -> StoreNode:
-    return StoreNode(
+) -> PalNode:
+    return PalNode(
         entry_type=entry_type,
         timestamp="2026-01-01T00:00:00Z",
         files=files or [],

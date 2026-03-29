@@ -9,7 +9,7 @@ from .chat import ChatTool
 from .clink import CLinkTool
 from .codereview import CodeReviewTool
 from .consensus import ConsensusTool
-from .context import CtxArmTool, CtxForkTool, CtxInitTool, CtxListTool, CtxQueryTool, CtxReadTool, CtxStoreTool
+from .palstore import PalArmTool, PalForkTool, PalInitTool, PalListTool, PalQueryTool, PalReadTool, PalStoreTool
 from .debug import DebugIssueTool
 from .docgen import DocgenTool
 from .imagegen import ImageGenTool
@@ -46,12 +46,12 @@ __all__ = [
     "VersionTool",
     "ImageGenTool",
     "PerceiveTool",
-    "CtxStoreTool",
-    "CtxQueryTool",
-    "CtxInitTool",
-    "CtxListTool",
-    "CtxForkTool",
-    "CtxReadTool",
-    "CtxArmTool",
+    "PalStoreTool",
+    "PalQueryTool",
+    "PalInitTool",
+    "PalListTool",
+    "PalForkTool",
+    "PalReadTool",
+    "PalArmTool",
     "NarrateTool",
 ]

@@ -12,7 +12,7 @@ import sys
 
 sys.path.insert(0, ".")
 
-from utils.context_store import StoreNode, get_store_path, load_store, resolve_store_location, save_store
+from utils.palstore import PalNode, get_store_path, load_store, resolve_store_location, save_store
 
 # ---------------------------------------------------------------------------
 # Key helpers
@@ -30,7 +30,7 @@ def _next_root_l_key(store) -> str:
     return f"L{next_idx}"
 
 
-def _next_f_key(q_node: StoreNode) -> str:
+def _next_f_key(q_node: PalNode) -> str:
     """Return the next available F-key in a Q-node's children."""
     pattern = re.compile(r"^F(\d+)$")
     indices = [int(m.group(1)) for k in q_node.children if (m := pattern.match(k))]
@@ -124,7 +124,7 @@ def fix_tool_under_q(store_name: str, l_key: str, q_key: str, tool_key: str) -> 
     bak = backup_store(directory, root_id)
     print(f"  backed up → {bak}")
 
-    fork_node = StoreNode(
+    fork_node = PalNode(
         entry_type="fork",
         timestamp=tool_node.timestamp,
         label=canonical_tool_name,

@@ -12,13 +12,13 @@ import logging
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from utils.context_store import StoreNode, StoreRoot
+    from utils.palstore import PalNode, PalRoot
     from utils.conversation_memory import ThreadContext
 
 logger = logging.getLogger(__name__)
 
 
-def build_context_from_ancestry(ancestors: list[StoreNode], include_files: bool = True) -> str:
+def build_context_from_ancestry(ancestors: list[PalNode], include_files: bool = True) -> str:
     """Build formatted conversation history from ancestor chain.
 
     Each ancestor node's prompt+response becomes a user/assistant turn pair in the history.
@@ -69,7 +69,7 @@ def build_context_from_ancestry(ancestors: list[StoreNode], include_files: bool 
     return "\n".join(parts)
 
 
-def hydrate_thread_context(store: StoreRoot, node_path: str) -> ThreadContext:
+def hydrate_thread_context(store: PalRoot, node_path: str) -> ThreadContext:
     """Create an ephemeral ThreadContext from store tree for non-ctx tool bridge.
 
     Walks the ancestry from root to the target node, creates ConversationTurn objects
@@ -80,10 +80,10 @@ def hydrate_thread_context(store: StoreRoot, node_path: str) -> ThreadContext:
 
     The hydrated thread is ephemeral; the store tree remains the source of truth.
     """
-    from utils.context_store import walk_ancestry
+    from utils.palstore import walk_palnode_ancestry
     from utils.conversation_memory import add_turn, create_thread, get_thread
 
-    ancestors = walk_ancestry(store, node_path)
+    ancestors = walk_palnode_ancestry(store, node_path)
 
     thread_id = create_thread(tool_name="ctx_hydrated", initial_request={}, model_name=None)
 

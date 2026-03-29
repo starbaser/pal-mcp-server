@@ -241,7 +241,7 @@ class NarrateTool(WorkflowTool):
         if step_number == 1:
             store_id = getattr(request, "store_id", None) if request else None
             store_note = (
-                f" If store_id '{store_id}' is provided, explore it via ctxread to identify relevant pages."
+                f" If store_id '{store_id}' is provided, explore it via palread to identify relevant pages."
                 if store_id
                 else ""
             )
@@ -314,7 +314,7 @@ class NarrateTool(WorkflowTool):
         by store_id path. This method reads the store's L-children by index as a compatibility bridge.
         """
         try:
-            from utils.context_store import load_store, resolve_store_location
+            from utils.palstore import load_store, resolve_store_location
 
             location = resolve_store_location(store_id)
             if location is None:
@@ -498,7 +498,7 @@ class NarrateTool(WorkflowTool):
             store_clause = ""
             if getattr(request, "store_id", None):
                 store_clause = (
-                    " If a store_id was provided, use ctxread to explore the store and identify which pages "
+                    " If a store_id was provided, use palread to explore the store and identify which pages "
                     "contain relevant background context."
                 )
             next_steps = (

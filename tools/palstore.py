@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 STORE_ID_DESCRIPTION = (
     "Dot-path identifier for a context store node. Root stores use a plain name (e.g. 'myproject'). "
     "Child nodes extend the path with dot notation (e.g. 'myproject.L1', 'myproject.L1.Q1'). "
-    "Use ctxlist to discover existing store_ids. Returned by ctxinit, ctxstore, ctxquery, and ctxfork."
+    "Use pallist to discover existing store_ids. Returned by palinit, palstore, palquery, and palfork."
 )
 
 
@@ -44,11 +44,11 @@ def _natural_sort_key(key: str) -> tuple:
 
 def _render_store_tree(store, root_path: str = "", indent: int = 0) -> list[str]:
     """Render a store's node dict as indented markdown link lines."""
-    from utils.context_store import StoreNode
+    from utils.palstore import PalNode
 
     lines: list[str] = []
 
-    def _render_nodes(nodes: dict[str, StoreNode], parent_path: str, depth: int) -> None:
+    def _render_nodes(nodes: dict[str, PalNode], parent_path: str, depth: int) -> None:
         p = "  " * depth
         for key, node in sorted(nodes.items(), key=lambda kv: _natural_sort_key(kv[0])):
             full_path = f"{parent_path}.{key}"
@@ -105,7 +105,7 @@ def _render_store_tree(store, root_path: str = "", indent: int = 0) -> list[str]
 # ---------------------------------------------------------------------------
 
 
-class CtxStoreRequest(ToolRequest):
+class PalStoreRequest(ToolRequest):
     prompt: str = Field(...)
     absolute_file_paths: Optional[list[str]] = Field(default_factory=list)
     media: Optional[list[str]] = Field(default_factory=list)
@@ -113,7 +113,7 @@ class CtxStoreRequest(ToolRequest):
     store_id: str = Field(...)
 
 
-class CtxQueryRequest(ToolRequest):
+class PalQueryRequest(ToolRequest):
     prompt: str = Field(...)
     absolute_file_paths: Optional[list[str]] = Field(default_factory=list)
     media: Optional[list[str]] = Field(default_factory=list)
@@ -125,7 +125,7 @@ class CtxQueryRequest(ToolRequest):
 # ---------------------------------------------------------------------------
 
 
-class ContextBaseTool(SimpleTool):
+class PalStoreBaseTool(SimpleTool):
     """Shared base for context store tools that call external models."""
 
     def get_model_category(self):
@@ -153,7 +153,7 @@ class ContextBaseTool(SimpleTool):
 
         Raises KeyError if store not found.
         """
-        from utils.context_store import load_store, resolve_store_location
+        from utils.palstore import load_store, resolve_store_location
 
         location = resolve_store_location(store_id)
         if location is None:
@@ -166,19 +166,19 @@ class ContextBaseTool(SimpleTool):
 
 
 # ---------------------------------------------------------------------------
-# ctxinit
+# palinit
 # ---------------------------------------------------------------------------
 
 
-class CtxInitTool(BaseTool):
+class PalInitTool(BaseTool):
     def get_name(self) -> str:
-        return "ctxinit"
+        return "palinit"
 
     def get_description(self) -> str:
         return (
             "Create a new named context store and register it to a project directory. "
-            "Run ctxlist first to check for an existing store before creating a new one; "
-            "use ctxstore to add context layers after creation."
+            "Run pallist first to check for an existing store before creating a new one; "
+            "use palstore to add context layers after creation."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -227,7 +227,7 @@ class CtxInitTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
-        from utils.context_store import StoreRoot, save_store, update_index
+        from utils.palstore import PalRoot, save_store, update_index
 
         store_name = arguments.get("store_name", "")
         directory = arguments.get("directory", "")
@@ -240,7 +240,7 @@ class CtxInitTool(BaseTool):
             )
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        from utils.context_store import resolve_store_location
+        from utils.palstore import resolve_store_location
 
         existing = resolve_store_location(store_name)
         if existing is not None:
@@ -251,7 +251,7 @@ class CtxInitTool(BaseTool):
             )
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        store = StoreRoot(
+        store = PalRoot(
             store_id=store_name,
             directory=directory,
             created_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -265,7 +265,7 @@ class CtxInitTool(BaseTool):
                 f"Context store created.\n\n"
                 f"store_id: {store_name}\n"
                 f"directory: {directory}\n\n"
-                f'Use ctxstore(store_id="{store_name}", ...) to add context layers.'
+                f'Use palstore(store_id="{store_name}", ...) to add context layers.'
             ),
             content_type="text",
             metadata={"store_id": store_name, "directory": directory},
@@ -274,23 +274,23 @@ class CtxInitTool(BaseTool):
 
 
 # ---------------------------------------------------------------------------
-# ctxstore
+# palstore
 # ---------------------------------------------------------------------------
 
 
-class CtxStoreTool(ContextBaseTool):
+class PalStoreTool(PalStoreBaseTool):
     def get_name(self) -> str:
-        return "ctxstore"
+        return "palstore"
 
     def get_description(self) -> str:
         return (
             "Add a context layer to an existing store, embedding files and prose for an external model to process. "
             "Each call appends a new numbered layer (L1, L2, …); seed 4–6 key files per layer for best results. "
-            "Use ctxinit to create a store first, then ctxquery to retrieve stored context."
+            "Use palinit to create a store first, then palquery to retrieve stored context."
         )
 
     def get_request_model(self):
-        return CtxStoreRequest
+        return PalStoreRequest
 
     def get_tool_fields(self) -> dict[str, dict[str, Any]]:
         return {
@@ -365,7 +365,7 @@ class CtxStoreTool(ContextBaseTool):
         if not store_id:
             error = ToolOutput(
                 status="error",
-                content="ctxstore requires a store_id. Use ctxinit to create a store first.",
+                content="palstore requires a store_id. Use palinit to create a store first.",
                 content_type="text",
             )
             return [TextContent(type="text", text=error.model_dump_json())]
@@ -376,12 +376,12 @@ class CtxStoreTool(ContextBaseTool):
             error = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        from utils.context_builder import build_context_from_ancestry
-        from utils.context_store import resolve_root_alias, walk_ancestry
+        from utils.palstore_builder import build_context_from_ancestry
+        from utils.palstore import resolve_root_alias, walk_palnode_ancestry
         from utils.file_diff import build_file_state_from_ancestry
 
         resolved_id = resolve_root_alias(store, store_id)
-        ancestors = walk_ancestry(store, resolved_id)
+        ancestors = walk_palnode_ancestry(store, resolved_id)
         self._ancestors = ancestors
         self._prior_file_state = build_file_state_from_ancestry(ancestors)
         self._injected_history = build_context_from_ancestry(ancestors)
@@ -397,7 +397,7 @@ class CtxStoreTool(ContextBaseTool):
 
         return await super().execute(arguments)
 
-    async def prepare_prompt(self, request: CtxStoreRequest) -> str:
+    async def prepare_prompt(self, request: PalStoreRequest) -> str:
         user_content = self.handle_prompt_file_with_fallback(request)
 
         files = self.get_request_files(request)
@@ -454,12 +454,12 @@ class CtxStoreTool(ContextBaseTool):
             return ""
         return f"\n\n=== CONTEXT FILES ===\n{''.join(file_parts)}\n=== END CONTEXT FILES ==="
 
-    def format_response(self, response: str, _request: CtxStoreRequest, _model_info: Optional[dict] = None) -> str:
+    def format_response(self, response: str, _request: PalStoreRequest, _model_info: Optional[dict] = None) -> str:
         self._last_raw_response = response
         return f"{response}\n\n---\n\nAGENT'S TURN: Context layer stored. Use the store_id to add more layers or query this store."
 
     def _create_continuation_offer(self, _request, _model_info: Optional[dict] = None):
-        from utils.context_store import get_next_key, resolve_layer_insertion_point
+        from utils.palstore import get_next_key, resolve_layer_insertion_point
 
         store = getattr(self, "_store", None)
         store_id = getattr(self, "_store_id", None)
@@ -482,13 +482,13 @@ class CtxStoreTool(ContextBaseTool):
     def _record_assistant_turn(
         self, _continuation_id: str, response_text: str, request, model_info: Optional[dict]
     ) -> None:
-        from utils.context_store import StoreNode, add_child, save_store
+        from utils.palstore import PalNode, add_palnode, save_store
 
         store = getattr(self, "_store", None)
         insertion_parent = getattr(self, "_insertion_parent", None)
         next_key = getattr(self, "_next_key", None)
         if store is None or insertion_parent is None or next_key is None:
-            logger.warning("ctxstore: missing store state in _record_assistant_turn, skipping write")
+            logger.warning("palstore: missing store state in _record_assistant_turn, skipping write")
             return
 
         raw = getattr(self, "_last_raw_response", response_text)
@@ -498,7 +498,7 @@ class CtxStoreTool(ContextBaseTool):
         # Build content blob: full API exchange (prompt with files + model response)
         content = f"{full_prompt}\n\n---\n\n{raw}" if full_prompt else raw
 
-        node = StoreNode(
+        node = PalNode(
             entry_type="store",
             label=getattr(request, "context_label", None),
             timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -509,28 +509,28 @@ class CtxStoreTool(ContextBaseTool):
             content=content,
         )
 
-        add_child(store, insertion_parent, next_key, node)
+        add_palnode(store, insertion_parent, next_key, node)
         save_store(store)
 
 
 # ---------------------------------------------------------------------------
-# ctxquery
+# palquery
 # ---------------------------------------------------------------------------
 
 
-class CtxQueryTool(ContextBaseTool):
+class PalQueryTool(PalStoreBaseTool):
     def get_name(self) -> str:
-        return "ctxquery"
+        return "palquery"
 
     def get_description(self) -> str:
         return (
             "Ask a question against a context store — sends all stored layers to an external model for analysis. "
             "Use for targeted questions, not context revival. Each query is recorded as a child node. "
-            "For context revival, prefer ctxread (metadata + summary) + ctxfilelist → ctxfileread (selective file content)."
+            "For context revival, prefer palread (metadata + summary) + palfilelist → palfileread (selective file content)."
         )
 
     def get_request_model(self):
-        return CtxQueryRequest
+        return PalQueryRequest
 
     def get_tool_fields(self) -> dict[str, dict[str, Any]]:
         return {
@@ -592,7 +592,7 @@ class CtxQueryTool(ContextBaseTool):
         if not store_id:
             error = ToolOutput(
                 status="error",
-                content="ctxquery requires a store_id. Create a store with ctxinit first.",
+                content="palquery requires a store_id. Create a store with palinit first.",
                 content_type="text",
             )
             return [TextContent(type="text", text=error.model_dump_json())]
@@ -603,7 +603,7 @@ class CtxQueryTool(ContextBaseTool):
             error = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        from utils.context_store import resolve_node, resolve_root_alias
+        from utils.palstore import resolve_palnode, resolve_root_alias
 
         try:
             store_id = resolve_root_alias(store, store_id)
@@ -611,7 +611,7 @@ class CtxQueryTool(ContextBaseTool):
             error = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        node = resolve_node(store, store_id)
+        node = resolve_palnode(store, store_id)
 
         if node is not None and node.entry_type in ("store", "fork", "query", "tool"):
             self._parent_path = store_id
@@ -625,12 +625,12 @@ class CtxQueryTool(ContextBaseTool):
             )
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        from utils.context_builder import build_context_from_ancestry
-        from utils.context_store import walk_ancestry
+        from utils.palstore_builder import build_context_from_ancestry
+        from utils.palstore import walk_palnode_ancestry
 
-        ancestors = walk_ancestry(store, store_id)
+        ancestors = walk_palnode_ancestry(store, store_id)
 
-        # Root-level query: walk_ancestry returns [] because there's no path to traverse.
+        # Root-level query: walk_palnode_ancestry returns [] because there's no path to traverse.
         # Collect all L-children (layers) as the context — this is "query the whole store".
         if not ancestors and store_id == store.store_id:
             layers = [(k, v) for k, v in store.children.items() if k.startswith("L") and k[1:].isdigit()]
@@ -649,7 +649,7 @@ class CtxQueryTool(ContextBaseTool):
 
         return await super().execute(arguments)
 
-    async def prepare_prompt(self, request: CtxQueryRequest) -> str:
+    async def prepare_prompt(self, request: PalQueryRequest) -> str:
         user_content = self.handle_prompt_file_with_fallback(request)
 
         files = self.get_request_files(request)
@@ -672,12 +672,12 @@ class CtxQueryTool(ContextBaseTool):
         self._last_full_prompt = full_prompt
         return full_prompt
 
-    def format_response(self, response: str, _request: CtxQueryRequest, _model_info: Optional[dict] = None) -> str:
+    def format_response(self, response: str, _request: PalQueryRequest, _model_info: Optional[dict] = None) -> str:
         self._last_raw_response = response
         return f"{response}\n\n---\n\nAGENT'S TURN: Evaluate this response from the context store alongside your own analysis."
 
     def _create_continuation_offer(self, _request, _model_info: Optional[dict] = None):
-        from utils.context_store import get_next_key
+        from utils.palstore import get_next_key
 
         store = getattr(self, "_store", None)
         parent_path = getattr(self, "_parent_path", None)
@@ -699,7 +699,7 @@ class CtxQueryTool(ContextBaseTool):
     def _record_assistant_turn(
         self, _continuation_id: str, response_text: str, request, model_info: Optional[dict]
     ) -> None:
-        from utils.context_store import StoreNode, add_child, save_store
+        from utils.palstore import PalNode, add_palnode, save_store
 
         store = getattr(self, "_store", None)
         parent_path = getattr(self, "_parent_path", None)
@@ -707,7 +707,7 @@ class CtxQueryTool(ContextBaseTool):
         child_entry_type = getattr(self, "_child_entry_type", "query")
 
         if store is None or parent_path is None or next_key is None:
-            logger.warning("ctxquery: missing store state in _record_assistant_turn, skipping write")
+            logger.warning("palquery: missing store state in _record_assistant_turn, skipping write")
             return
 
         raw = getattr(self, "_last_raw_response", response_text)
@@ -717,7 +717,7 @@ class CtxQueryTool(ContextBaseTool):
 
         content = f"{full_prompt}\n\n---\n\n{raw}" if full_prompt else raw
 
-        node = StoreNode(
+        node = PalNode(
             entry_type=child_entry_type,
             label=_truncate_label(prompt) if prompt else None,
             timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -728,24 +728,24 @@ class CtxQueryTool(ContextBaseTool):
             content=content,
         )
 
-        add_child(store, parent_path, next_key, node)
+        add_palnode(store, parent_path, next_key, node)
         save_store(store)
 
 
 # ---------------------------------------------------------------------------
-# ctxfork
+# palfork
 # ---------------------------------------------------------------------------
 
 
-class CtxForkTool(BaseTool):
+class PalForkTool(BaseTool):
     def get_name(self) -> str:
-        return "ctxfork"
+        return "palfork"
 
     def get_description(self) -> str:
         return (
             "Create a fork point in a context store, branching from any node to explore alternatives "
             "without disrupting the main lineage. Returns a new store_id for the fork branch. "
-            "Use ctxlist to find the store_id to fork from; use ctxstore or ctxquery with the returned fork store_id."
+            "Use pallist to find the store_id to fork from; use palstore or palquery with the returned fork store_id."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -790,9 +790,9 @@ class CtxForkTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
-        from utils.context_store import (
-            StoreNode,
-            add_child,
+        from utils.palstore import (
+            PalNode,
+            add_palnode,
             get_next_key,
             load_store,
             resolve_store_location,
@@ -813,7 +813,7 @@ class CtxForkTool(BaseTool):
             error = ToolOutput(status="error", content=f'Store file not found: "{root_id}".', content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        from utils.context_store import resolve_root_alias
+        from utils.palstore import resolve_root_alias
 
         try:
             store_id = resolve_root_alias(store, store_id)
@@ -822,12 +822,12 @@ class CtxForkTool(BaseTool):
             return [TextContent(type="text", text=error.model_dump_json())]
 
         next_key = get_next_key(store, store_id, "F")
-        fork_node = StoreNode(
+        fork_node = PalNode(
             entry_type="fork",
             label=label,
             timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         )
-        new_path = add_child(store, store_id, next_key, fork_node)
+        new_path = add_palnode(store, store_id, next_key, fork_node)
         save_store(store)
 
         tool_output = ToolOutput(
@@ -844,18 +844,18 @@ class CtxForkTool(BaseTool):
 
 
 # ---------------------------------------------------------------------------
-# ctxlist
+# pallist
 # ---------------------------------------------------------------------------
 
 
-class CtxListTool(BaseTool):
+class PalListTool(BaseTool):
     def get_name(self) -> str:
-        return "ctxlist"
+        return "pallist"
 
     def get_description(self) -> str:
         return (
-            "List context stores and their full node trees, returning store_ids needed for ctxstore, ctxquery, "
-            "ctxread, ctxfork, and ctxarm. Filter by directory to scope to a project, "
+            "List context stores and their full node trees, returning store_ids needed for palstore, palquery, "
+            "palread, palfork, and palarm. Filter by directory to scope to a project, "
             "or pass store_id to drill into a specific subtree."
         )
 
@@ -874,7 +874,7 @@ class CtxListTool(BaseTool):
                     "type": "string",
                     "description": (
                         "Show only the subtree rooted at this node (e.g. 'myproject' or 'myproject.L2'). "
-                        "Use ctxread for the full content of a single node."
+                        "Use palread for the full content of a single node."
                     ),
                 },
             },
@@ -910,7 +910,7 @@ class CtxListTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
-        from utils.context_store import list_stores, load_store, resolve_node, resolve_store_location
+        from utils.palstore import list_stores, load_store, resolve_palnode, resolve_store_location
 
         directory = arguments.get("directory")
         store_id = arguments.get("store_id")
@@ -927,7 +927,7 @@ class CtxListTool(BaseTool):
                 error = ToolOutput(status="error", content=f'Store file not found: "{root_id}".', content_type="text")
                 return [TextContent(type="text", text=error.model_dump_json())]
 
-            node = resolve_node(store, store_id)
+            node = resolve_palnode(store, store_id)
             if node is None and store_id == store.store_id:
                 n_layers = self._count_l_children(store.children)
                 lines = [f"{store.store_id}  ({n_layers} layers)"]
@@ -961,19 +961,19 @@ class CtxListTool(BaseTool):
 
 
 # ---------------------------------------------------------------------------
-# ctxread
+# palread
 # ---------------------------------------------------------------------------
 
 
-class CtxReadTool(BaseTool):
+class PalReadTool(BaseTool):
     def get_name(self) -> str:
-        return "ctxread"
+        return "palread"
 
     def get_description(self) -> str:
         return (
             "Read a context store node's metadata, prompt, and response — the primary tool for context revival. "
             "Returns label, model, timestamp, file list, prompt text, and response text. "
-            "After reading, use ctxfilelist to see attached files, then ctxfileread to selectively load relevant ones."
+            "After reading, use palfilelist to see attached files, then palfileread to selectively load relevant ones."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -1014,7 +1014,7 @@ class CtxReadTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
-        from utils.context_store import load_store, resolve_node, resolve_store_location
+        from utils.palstore import load_store, resolve_palnode, resolve_store_location
 
         store_id = arguments.get("store_id", "")
 
@@ -1029,7 +1029,7 @@ class CtxReadTool(BaseTool):
             error = ToolOutput(status="error", content=f'Store file not found: "{root_id}".', content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        from utils.context_store import resolve_root_alias
+        from utils.palstore import resolve_root_alias
 
         try:
             store_id = resolve_root_alias(store, store_id)
@@ -1037,7 +1037,7 @@ class CtxReadTool(BaseTool):
             error = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        node = resolve_node(store, store_id)
+        node = resolve_palnode(store, store_id)
 
         if node is None:
             error = ToolOutput(
@@ -1070,19 +1070,19 @@ class CtxReadTool(BaseTool):
 
 
 # ---------------------------------------------------------------------------
-# ctxarm
+# palarm
 # ---------------------------------------------------------------------------
 
 
-class CtxArmTool(BaseTool):
+class PalArmTool(BaseTool):
     def get_name(self) -> str:
-        return "ctxarm"
+        return "palarm"
 
     def get_description(self) -> str:
         return (
             "Arm a context store for automatic revival at every session start, "
-            "so the SessionStart hook runs ctxlist and ctxquery to restore project context without manual steps. "
-            "Pass disarm=true to remove the armed state; use ctxlist to find the store_id to arm."
+            "so the SessionStart hook runs pallist and palquery to restore project context without manual steps. "
+            "Pass disarm=true to remove the armed state; use pallist to find the store_id to arm."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -1093,14 +1093,14 @@ class CtxArmTool(BaseTool):
                     "type": "string",
                     "description": (
                         "Root store_id to arm for auto-revival (e.g. 'myproject'). "
-                        "Must be an existing root store — use ctxlist to confirm."
+                        "Must be an existing root store — use pallist to confirm."
                     ),
                 },
                 "directory": {
                     "type": "string",
                     "description": (
                         "Absolute path to the project directory. "
-                        "Must match the directory the store was registered to at ctxinit time."
+                        "Must match the directory the store was registered to at palinit time."
                     ),
                 },
                 "disarm": {
@@ -1138,7 +1138,7 @@ class CtxArmTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
-        from utils.context_store import arm_store, disarm_store, load_store, resolve_store_location
+        from utils.palstore import arm_store, disarm_store, load_store, resolve_store_location
 
         store_id = arguments.get("store_id", "")
         directory = arguments.get("directory", "")
@@ -1158,7 +1158,7 @@ class CtxArmTool(BaseTool):
         if location is None:
             tool_output = ToolOutput(
                 status="error",
-                content=f'Store "{store_id}" not found. Use ctxinit to create it first.',
+                content=f'Store "{store_id}" not found. Use palinit to create it first.',
                 content_type="text",
             )
             return [TextContent(type="text", text=tool_output.model_dump_json())]
@@ -1190,7 +1190,7 @@ class CtxArmTool(BaseTool):
             content=(
                 f"Armed: store '{store_id}' will auto-revive on every SessionStart for '{directory}'.\n\n"
                 f"Revival sequence fires automatically — no further action needed.\n"
-                f'To disarm: ctxarm(store_id="{store_id}", directory="{directory}", disarm=true)'
+                f'To disarm: palarm(store_id="{store_id}", directory="{directory}", disarm=true)'
             ),
             content_type="text",
             metadata={"store_id": store_id, "directory": directory, "armed": True},
@@ -1199,18 +1199,18 @@ class CtxArmTool(BaseTool):
 
 
 # ---------------------------------------------------------------------------
-# ctxrename
+# palrename
 # ---------------------------------------------------------------------------
 
 
-class CtxRenameTool(BaseTool):
+class PalRenameTool(BaseTool):
     def get_name(self) -> str:
-        return "ctxrename"
+        return "palrename"
 
     def get_description(self) -> str:
         return (
             "Rename a root context store, updating the store file, index, and any armed state atomically. "
-            "Use ctxlist to confirm the current store_id before renaming."
+            "Use pallist to confirm the current store_id before renaming."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -1219,7 +1219,7 @@ class CtxRenameTool(BaseTool):
             "properties": {
                 "store_id": {
                     "type": "string",
-                    "description": "Current root store_id to rename (e.g. 'myproject'). Use ctxlist to confirm it exists.",
+                    "description": "Current root store_id to rename (e.g. 'myproject'). Use pallist to confirm it exists.",
                 },
                 "new_name": {
                     "type": "string",
@@ -1259,7 +1259,7 @@ class CtxRenameTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
-        from utils.context_store import rename_store
+        from utils.palstore import rename_store
 
         store_id = arguments.get("store_id", "")
         new_name = arguments.get("new_name", "")
@@ -1292,13 +1292,13 @@ class CtxRenameTool(BaseTool):
 
 
 # ---------------------------------------------------------------------------
-# ctxexport
+# palexport
 # ---------------------------------------------------------------------------
 
 
-class CtxExportTool(BaseTool):
+class PalExportTool(BaseTool):
     def get_name(self) -> str:
-        return "ctxexport"
+        return "palexport"
 
     def get_description(self) -> str:
         return (
@@ -1352,9 +1352,9 @@ class CtxExportTool(BaseTool):
 
     def _render_node(self, path: str, node, depth: int) -> list[str]:
         """Render a single node as markdown sections."""
-        from utils.context_store import StoreNode
+        from utils.palstore import PalNode
 
-        node: StoreNode
+        node: PalNode
         heading = "#" * min(depth, 6)
         lines = [f"{heading} {path}", ""]
 
@@ -1414,7 +1414,7 @@ class CtxExportTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
-        from utils.context_store import load_store, resolve_store_location
+        from utils.palstore import load_store, resolve_store_location
 
         store_id = arguments.get("store_id", "")
         output_path = arguments.get("output_path", "")
@@ -1493,19 +1493,19 @@ class CtxExportTool(BaseTool):
 
 
 # ---------------------------------------------------------------------------
-# ctxfilelist
+# palfilelist
 # ---------------------------------------------------------------------------
 
 
-class CtxFileListTool(BaseTool):
+class PalFileListTool(BaseTool):
     def get_name(self) -> str:
-        return "ctxfilelist"
+        return "palfilelist"
 
     def get_description(self) -> str:
         return (
             "List all files attached across a context store tree, grouped by node. "
             "Shows which files were seeded into each layer with timestamps and labels. "
-            "Part of the context revival flow: ctxread → ctxfilelist → ctxfileread on context-relevant files."
+            "Part of the context revival flow: palread → palfilelist → palfileread on context-relevant files."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -1558,7 +1558,7 @@ class CtxFileListTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
-        from utils.context_store import load_store, resolve_node, resolve_store_location
+        from utils.palstore import load_store, resolve_palnode, resolve_store_location
 
         store_id = arguments.get("store_id", "")
 
@@ -1573,7 +1573,7 @@ class CtxFileListTool(BaseTool):
             error = ToolOutput(status="error", content=f'Store file not found: "{root_id}".', content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        node = resolve_node(store, store_id)
+        node = resolve_palnode(store, store_id)
         if node is None and store_id == store.store_id:
             collected = self._collect_files(store.children, store.store_id)
         elif node is not None:
@@ -1603,19 +1603,19 @@ class CtxFileListTool(BaseTool):
 
 
 # ---------------------------------------------------------------------------
-# ctxfileread
+# palfileread
 # ---------------------------------------------------------------------------
 
 
-class CtxFileReadTool(BaseTool):
+class PalFileReadTool(BaseTool):
     def get_name(self) -> str:
-        return "ctxfileread"
+        return "palfileread"
 
     def get_description(self) -> str:
         return (
             "Read a specific file from a context store node's stored content blob (falls back to disk). "
-            "Use after ctxfilelist to selectively load only the files relevant to the current task. "
-            "This targeted approach avoids the token cost of ctxquery, which sends all layers to an external model."
+            "Use after palfilelist to selectively load only the files relevant to the current task. "
+            "This targeted approach avoids the token cost of palquery, which sends all layers to an external model."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -1660,9 +1660,9 @@ class CtxFileReadTool(BaseTool):
 
     def _find_nodes_with_file(self, nodes: dict, parent_path: str, file_path: str) -> list[tuple[str, str, "Any"]]:
         """Recursively find nodes referencing file_path. Returns (node_path, timestamp, node)."""
-        from utils.context_store import StoreNode
+        from utils.palstore import PalNode
 
-        results: list[tuple[str, str, StoreNode]] = []
+        results: list[tuple[str, str, PalNode]] = []
         for key in sorted(nodes, key=_natural_sort_key):
             node = nodes[key]
             full_path = f"{parent_path}.{key}"
@@ -1685,7 +1685,7 @@ class CtxFileReadTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
-        from utils.context_store import load_store, resolve_node, resolve_store_location
+        from utils.palstore import load_store, resolve_palnode, resolve_store_location
 
         store_id = arguments.get("store_id", "")
         file_path = arguments.get("file_path", "")
@@ -1706,7 +1706,7 @@ class CtxFileReadTool(BaseTool):
             return [TextContent(type="text", text=error.model_dump_json())]
 
         # Search from root or subtree
-        node = resolve_node(store, store_id)
+        node = resolve_palnode(store, store_id)
         if node is None and store_id == store.store_id:
             matches = self._find_nodes_with_file(store.children, store.store_id, file_path)
         elif node is not None:
@@ -1720,7 +1720,7 @@ class CtxFileReadTool(BaseTool):
         if not matches:
             error = ToolOutput(
                 status="error",
-                content=f"File '{file_path}' not found in any node under '{store_id}'. Use ctxfilelist to discover attached files.",
+                content=f"File '{file_path}' not found in any node under '{store_id}'. Use palfilelist to discover attached files.",
                 content_type="text",
             )
             return [TextContent(type="text", text=error.model_dump_json())]
@@ -1769,13 +1769,13 @@ class CtxFileReadTool(BaseTool):
 
 
 # ---------------------------------------------------------------------------
-# ctxtraverse
+# paltraverse
 # ---------------------------------------------------------------------------
 
 
-class CtxTraverseTool(BaseTool):
+class PalTraverseTool(BaseTool):
     def get_name(self) -> str:
-        return "ctxtraverse"
+        return "paltraverse"
 
     def get_description(self) -> str:
         return (
@@ -1791,7 +1791,7 @@ class CtxTraverseTool(BaseTool):
             "properties": {
                 "store_id": {
                     "type": "string",
-                    "description": "Root store name (e.g. 'myproject'). Use ctxlist to discover store names.",
+                    "description": "Root store name (e.g. 'myproject'). Use pallist to discover store names.",
                 },
                 "start_node": {
                     "type": "string",
@@ -1837,8 +1837,8 @@ class CtxTraverseTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
-        from utils.context_builder import build_context_from_ancestry
-        from utils.context_store import load_store, resolve_store_location, walk_range
+        from utils.palstore_builder import build_context_from_ancestry
+        from utils.palstore import load_store, resolve_store_location, walk_palnode_range
 
         store_id = arguments.get("store_id", "")
         start_node = arguments.get("start_node", "")
@@ -1865,7 +1865,7 @@ class CtxTraverseTool(BaseTool):
         end_full = f"{root_id}.{end_node}"
 
         try:
-            range_nodes = walk_range(store, start_full, end_full)
+            range_nodes = walk_palnode_range(store, start_full, end_full)
         except ValueError as exc:
             error = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]

@@ -1,23 +1,23 @@
 """
-Unit tests for utils/context_store.py and utils/context_builder.py.
+Unit tests for utils/palstore.py and utils/palstore_builder.py.
 """
 
 import os
 
 import pytest
 
-from utils.context_store import (
-    StoreNode,
-    StoreRoot,
-    add_child,
+from utils.palstore import (
+    PalNode,
+    PalRoot,
+    add_palnode,
     arm_store,
-    collect_subtree_files,
-    copy_node,
-    detach_node,
+    collect_palnode_files,
+    copy_palnode,
+    detach_palnode,
     disarm_store,
     encode_directory,
-    find_ancestor,
-    fold_range,
+    find_palnode_ancestor,
+    fold_palnode_range,
     get_armed_store,
     get_last_layer_path,
     get_next_key,
@@ -26,17 +26,17 @@ from utils.context_store import (
     list_armed_stores,
     list_stores,
     load_store,
-    move_node,
+    move_palnode,
     parse_store_path,
     rebuild_index,
     resolve_layer_insertion_point,
-    resolve_node,
+    resolve_palnode,
     resolve_root_alias,
     resolve_store_location,
     save_store,
     update_index,
-    walk_ancestry,
-    walk_range,
+    walk_palnode_ancestry,
+    walk_palnode_range,
 )
 
 # ---------------------------------------------------------------------------
@@ -46,17 +46,17 @@ from utils.context_store import (
 
 @pytest.fixture
 def ctx_env(tmp_path, monkeypatch):
-    from utils import context_store
+    from utils import palstore
 
     ctx_dir = str(tmp_path / "context")
-    monkeypatch.setattr(context_store, "_CTX_DIR", ctx_dir)
-    monkeypatch.setattr(context_store, "_INDEX_PATH", os.path.join(ctx_dir, "store-index.json"))
-    monkeypatch.setattr(context_store, "_ARMED_PATH", os.path.join(ctx_dir, "armed.json"))
+    monkeypatch.setattr(palstore, "_CTX_DIR", ctx_dir)
+    monkeypatch.setattr(palstore, "_INDEX_PATH", os.path.join(ctx_dir, "store-index.json"))
+    monkeypatch.setattr(palstore, "_ARMED_PATH", os.path.join(ctx_dir, "armed.json"))
     return ctx_dir
 
 
-def _make_node(entry_type="store", prompt="", response="", files=None, label=None) -> StoreNode:
-    return StoreNode(
+def _make_node(entry_type="store", prompt="", response="", files=None, label=None) -> PalNode:
+    return PalNode(
         entry_type=entry_type,
         label=label,
         timestamp="2026-01-01T00:00:00Z",
@@ -66,8 +66,8 @@ def _make_node(entry_type="store", prompt="", response="", files=None, label=Non
     )
 
 
-def _make_root(store_id="mystore", directory="/home/user/project") -> StoreRoot:
-    return StoreRoot(
+def _make_root(store_id="mystore", directory="/home/user/project") -> PalRoot:
+    return PalRoot(
         store_id=store_id,
         directory=directory,
         created_at="2026-01-01T00:00:00Z",
@@ -127,10 +127,10 @@ class TestStoreLifecycle:
         assert loaded.children["L1"].prompt == "hello"
 
     def test_load_corrupt_json_returns_none(self, ctx_env):
-        from utils import context_store
+        from utils import palstore
 
         store = _make_root()
-        path = context_store.get_store_path(store.directory, store.store_id)
+        path = palstore.get_store_path(store.directory, store.store_id)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
             f.write("{not valid json")
@@ -150,7 +150,7 @@ class TestResolveNode:
         child = _make_node(entry_type="query", prompt="q", response="r")
         store.children["L1"] = child
 
-        result = resolve_node(store, "mystore.L1")
+        result = resolve_palnode(store, "mystore.L1")
         assert result is not None
         assert result.prompt == "q"
 
@@ -169,18 +169,18 @@ class TestResolveNode:
         # Index the store so parse_store_path can find the root
         update_index(store.directory, store.store_id)
 
-        result = resolve_node(store, "mystore.L1.Q0.F0.thinkdeep")
+        result = resolve_palnode(store, "mystore.L1.Q0.F0.thinkdeep")
         assert result is not None
         assert result.prompt == "tdp"
 
     def test_resolve_root_only_returns_none(self, ctx_env):
         store = _make_root()
-        result = resolve_node(store, "mystore")
+        result = resolve_palnode(store, "mystore")
         assert result is None
 
     def test_resolve_nonexistent_path_returns_none(self, ctx_env):
         store = _make_root()
-        result = resolve_node(store, "mystore.Z99")
+        result = resolve_palnode(store, "mystore.Z99")
         assert result is None
 
 
@@ -190,31 +190,31 @@ class TestResolveNode:
 
 
 class TestAddChild:
-    def test_add_child_to_root(self, ctx_env):
+    def test_add_palnode_to_root(self, ctx_env):
         store = _make_root()
         child = _make_node(entry_type="query", prompt="q", response="r")
 
-        full_path = add_child(store, "mystore", "L1", child)
+        full_path = add_palnode(store, "mystore", "L1", child)
         assert full_path == "mystore.L1"
         assert "L1" in store.children
 
-    def test_add_child_to_nested_node(self, ctx_env):
+    def test_add_palnode_to_nested_node(self, ctx_env):
         store = _make_root()
         l1 = _make_node(entry_type="query", prompt="p", response="r")
         store.children["L1"] = l1
         update_index(store.directory, store.store_id)
 
         grandchild = _make_node(entry_type="tool", prompt="gp", response="gr")
-        full_path = add_child(store, "mystore.L1", "Q0", grandchild)
+        full_path = add_palnode(store, "mystore.L1", "Q0", grandchild)
         assert full_path == "mystore.L1.Q0"
         assert "Q0" in store.children["L1"].children
 
-    def test_add_child_to_nonexistent_parent_raises(self, ctx_env):
+    def test_add_palnode_to_nonexistent_parent_raises(self, ctx_env):
         store = _make_root()
         child = _make_node()
 
         with pytest.raises(KeyError, match="parent path not found"):
-            add_child(store, "mystore.Z99", "L1", child)
+            add_palnode(store, "mystore.Z99", "L1", child)
 
 
 # ---------------------------------------------------------------------------
@@ -228,7 +228,7 @@ class TestWalkAncestry:
         child = _make_node(entry_type="query", prompt="p", response="r")
         store.children["L1"] = child
 
-        result = walk_ancestry(store, "mystore.L1")
+        result = walk_palnode_ancestry(store, "mystore.L1")
         assert len(result) == 1
         assert result[0].prompt == "p"
 
@@ -246,7 +246,7 @@ class TestWalkAncestry:
 
         update_index(store.directory, store.store_id)
 
-        result = walk_ancestry(store, "mystore.L1.Q0.F0.thinkdeep")
+        result = walk_palnode_ancestry(store, "mystore.L1.Q0.F0.thinkdeep")
         assert len(result) == 4
         assert result[0].prompt == "l1p"
         assert result[1].prompt == "q0p"
@@ -255,7 +255,7 @@ class TestWalkAncestry:
 
     def test_walk_to_root_returns_empty(self, ctx_env):
         store = _make_root()
-        result = walk_ancestry(store, "mystore")
+        result = walk_palnode_ancestry(store, "mystore")
         assert result == []
 
     def test_fork_nodes_included_in_ancestry(self, ctx_env):
@@ -268,7 +268,7 @@ class TestWalkAncestry:
 
         update_index(store.directory, store.store_id)
 
-        result = walk_ancestry(store, "mystore.F0.L1")
+        result = walk_palnode_ancestry(store, "mystore.F0.L1")
         assert len(result) == 2
         assert result[0].entry_type == "fork"
         assert result[1].prompt == "cp"
@@ -281,7 +281,7 @@ class TestWalkAncestry:
 
         update_index(store.directory, store.store_id)
 
-        result = walk_ancestry(store, "mystore.L2")
+        result = walk_palnode_ancestry(store, "mystore.L2")
         assert len(result) == 3
         assert result[0].prompt == "p0"
         assert result[1].prompt == "p1"
@@ -298,7 +298,7 @@ class TestWalkAncestry:
 
         update_index(store.directory, store.store_id)
 
-        result = walk_ancestry(store, "mystore.L2.F0")
+        result = walk_palnode_ancestry(store, "mystore.L2.F0")
         assert len(result) == 4
         assert result[0].prompt == "p0"
         assert result[1].prompt == "p1"
@@ -314,7 +314,7 @@ class TestWalkAncestry:
 
         update_index(store.directory, store.store_id)
 
-        result = walk_ancestry(store, "mystore.F0.L1")
+        result = walk_palnode_ancestry(store, "mystore.F0.L1")
         assert len(result) == 3
         assert result[0].entry_type == "fork"
         assert result[1].prompt == "fp0"
@@ -414,7 +414,7 @@ class TestParseStorePath:
 class TestIndexOperations:
     def test_update_and_load_index_roundtrip(self, ctx_env):
         update_index("/home/user/project", "mystore")
-        from utils.context_store import load_index
+        from utils.palstore import load_index
 
         index = load_index()
         assert "mystore" in index["stores"]
@@ -526,13 +526,13 @@ class TestListStores:
         assert results == []
 
     def test_list_stores_filters_corrupt_files(self, ctx_env):
-        from utils import context_store
+        from utils import palstore
 
         store = _make_root()
         save_store(store)
 
         # Drop a corrupt JSON file in the same directory
-        folder = context_store.get_store_dir(store.directory)
+        folder = palstore.get_store_dir(store.directory)
         corrupt_path = os.path.join(folder, "corrupt.json")
         with open(corrupt_path, "w") as f:
             f.write("{bad json")
@@ -549,7 +549,7 @@ class TestListStores:
 
 class TestContextBuilder:
     def test_build_context_from_ancestry_with_content_nodes(self):
-        from utils.context_builder import build_context_from_ancestry
+        from utils.palstore_builder import build_context_from_ancestry
 
         nodes = [
             _make_node(entry_type="query", prompt="first question", response="first answer"),
@@ -566,7 +566,7 @@ class TestContextBuilder:
         assert "Turn 2" in result
 
     def test_build_context_skips_fork_nodes(self):
-        from utils.context_builder import build_context_from_ancestry
+        from utils.palstore_builder import build_context_from_ancestry
 
         fork = _make_node(entry_type="fork", prompt="", response="")
         content = _make_node(entry_type="query", prompt="real question", response="real answer")
@@ -579,13 +579,13 @@ class TestContextBuilder:
         assert "Turn 2" not in result
 
     def test_build_context_returns_empty_for_empty_list(self):
-        from utils.context_builder import build_context_from_ancestry
+        from utils.palstore_builder import build_context_from_ancestry
 
         result = build_context_from_ancestry([])
         assert result == ""
 
     def test_build_context_returns_empty_when_all_forks(self):
-        from utils.context_builder import build_context_from_ancestry
+        from utils.palstore_builder import build_context_from_ancestry
 
         nodes = [
             _make_node(entry_type="fork", prompt="", response=""),
@@ -596,7 +596,7 @@ class TestContextBuilder:
         assert result == ""
 
     def test_build_context_includes_file_listing(self):
-        from utils.context_builder import build_context_from_ancestry
+        from utils.palstore_builder import build_context_from_ancestry
 
         node = _make_node(
             entry_type="query",
@@ -611,7 +611,7 @@ class TestContextBuilder:
         assert "/home/user/bar.py" in result
 
     def test_build_context_omits_file_listing_when_disabled(self):
-        from utils.context_builder import build_context_from_ancestry
+        from utils.palstore_builder import build_context_from_ancestry
 
         node = _make_node(
             entry_type="query",
@@ -624,7 +624,7 @@ class TestContextBuilder:
         assert "FILES REFERENCED" not in result
 
     def test_build_context_deduplicates_files_across_nodes(self):
-        from utils.context_builder import build_context_from_ancestry
+        from utils.palstore_builder import build_context_from_ancestry
 
         node_a = _make_node(entry_type="query", prompt="q1", response="r1", files=["/shared.py", "/a.py"])
         node_b = _make_node(entry_type="query", prompt="q2", response="r2", files=["/shared.py", "/b.py"])
@@ -637,7 +637,7 @@ class TestContextBuilder:
         """Regression: when layers share a file via content blobs, the same
         file body must NOT appear multiple times in the reconstructed history.
         This is the core invariant that diff-based dedup protects."""
-        from utils.context_builder import build_context_from_ancestry
+        from utils.palstore_builder import build_context_from_ancestry
         from utils.file_diff import decide_file_representation
 
         file_body = "class Foo:\n    pass\n"
@@ -646,7 +646,7 @@ class TestContextBuilder:
         # L1: first occurrence — full file embed
         l1_file_block = decide_file_representation("/app.py", file_body, None, None, mtime)
         l1_prompt = f"=== CONTEXT LAYER SUBMISSION ===\n\nsetup\n\n=== CONTEXT FILES ===\n{l1_file_block}\n=== END CONTEXT FILES ==="
-        l1 = StoreNode(
+        l1 = PalNode(
             entry_type="store",
             timestamp="2026-01-01T00:00:00Z",
             files=["/app.py"],
@@ -659,7 +659,7 @@ class TestContextBuilder:
         l2_file_block = decide_file_representation("/app.py", file_body, file_body, "L1", mtime)
         assert l2_file_block == "", "unchanged file should produce empty representation"
         l2_prompt = "=== CONTEXT LAYER SUBMISSION ===\n\nupdate"
-        l2 = StoreNode(
+        l2 = PalNode(
             entry_type="store",
             timestamp="2026-01-02T00:00:00Z",
             files=["/app.py"],
@@ -712,7 +712,7 @@ class TestContextBuilder:
             )
             return f"{prompt}\n\n---\n\n{resp}"
 
-        n1 = StoreNode(
+        n1 = PalNode(
             entry_type="store",
             timestamp="2026-01-01T00:00:00Z",
             files=["/a.py"],
@@ -720,7 +720,7 @@ class TestContextBuilder:
             response="r",
             content=_blob("/a.py", "v1"),
         )
-        n2 = StoreNode(
+        n2 = PalNode(
             entry_type="store",
             timestamp="2026-01-02T00:00:00Z",
             files=["/a.py", "/b.py"],
@@ -728,7 +728,7 @@ class TestContextBuilder:
             response="r",
             content=_blob("/a.py", "v2") + _blob("/b.py", "b_content"),
         )
-        n3 = StoreNode(
+        n3 = PalNode(
             entry_type="store",
             timestamp="2026-01-03T00:00:00Z",
             files=["/b.py"],
@@ -746,7 +746,7 @@ class TestContextBuilder:
         builder should still reconstruct valid conversation history without
         duplicate file content."""
         from scripts.migrate_to_diff_stores import migrate_store
-        from utils.context_builder import build_context_from_ancestry
+        from utils.palstore_builder import build_context_from_ancestry
 
         file_body = "def hello():\n    print('hi')\n"
 
@@ -762,12 +762,12 @@ class TestContextBuilder:
             full_prompt = f"=== CONTEXT LAYER SUBMISSION ===\n\n{prompt_text}{file_section}"
             return f"{full_prompt}\n\n---\n\n{response}"
 
-        store = StoreRoot(
+        store = PalRoot(
             store_id="regression",
             directory="/tmp/test",
             created_at="2026-01-01T00:00:00Z",
             children={
-                "L1": StoreNode(
+                "L1": PalNode(
                     entry_type="store",
                     timestamp="2026-01-01T00:00:00Z",
                     files=["/app.py"],
@@ -775,7 +775,7 @@ class TestContextBuilder:
                     response="stored L1",
                     content=_make_layer("initial", {"/app.py": file_body}, "stored L1"),
                 ),
-                "L2": StoreNode(
+                "L2": PalNode(
                     entry_type="store",
                     timestamp="2026-01-02T00:00:00Z",
                     files=["/app.py"],
@@ -783,7 +783,7 @@ class TestContextBuilder:
                     response="stored L2",
                     content=_make_layer("update", {"/app.py": file_body}, "stored L2"),
                 ),
-                "L3": StoreNode(
+                "L3": PalNode(
                     entry_type="store",
                     timestamp="2026-01-03T00:00:00Z",
                     files=["/app.py"],
@@ -812,18 +812,18 @@ class TestContextBuilder:
         assert "stored L3" in history
 
     def test_build_context_ends_with_end_marker(self):
-        from utils.context_builder import build_context_from_ancestry
+        from utils.palstore_builder import build_context_from_ancestry
 
         node = _make_node(entry_type="query", prompt="q", response="r")
         result = build_context_from_ancestry([node])
         assert result.strip().endswith("=== END CONVERSATION HISTORY ===")
 
     def test_build_context_uses_content_for_user_turn(self):
-        from utils.context_builder import build_context_from_ancestry
+        from utils.palstore_builder import build_context_from_ancestry
 
         full_prompt = "user text\n\n=== CONTEXT FILES ===\nFILE BLOB CONTENT HERE\n=== END CONTEXT FILES ==="
         raw_response = "assistant replied"
-        node = StoreNode(
+        node = PalNode(
             entry_type="store",
             timestamp="2026-01-01T00:00:00Z",
             prompt="user text",
@@ -835,18 +835,18 @@ class TestContextBuilder:
         assert raw_response in result
 
     def test_build_context_falls_back_to_prompt_when_no_content(self):
-        from utils.context_builder import build_context_from_ancestry
+        from utils.palstore_builder import build_context_from_ancestry
 
         node = _make_node(entry_type="store", prompt="bare prompt", response="response")
         result = build_context_from_ancestry([node])
         assert "bare prompt" in result
 
     def test_build_context_split_uses_first_separator_only(self):
-        from utils.context_builder import build_context_from_ancestry
+        from utils.palstore_builder import build_context_from_ancestry
 
         tricky_prompt = "before\n\n---\n\nstill part of prompt"
         response = "answer"
-        node = StoreNode(
+        node = PalNode(
             entry_type="store",
             timestamp="2026-01-01T00:00:00Z",
             prompt="short",
@@ -885,13 +885,13 @@ class TestEncodeDirectoryEdgeCases:
 
 class TestPathUtilities:
     def test_get_store_dir_returns_expected_path(self, ctx_env):
-        from utils.context_store import get_store_dir
+        from utils.palstore import get_store_dir
 
         result = get_store_dir("/home/user/project")
         assert result == os.path.join(ctx_env, "-home-user-project")
 
     def test_get_store_path_ends_with_json(self, ctx_env):
-        from utils.context_store import get_store_path
+        from utils.palstore import get_store_path
 
         result = get_store_path("/home/user/project", "mystore")
         assert result.endswith("mystore.json")
@@ -904,10 +904,10 @@ class TestPathUtilities:
 
 class TestStoreLifecycleEdgeCases:
     def test_load_store_with_list_json_returns_none(self, ctx_env):
-        from utils import context_store
+        from utils import palstore
 
         store = _make_root()
-        path = context_store.get_store_path(store.directory, store.store_id)
+        path = palstore.get_store_path(store.directory, store.store_id)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
             import json
@@ -918,10 +918,10 @@ class TestStoreLifecycleEdgeCases:
         assert result is None
 
     def test_load_store_with_missing_required_fields_returns_none(self, ctx_env):
-        from utils import context_store
+        from utils import palstore
 
         store = _make_root()
-        path = context_store.get_store_path(store.directory, store.store_id)
+        path = palstore.get_store_path(store.directory, store.store_id)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
             import json
@@ -932,12 +932,12 @@ class TestStoreLifecycleEdgeCases:
         assert result is None
 
     def test_save_store_creates_nested_directories(self, ctx_env):
-        from utils import context_store
+        from utils import palstore
 
         store = _make_root(directory="/some/deeply/nested/path")
         save_store(store)
 
-        path = context_store.get_store_path(store.directory, store.store_id)
+        path = palstore.get_store_path(store.directory, store.store_id)
         assert os.path.exists(path)
 
 
@@ -948,7 +948,7 @@ class TestStoreLifecycleEdgeCases:
 
 class TestRenameStore:
     def test_rename_happy_path(self, ctx_env):
-        from utils.context_store import get_store_path, load_index, rename_store
+        from utils.palstore import get_store_path, load_index, rename_store
 
         store = _make_root()
         save_store(store)
@@ -968,13 +968,13 @@ class TestRenameStore:
         assert "mystore" not in index["stores"]
 
     def test_rename_nonexistent_raises_key_error(self, ctx_env):
-        from utils.context_store import rename_store
+        from utils.palstore import rename_store
 
         with pytest.raises(KeyError, match="Store not found"):
             rename_store("/home/user/project", "ghost-store", "newname")
 
     def test_rename_new_id_with_dots_raises_value_error(self, ctx_env):
-        from utils.context_store import rename_store
+        from utils.palstore import rename_store
 
         store = _make_root()
         save_store(store)
@@ -983,7 +983,7 @@ class TestRenameStore:
             rename_store(store.directory, "mystore", "new.name")
 
     def test_rename_updates_armed_state(self, ctx_env):
-        from utils.context_store import rename_store
+        from utils.palstore import rename_store
 
         store = _make_root()
         save_store(store)
@@ -995,7 +995,7 @@ class TestRenameStore:
         assert get_armed_store(store.directory) == "renamed-store"
 
     def test_rename_when_store_not_armed_is_noop_for_armed_state(self, ctx_env):
-        from utils.context_store import rename_store
+        from utils.palstore import rename_store
 
         store = _make_root()
         save_store(store)
@@ -1008,7 +1008,7 @@ class TestRenameStore:
         assert get_armed_store(store.directory) is None
 
     def test_rename_preserves_children(self, ctx_env):
-        from utils.context_store import rename_store
+        from utils.palstore import rename_store
 
         store = _make_root()
         child = _make_node(entry_type="query", prompt="child-q", response="child-r")
@@ -1036,7 +1036,7 @@ class TestResolveNodeEdgeCases:
         store.children["L1"] = child
         update_index(store.directory, store.store_id)
 
-        result = resolve_node(store, "mystore.L1.Q99")
+        result = resolve_palnode(store, "mystore.L1.Q99")
         assert result is None
 
     def test_empty_children_at_intermediate_node_returns_none(self, ctx_env):
@@ -1045,7 +1045,7 @@ class TestResolveNodeEdgeCases:
         store.children["L1"] = child
         update_index(store.directory, store.store_id)
 
-        result = resolve_node(store, "mystore.L1.Q0")
+        result = resolve_palnode(store, "mystore.L1.Q0")
         assert result is None
 
 
@@ -1060,8 +1060,8 @@ class TestAddChildEdgeCases:
         original = _make_node(entry_type="store", prompt="original", response="old")
         replacement = _make_node(entry_type="query", prompt="new prompt", response="new response")
 
-        add_child(store, "mystore", "L1", original)
-        add_child(store, "mystore", "L1", replacement)
+        add_palnode(store, "mystore", "L1", original)
+        add_palnode(store, "mystore", "L1", replacement)
 
         assert store.children["L1"].prompt == "new prompt"
         assert store.children["L1"].entry_type == "query"
@@ -1070,15 +1070,15 @@ class TestAddChildEdgeCases:
         store = _make_root()
 
         n1 = _make_node(entry_type="store", prompt="l1", response="r1")
-        add_child(store, "mystore", "L1", n1)
+        add_palnode(store, "mystore", "L1", n1)
         update_index(store.directory, store.store_id)
 
         n2 = _make_node(entry_type="fork", prompt="", response="")
-        path2 = add_child(store, "mystore.L1", "F0", n2)
+        path2 = add_palnode(store, "mystore.L1", "F0", n2)
         assert path2 == "mystore.L1.F0"
 
         n3 = _make_node(entry_type="tool", prompt="tool-p", response="tool-r")
-        path3 = add_child(store, "mystore.L1.F0", "thinkdeep", n3)
+        path3 = add_palnode(store, "mystore.L1.F0", "thinkdeep", n3)
         assert path3 == "mystore.L1.F0.thinkdeep"
 
         assert store.children["L1"].children["F0"].children["thinkdeep"].prompt == "tool-p"
@@ -1096,7 +1096,7 @@ class TestWalkAncestryEdgeCases:
         store.children["L1"] = child
         update_index(store.directory, store.store_id)
 
-        result = walk_ancestry(store, "mystore.L1.Q0")
+        result = walk_palnode_ancestry(store, "mystore.L1.Q0")
         assert len(result) == 1
         assert result[0].prompt == "p1"
 
@@ -1113,7 +1113,7 @@ class TestWalkAncestryEdgeCases:
         store.children["L1"] = n_store
         update_index(store.directory, store.store_id)
 
-        result = walk_ancestry(store, "mystore.L1.F0.Q0.thinkdeep")
+        result = walk_palnode_ancestry(store, "mystore.L1.F0.Q0.thinkdeep")
         assert len(result) == 4
         assert result[0].entry_type == "store"
         assert result[1].entry_type == "fork"
@@ -1196,7 +1196,7 @@ class TestResolveStoreLocationEdgeCases:
     def test_stale_index_entry_falls_back_to_scan(self, ctx_env):
         import os
 
-        from utils.context_store import get_store_path
+        from utils.palstore import get_store_path
 
         store = _make_root()
         save_store(store)
@@ -1249,7 +1249,7 @@ class TestListStoresEdgeCases:
         assert len(results) == 2
 
     def test_directory_with_no_json_files_returns_empty(self, ctx_env):
-        from utils.context_store import get_store_dir
+        from utils.palstore import get_store_dir
 
         folder = get_store_dir("/home/user/project")
         os.makedirs(folder, exist_ok=True)
@@ -1267,7 +1267,7 @@ class TestListStoresEdgeCases:
 
 class TestListAllDirectories:
     def test_returns_indexed_directories(self, ctx_env):
-        from utils.context_store import list_all_directories
+        from utils.palstore import list_all_directories
 
         store = _make_root(store_id="store-a", directory="/home/user/proj-a")
         save_store(store)
@@ -1277,7 +1277,7 @@ class TestListAllDirectories:
         assert "/home/user/proj-a" in result
 
     def test_returns_unindexed_directories_via_scan(self, ctx_env):
-        from utils.context_store import list_all_directories
+        from utils.palstore import list_all_directories
 
         store = _make_root(store_id="store-b", directory="/home/user/proj-b")
         save_store(store)
@@ -1286,7 +1286,7 @@ class TestListAllDirectories:
         assert "/home/user/proj-b" in result
 
     def test_empty_context_directory_returns_empty(self, ctx_env):
-        from utils.context_store import list_all_directories
+        from utils.palstore import list_all_directories
 
         result = list_all_directories()
         assert result == []
@@ -1299,10 +1299,10 @@ class TestListAllDirectories:
 
 class TestHydrateThreadContext:
     def test_ancestor_with_content_used_as_user_turn(self, ctx_env):
-        from utils.context_builder import hydrate_thread_context
+        from utils.palstore_builder import hydrate_thread_context
 
         store = _make_root()
-        node = StoreNode(
+        node = PalNode(
             entry_type="store",
             timestamp="2026-01-01T00:00:00Z",
             prompt="short prompt",
@@ -1318,7 +1318,7 @@ class TestHydrateThreadContext:
         assert thread.turns[0].content == "FULL CONTENT BLOB"
 
     def test_ancestor_without_content_yields_separate_turns(self, ctx_env):
-        from utils.context_builder import hydrate_thread_context
+        from utils.palstore_builder import hydrate_thread_context
 
         store = _make_root()
         node = _make_node(entry_type="query", prompt="the question", response="the answer")
@@ -1333,7 +1333,7 @@ class TestHydrateThreadContext:
         assert thread.turns[1].content == "the answer"
 
     def test_fork_nodes_are_skipped(self, ctx_env):
-        from utils.context_builder import hydrate_thread_context
+        from utils.palstore_builder import hydrate_thread_context
 
         store = _make_root()
         n_store = _make_node(entry_type="store", prompt="q1", response="r1")
@@ -1351,7 +1351,7 @@ class TestHydrateThreadContext:
         assert roles == ["user", "assistant", "user", "assistant"]
 
     def test_root_path_yields_empty_thread(self, ctx_env):
-        from utils.context_builder import hydrate_thread_context
+        from utils.palstore_builder import hydrate_thread_context
 
         store = _make_root()
         update_index(store.directory, store.store_id)
@@ -1361,7 +1361,7 @@ class TestHydrateThreadContext:
 
     def test_runtime_error_when_get_thread_returns_none(self, ctx_env, monkeypatch):
         import utils.conversation_memory as cm
-        from utils.context_builder import hydrate_thread_context
+        from utils.palstore_builder import hydrate_thread_context
 
         monkeypatch.setattr(cm, "get_thread", lambda thread_id: None)
 
@@ -1379,21 +1379,21 @@ class TestHydrateThreadContext:
 
 class TestBuildContextAdditional:
     def test_node_with_prompt_but_empty_response_filtered_out(self):
-        from utils.context_builder import build_context_from_ancestry
+        from utils.palstore_builder import build_context_from_ancestry
 
         node = _make_node(entry_type="store", prompt="question only", response="")
         result = build_context_from_ancestry([node])
         assert result == ""
 
     def test_node_with_empty_prompt_but_response_filtered_out(self):
-        from utils.context_builder import build_context_from_ancestry
+        from utils.palstore_builder import build_context_from_ancestry
 
         node = _make_node(entry_type="query", prompt="", response="answer only")
         result = build_context_from_ancestry([node])
         assert result == ""
 
     def test_five_node_chain_turns_numbered_one_through_five(self):
-        from utils.context_builder import build_context_from_ancestry
+        from utils.palstore_builder import build_context_from_ancestry
 
         nodes = [_make_node(entry_type="store", prompt=f"q{i}", response=f"r{i}") for i in range(1, 6)]
         result = build_context_from_ancestry(nodes)
@@ -1401,7 +1401,7 @@ class TestBuildContextAdditional:
             assert f"Turn {i}" in result
 
     def test_multi_node_chain_ordering_preserved(self):
-        from utils.context_builder import build_context_from_ancestry
+        from utils.palstore_builder import build_context_from_ancestry
 
         nodes = [
             _make_node(entry_type="store", prompt="first", response="f-resp"),
@@ -1480,7 +1480,7 @@ class TestResolveRootAlias:
 
 
 def _build_parent_scaffold(store, parent_type):
-    """Return the parent_path string for add_child tests given parent_type."""
+    """Return the parent_path string for add_palnode tests given parent_type."""
     if parent_type == "root":
         return store.store_id
     if parent_type == "store":
@@ -1523,7 +1523,7 @@ class TestNodeRulesMatrix:
         store = _make_root()
         parent_path = _build_parent_scaffold(store, parent_type)
         child = _make_node(entry_type=child_entry_type)
-        result = add_child(store, parent_path, child_key, child)
+        result = add_palnode(store, parent_path, child_key, child)
         assert result == f"{parent_path}.{child_key}"
 
     @pytest.mark.parametrize(
@@ -1548,7 +1548,7 @@ class TestNodeRulesMatrix:
         parent_path = _build_parent_scaffold(store, parent_type)
         child = _make_node(entry_type=child_entry_type)
         with pytest.raises(ValueError):
-            add_child(store, parent_path, child_key, child)
+            add_palnode(store, parent_path, child_key, child)
 
 
 # ---------------------------------------------------------------------------
@@ -1558,45 +1558,45 @@ class TestNodeRulesMatrix:
 
 @pytest.fixture
 def ref_tree(ctx_env):
-    """Build the reference tree using add_child for every node."""
+    """Build the reference tree using add_palnode for every node."""
     store = _make_root()
     update_index(store.directory, store.store_id)
 
     # Root level: L1, L2, L3, F0
-    add_child(store, "mystore", "L1", _make_node(entry_type="store", prompt="p1"))
-    add_child(store, "mystore", "L2", _make_node(entry_type="store", prompt="p2"))
-    add_child(store, "mystore", "L3", _make_node(entry_type="store", prompt="p3"))
-    add_child(store, "mystore", "F0", _make_node(entry_type="fork"))
+    add_palnode(store, "mystore", "L1", _make_node(entry_type="store", prompt="p1"))
+    add_palnode(store, "mystore", "L2", _make_node(entry_type="store", prompt="p2"))
+    add_palnode(store, "mystore", "L3", _make_node(entry_type="store", prompt="p3"))
+    add_palnode(store, "mystore", "F0", _make_node(entry_type="fork"))
 
     # L1 subtree
-    add_child(store, "mystore.L1", "Q0", _make_node(entry_type="query", prompt="what is X?"))
-    add_child(store, "mystore.L1", "F0", _make_node(entry_type="fork"))
+    add_palnode(store, "mystore.L1", "Q0", _make_node(entry_type="query", prompt="what is X?"))
+    add_palnode(store, "mystore.L1", "F0", _make_node(entry_type="fork"))
 
     # L1.Q0 subtree
-    add_child(store, "mystore.L1.Q0", "Q0", _make_node(entry_type="query", prompt="sub-question"))
-    add_child(store, "mystore.L1.Q0", "1", _make_node(entry_type="query", prompt="follow-up 1"))
-    add_child(store, "mystore.L1.Q0", "2", _make_node(entry_type="query", prompt="follow-up 2"))
-    add_child(store, "mystore.L1.Q0", "F0", _make_node(entry_type="fork"))
-    add_child(store, "mystore.L1.Q0.F0", "thinkdeep", _make_node(entry_type="tool", prompt="td"))
+    add_palnode(store, "mystore.L1.Q0", "Q0", _make_node(entry_type="query", prompt="sub-question"))
+    add_palnode(store, "mystore.L1.Q0", "1", _make_node(entry_type="query", prompt="follow-up 1"))
+    add_palnode(store, "mystore.L1.Q0", "2", _make_node(entry_type="query", prompt="follow-up 2"))
+    add_palnode(store, "mystore.L1.Q0", "F0", _make_node(entry_type="fork"))
+    add_palnode(store, "mystore.L1.Q0.F0", "thinkdeep", _make_node(entry_type="tool", prompt="td"))
 
     # L1.F0 subtree
-    add_child(store, "mystore.L1.F0", "L1", _make_node(entry_type="store", prompt="branch1"))
-    add_child(store, "mystore.L1.F0", "L2", _make_node(entry_type="store", prompt="branch2"))
-    add_child(store, "mystore.L1.F0", "F0", _make_node(entry_type="fork"))
-    add_child(store, "mystore.L1.F0.L1", "Q0", _make_node(entry_type="query", prompt="branch query"))
-    add_child(store, "mystore.L1.F0.F0", "L1", _make_node(entry_type="store", prompt="deep branch"))
+    add_palnode(store, "mystore.L1.F0", "L1", _make_node(entry_type="store", prompt="branch1"))
+    add_palnode(store, "mystore.L1.F0", "L2", _make_node(entry_type="store", prompt="branch2"))
+    add_palnode(store, "mystore.L1.F0", "F0", _make_node(entry_type="fork"))
+    add_palnode(store, "mystore.L1.F0.L1", "Q0", _make_node(entry_type="query", prompt="branch query"))
+    add_palnode(store, "mystore.L1.F0.F0", "L1", _make_node(entry_type="store", prompt="deep branch"))
 
     # L2 subtree
-    add_child(store, "mystore.L2", "Q0", _make_node(entry_type="query", prompt="query on L2"))
-    add_child(store, "mystore.L2", "F0", _make_node(entry_type="fork"))
-    add_child(store, "mystore.L2.F0", "analyze", _make_node(entry_type="tool", prompt="analyze"))
-    add_child(store, "mystore.L2.F0.analyze", "F0", _make_node(entry_type="fork"))
-    add_child(store, "mystore.L2.F0.analyze.F0", "chat", _make_node(entry_type="tool", prompt="chat"))
+    add_palnode(store, "mystore.L2", "Q0", _make_node(entry_type="query", prompt="query on L2"))
+    add_palnode(store, "mystore.L2", "F0", _make_node(entry_type="fork"))
+    add_palnode(store, "mystore.L2.F0", "analyze", _make_node(entry_type="tool", prompt="analyze"))
+    add_palnode(store, "mystore.L2.F0.analyze", "F0", _make_node(entry_type="fork"))
+    add_palnode(store, "mystore.L2.F0.analyze.F0", "chat", _make_node(entry_type="tool", prompt="chat"))
 
     # Root F0 subtree
-    add_child(store, "mystore.F0", "L1", _make_node(entry_type="store", prompt="root fork layer"))
-    add_child(store, "mystore.F0", "Q0", _make_node(entry_type="query", prompt="root fork query"))
-    add_child(store, "mystore.F0", "thinkdeep", _make_node(entry_type="tool", prompt="root fork td"))
+    add_palnode(store, "mystore.F0", "L1", _make_node(entry_type="store", prompt="root fork layer"))
+    add_palnode(store, "mystore.F0", "Q0", _make_node(entry_type="query", prompt="root fork query"))
+    add_palnode(store, "mystore.F0", "thinkdeep", _make_node(entry_type="tool", prompt="root fork td"))
 
     return store
 
@@ -1637,7 +1637,7 @@ class TestWalkAncestryComplex:
         ],
     )
     def test_walk_path(self, ref_tree, path, expected_count, expected_types):
-        result = walk_ancestry(ref_tree, path)
+        result = walk_palnode_ancestry(ref_tree, path)
         assert len(result) == expected_count, f"path={path}: expected {expected_count} nodes, got {len(result)}"
         assert [n.entry_type for n in result] == expected_types, f"path={path}: type mismatch"
 
@@ -1663,7 +1663,7 @@ class TestWalkRangeComplex:
         ],
     )
     def test_valid_range(self, ref_tree, start, end, expected_count, expected_types):
-        result = walk_range(ref_tree, start, end)
+        result = walk_palnode_range(ref_tree, start, end)
         assert len(result) == expected_count, f"start={start}, end={end}: expected {expected_count}, got {len(result)}"
         assert [n.entry_type for n in result] == expected_types, f"start={start}, end={end}: type mismatch"
 
@@ -1680,7 +1680,7 @@ class TestWalkRangeComplex:
     )
     def test_invalid_range(self, ref_tree, start, end):
         with pytest.raises(ValueError):
-            walk_range(ref_tree, start, end)
+            walk_palnode_range(ref_tree, start, end)
 
 
 # ---------------------------------------------------------------------------
@@ -1690,29 +1690,29 @@ class TestWalkRangeComplex:
 
 def _build_minimal_ref_tree(store):
     """Build a subset of the reference tree used for insertion-order checks."""
-    add_child(store, "mystore", "L1", _make_node(entry_type="store", prompt="p1"))
-    add_child(store, "mystore", "L2", _make_node(entry_type="store", prompt="p2"))
-    add_child(store, "mystore", "L3", _make_node(entry_type="store", prompt="p3"))
-    add_child(store, "mystore", "F0", _make_node(entry_type="fork"))
-    add_child(store, "mystore.L1", "F0", _make_node(entry_type="fork"))
-    add_child(store, "mystore.L1.F0", "L1", _make_node(entry_type="store", prompt="branch1"))
-    add_child(store, "mystore.L1.F0", "L2", _make_node(entry_type="store", prompt="branch2"))
-    add_child(store, "mystore.L2", "F0", _make_node(entry_type="fork"))
-    add_child(store, "mystore.L2.F0", "analyze", _make_node(entry_type="tool", prompt="analyze"))
-    add_child(store, "mystore.L2.F0.analyze", "F0", _make_node(entry_type="fork"))
-    add_child(store, "mystore.L2.F0.analyze.F0", "chat", _make_node(entry_type="tool", prompt="chat"))
+    add_palnode(store, "mystore", "L1", _make_node(entry_type="store", prompt="p1"))
+    add_palnode(store, "mystore", "L2", _make_node(entry_type="store", prompt="p2"))
+    add_palnode(store, "mystore", "L3", _make_node(entry_type="store", prompt="p3"))
+    add_palnode(store, "mystore", "F0", _make_node(entry_type="fork"))
+    add_palnode(store, "mystore.L1", "F0", _make_node(entry_type="fork"))
+    add_palnode(store, "mystore.L1.F0", "L1", _make_node(entry_type="store", prompt="branch1"))
+    add_palnode(store, "mystore.L1.F0", "L2", _make_node(entry_type="store", prompt="branch2"))
+    add_palnode(store, "mystore.L2", "F0", _make_node(entry_type="fork"))
+    add_palnode(store, "mystore.L2.F0", "analyze", _make_node(entry_type="tool", prompt="analyze"))
+    add_palnode(store, "mystore.L2.F0.analyze", "F0", _make_node(entry_type="fork"))
+    add_palnode(store, "mystore.L2.F0.analyze.F0", "chat", _make_node(entry_type="tool", prompt="chat"))
 
 
 def _assert_insertion_order_queries(store):
-    r1 = walk_ancestry(store, "mystore.L3")
+    r1 = walk_palnode_ancestry(store, "mystore.L3")
     assert len(r1) == 3
     assert [n.prompt for n in r1] == ["p1", "p2", "p3"]
 
-    r2 = walk_ancestry(store, "mystore.L1.F0.L2")
+    r2 = walk_palnode_ancestry(store, "mystore.L1.F0.L2")
     assert len(r2) == 4
     assert [n.entry_type for n in r2] == ["store", "fork", "store", "store"]
 
-    r3 = walk_ancestry(store, "mystore.L2.F0.analyze.F0.chat")
+    r3 = walk_palnode_ancestry(store, "mystore.L2.F0.analyze.F0.chat")
     assert len(r3) == 6
 
 
@@ -1730,19 +1730,19 @@ class TestInsertionOrder:
         # Build bottom-up, right-to-left where possible using direct assignment
         # for nodes that must exist before their parents can be referenced.
         # Nodes at same level can be added in any order; only parent→child ordering matters.
-        add_child(store, "mystore", "L3", _make_node(entry_type="store", prompt="p3"))
-        add_child(store, "mystore", "L2", _make_node(entry_type="store", prompt="p2"))
-        add_child(store, "mystore", "L1", _make_node(entry_type="store", prompt="p1"))
-        add_child(store, "mystore", "F0", _make_node(entry_type="fork"))
+        add_palnode(store, "mystore", "L3", _make_node(entry_type="store", prompt="p3"))
+        add_palnode(store, "mystore", "L2", _make_node(entry_type="store", prompt="p2"))
+        add_palnode(store, "mystore", "L1", _make_node(entry_type="store", prompt="p1"))
+        add_palnode(store, "mystore", "F0", _make_node(entry_type="fork"))
 
-        add_child(store, "mystore.L2", "F0", _make_node(entry_type="fork"))
-        add_child(store, "mystore.L2.F0", "analyze", _make_node(entry_type="tool", prompt="analyze"))
-        add_child(store, "mystore.L2.F0.analyze", "F0", _make_node(entry_type="fork"))
-        add_child(store, "mystore.L2.F0.analyze.F0", "chat", _make_node(entry_type="tool", prompt="chat"))
+        add_palnode(store, "mystore.L2", "F0", _make_node(entry_type="fork"))
+        add_palnode(store, "mystore.L2.F0", "analyze", _make_node(entry_type="tool", prompt="analyze"))
+        add_palnode(store, "mystore.L2.F0.analyze", "F0", _make_node(entry_type="fork"))
+        add_palnode(store, "mystore.L2.F0.analyze.F0", "chat", _make_node(entry_type="tool", prompt="chat"))
 
-        add_child(store, "mystore.L1", "F0", _make_node(entry_type="fork"))
-        add_child(store, "mystore.L1.F0", "L2", _make_node(entry_type="store", prompt="branch2"))
-        add_child(store, "mystore.L1.F0", "L1", _make_node(entry_type="store", prompt="branch1"))
+        add_palnode(store, "mystore.L1", "F0", _make_node(entry_type="fork"))
+        add_palnode(store, "mystore.L1.F0", "L2", _make_node(entry_type="store", prompt="branch2"))
+        add_palnode(store, "mystore.L1.F0", "L1", _make_node(entry_type="store", prompt="branch1"))
 
         _assert_insertion_order_queries(store)
 
@@ -1750,17 +1750,17 @@ class TestInsertionOrder:
         store = _make_root()
         update_index(store.directory, store.store_id)
 
-        add_child(store, "mystore", "L1", _make_node(entry_type="store", prompt="p1"))
-        add_child(store, "mystore", "L2", _make_node(entry_type="store", prompt="p2"))
-        add_child(store, "mystore.L1", "F0", _make_node(entry_type="fork"))
-        add_child(store, "mystore", "L3", _make_node(entry_type="store", prompt="p3"))
-        add_child(store, "mystore.L2", "F0", _make_node(entry_type="fork"))
-        add_child(store, "mystore.L1.F0", "L1", _make_node(entry_type="store", prompt="branch1"))
-        add_child(store, "mystore.L2.F0", "analyze", _make_node(entry_type="tool", prompt="analyze"))
-        add_child(store, "mystore.L1.F0", "L2", _make_node(entry_type="store", prompt="branch2"))
-        add_child(store, "mystore.L2.F0.analyze", "F0", _make_node(entry_type="fork"))
-        add_child(store, "mystore", "F0", _make_node(entry_type="fork"))
-        add_child(store, "mystore.L2.F0.analyze.F0", "chat", _make_node(entry_type="tool", prompt="chat"))
+        add_palnode(store, "mystore", "L1", _make_node(entry_type="store", prompt="p1"))
+        add_palnode(store, "mystore", "L2", _make_node(entry_type="store", prompt="p2"))
+        add_palnode(store, "mystore.L1", "F0", _make_node(entry_type="fork"))
+        add_palnode(store, "mystore", "L3", _make_node(entry_type="store", prompt="p3"))
+        add_palnode(store, "mystore.L2", "F0", _make_node(entry_type="fork"))
+        add_palnode(store, "mystore.L1.F0", "L1", _make_node(entry_type="store", prompt="branch1"))
+        add_palnode(store, "mystore.L2.F0", "analyze", _make_node(entry_type="tool", prompt="analyze"))
+        add_palnode(store, "mystore.L1.F0", "L2", _make_node(entry_type="store", prompt="branch2"))
+        add_palnode(store, "mystore.L2.F0.analyze", "F0", _make_node(entry_type="fork"))
+        add_palnode(store, "mystore", "F0", _make_node(entry_type="fork"))
+        add_palnode(store, "mystore.L2.F0.analyze.F0", "chat", _make_node(entry_type="tool", prompt="chat"))
 
         _assert_insertion_order_queries(store)
 
@@ -1792,16 +1792,16 @@ class TestResolveLayerInsertionPoint:
 
 
 # ---------------------------------------------------------------------------
-# TestCtxStoreSiblingBug
+# TestPalStoreSiblingBug
 # ---------------------------------------------------------------------------
 
 
-class TestCtxStoreSiblingBug:
+class TestPalStoreSiblingBug:
     def test_l7_sibling_at_root(self, ctx_env):
         store = _make_root()
         update_index(store.directory, store.store_id)
         for i in range(1, 8):
-            add_child(store, "mystore", f"L{i}", _make_node(entry_type="store", prompt=f"p{i}"))
+            add_palnode(store, "mystore", f"L{i}", _make_node(entry_type="store", prompt=f"p{i}"))
 
         parent = resolve_layer_insertion_point(store, "mystore.L7")
         assert parent == "mystore"
@@ -1812,9 +1812,9 @@ class TestCtxStoreSiblingBug:
     def test_fork_l3_sibling_within_fork(self, ctx_env):
         store = _make_root()
         update_index(store.directory, store.store_id)
-        add_child(store, "mystore", "F0", _make_node(entry_type="fork"))
+        add_palnode(store, "mystore", "F0", _make_node(entry_type="fork"))
         for i in range(1, 4):
-            add_child(store, "mystore.F0", f"L{i}", _make_node(entry_type="store", prompt=f"fp{i}"))
+            add_palnode(store, "mystore.F0", f"L{i}", _make_node(entry_type="store", prompt=f"fp{i}"))
 
         parent = resolve_layer_insertion_point(store, "mystore.F0.L3")
         assert parent == "mystore.F0"
@@ -1832,9 +1832,9 @@ class TestDetachNode:
     def test_detach_leaf(self, ctx_env):
         store = _make_root()
         update_index(store.directory, store.store_id)
-        add_child(store, "mystore", "L1", _make_node(entry_type="store", prompt="hello"))
+        add_palnode(store, "mystore", "L1", _make_node(entry_type="store", prompt="hello"))
 
-        node = detach_node(store, "mystore.L1")
+        node = detach_palnode(store, "mystore.L1")
 
         assert "L1" not in store.children
         assert node.prompt == "hello"
@@ -1842,10 +1842,10 @@ class TestDetachNode:
     def test_detach_with_subtree(self, ctx_env):
         store = _make_root()
         update_index(store.directory, store.store_id)
-        add_child(store, "mystore", "L1", _make_node(entry_type="store", prompt="parent"))
-        add_child(store, "mystore.L1", "Q0", _make_node(entry_type="query", prompt="child"))
+        add_palnode(store, "mystore", "L1", _make_node(entry_type="store", prompt="parent"))
+        add_palnode(store, "mystore.L1", "Q0", _make_node(entry_type="query", prompt="child"))
 
-        node = detach_node(store, "mystore.L1")
+        node = detach_palnode(store, "mystore.L1")
 
         assert "L1" not in store.children
         assert "Q0" in node.children
@@ -1856,23 +1856,23 @@ class TestDetachNode:
         update_index(store.directory, store.store_id)
 
         with pytest.raises(KeyError):
-            detach_node(store, "mystore.L99")
+            detach_palnode(store, "mystore.L99")
 
     def test_detach_root_raises(self, ctx_env):
         store = _make_root()
         update_index(store.directory, store.store_id)
 
         with pytest.raises(ValueError):
-            detach_node(store, "mystore")
+            detach_palnode(store, "mystore")
 
     def test_siblings_not_renumbered(self, ctx_env):
         store = _make_root()
         update_index(store.directory, store.store_id)
-        add_child(store, "mystore", "L1", _make_node(entry_type="store", prompt="one"))
-        add_child(store, "mystore", "L2", _make_node(entry_type="store", prompt="two"))
-        add_child(store, "mystore", "L3", _make_node(entry_type="store", prompt="three"))
+        add_palnode(store, "mystore", "L1", _make_node(entry_type="store", prompt="one"))
+        add_palnode(store, "mystore", "L2", _make_node(entry_type="store", prompt="two"))
+        add_palnode(store, "mystore", "L3", _make_node(entry_type="store", prompt="three"))
 
-        detach_node(store, "mystore.L2")
+        detach_palnode(store, "mystore.L2")
 
         assert "L1" in store.children
         assert "L2" not in store.children
@@ -1890,11 +1890,11 @@ class TestMoveNode:
     def test_move_between_parents(self, ctx_env):
         store = _make_root()
         update_index(store.directory, store.store_id)
-        add_child(store, "mystore", "F0", _make_node(entry_type="fork"))
-        add_child(store, "mystore", "F1", _make_node(entry_type="fork"))
-        add_child(store, "mystore.F0", "L1", _make_node(entry_type="store", prompt="moveme"))
+        add_palnode(store, "mystore", "F0", _make_node(entry_type="fork"))
+        add_palnode(store, "mystore", "F1", _make_node(entry_type="fork"))
+        add_palnode(store, "mystore.F0", "L1", _make_node(entry_type="store", prompt="moveme"))
 
-        new_path = move_node(store, "mystore.F0.L1", "mystore.F1", "L1")
+        new_path = move_palnode(store, "mystore.F0.L1", "mystore.F1", "L1")
 
         assert new_path == "mystore.F1.L1"
         assert "L1" not in store.children["F0"].children
@@ -1904,12 +1904,12 @@ class TestMoveNode:
     def test_move_preserves_subtree(self, ctx_env):
         store = _make_root()
         update_index(store.directory, store.store_id)
-        add_child(store, "mystore", "F0", _make_node(entry_type="fork"))
-        add_child(store, "mystore", "F1", _make_node(entry_type="fork"))
-        add_child(store, "mystore.F0", "L1", _make_node(entry_type="store", prompt="parent"))
-        add_child(store, "mystore.F0.L1", "Q0", _make_node(entry_type="query", prompt="child"))
+        add_palnode(store, "mystore", "F0", _make_node(entry_type="fork"))
+        add_palnode(store, "mystore", "F1", _make_node(entry_type="fork"))
+        add_palnode(store, "mystore.F0", "L1", _make_node(entry_type="store", prompt="parent"))
+        add_palnode(store, "mystore.F0.L1", "Q0", _make_node(entry_type="query", prompt="child"))
 
-        move_node(store, "mystore.F0.L1", "mystore.F1", "L1")
+        move_palnode(store, "mystore.F0.L1", "mystore.F1", "L1")
 
         moved = store.children["F1"].children["L1"]
         assert "Q0" in moved.children
@@ -1918,11 +1918,11 @@ class TestMoveNode:
     def test_move_invalid_dest_rollback(self, ctx_env):
         store = _make_root()
         update_index(store.directory, store.store_id)
-        add_child(store, "mystore", "L1", _make_node(entry_type="store", prompt="original"))
+        add_palnode(store, "mystore", "L1", _make_node(entry_type="store", prompt="original"))
 
         with pytest.raises((ValueError, KeyError)):
             # Q0 cannot be a child of root — invalid dest
-            move_node(store, "mystore.L1", "mystore", "Q0")
+            move_palnode(store, "mystore.L1", "mystore", "Q0")
 
         assert "L1" in store.children
         assert store.children["L1"].prompt == "original"
@@ -1930,10 +1930,10 @@ class TestMoveNode:
     def test_move_returns_new_path(self, ctx_env):
         store = _make_root()
         update_index(store.directory, store.store_id)
-        add_child(store, "mystore", "F0", _make_node(entry_type="fork"))
-        add_child(store, "mystore.F0", "L1", _make_node(entry_type="store", prompt="x"))
+        add_palnode(store, "mystore", "F0", _make_node(entry_type="fork"))
+        add_palnode(store, "mystore.F0", "L1", _make_node(entry_type="store", prompt="x"))
 
-        result = move_node(store, "mystore.F0.L1", "mystore", "L1")
+        result = move_palnode(store, "mystore.F0.L1", "mystore", "L1")
 
         assert result == "mystore.L1"
 
@@ -1947,11 +1947,11 @@ class TestCopyNode:
     def test_copy_creates_independent_clone(self, ctx_env):
         store = _make_root()
         update_index(store.directory, store.store_id)
-        add_child(store, "mystore", "L1", _make_node(entry_type="store", prompt="orig"))
-        add_child(store, "mystore.L1", "Q0", _make_node(entry_type="query", prompt="orig-child"))
-        add_child(store, "mystore", "F0", _make_node(entry_type="fork"))
+        add_palnode(store, "mystore", "L1", _make_node(entry_type="store", prompt="orig"))
+        add_palnode(store, "mystore.L1", "Q0", _make_node(entry_type="query", prompt="orig-child"))
+        add_palnode(store, "mystore", "F0", _make_node(entry_type="fork"))
 
-        copy_node(store, "mystore.L1", "mystore.F0", "L1")
+        copy_palnode(store, "mystore.L1", "mystore.F0", "L1")
 
         # Mutate copy; original must be unchanged
         store.children["F0"].children["L1"].prompt = "modified"
@@ -1960,15 +1960,15 @@ class TestCopyNode:
     def test_copy_preserves_content(self, ctx_env):
         store = _make_root()
         update_index(store.directory, store.store_id)
-        add_child(
+        add_palnode(
             store,
             "mystore",
             "L1",
             _make_node(entry_type="store", prompt="the prompt", response="the response", files=["a.py", "b.py"]),
         )
-        add_child(store, "mystore", "F0", _make_node(entry_type="fork"))
+        add_palnode(store, "mystore", "F0", _make_node(entry_type="fork"))
 
-        copy_node(store, "mystore.L1", "mystore.F0", "L1")
+        copy_palnode(store, "mystore.L1", "mystore.F0", "L1")
         copy_node_obj = store.children["F0"].children["L1"]
 
         assert copy_node_obj.prompt == "the prompt"
@@ -1978,11 +1978,11 @@ class TestCopyNode:
     def test_copy_to_invalid_dest_raises(self, ctx_env):
         store = _make_root()
         update_index(store.directory, store.store_id)
-        add_child(store, "mystore", "L1", _make_node(entry_type="store", prompt="x"))
+        add_palnode(store, "mystore", "L1", _make_node(entry_type="store", prompt="x"))
 
         with pytest.raises(ValueError):
             # Q0 is not valid at root
-            copy_node(store, "mystore.L1", "mystore", "Q0")
+            copy_palnode(store, "mystore.L1", "mystore", "Q0")
 
         # Original must still be present
         assert "L1" in store.children
@@ -1995,7 +1995,7 @@ class TestCopyNode:
 
 class TestFoldRange:
     def test_fold_chain(self, ctx_env):
-        from utils.context_builder import build_context_from_ancestry
+        from utils.palstore_builder import build_context_from_ancestry
 
         store = _make_root()
         update_index(store.directory, store.store_id)
@@ -2006,7 +2006,7 @@ class TestFoldRange:
         n1.children["Q0"] = n2
         n2.children["1"] = n3
 
-        result = fold_range(store, "mystore.L1", "mystore.L1.Q0.1")
+        result = fold_palnode_range(store, "mystore.L1", "mystore.L1.Q0.1")
 
         expected_content = build_context_from_ancestry([n1, n2, n3])
         assert result.content == expected_content
@@ -2021,7 +2021,7 @@ class TestFoldRange:
         n1.children["F0"] = fork
         fork.children["L1"] = n3
 
-        result = fold_range(store, "mystore.L1", "mystore.L1.F0.L1")
+        result = fold_palnode_range(store, "mystore.L1", "mystore.L1.F0.L1")
 
         # Fork's files (empty) contribute nothing; fork-type skipped
         assert "f1.py" in result.files
@@ -2035,7 +2035,7 @@ class TestFoldRange:
         store.children["L1"] = n1
         n1.children["Q0"] = n2
 
-        result = fold_range(store, "mystore.L1", "mystore.L1.Q0")
+        result = fold_palnode_range(store, "mystore.L1", "mystore.L1.Q0")
 
         assert result.files == ["a.py", "b.py", "c.py"]
 
@@ -2045,9 +2045,9 @@ class TestFoldRange:
         n1 = _make_node(entry_type="store", prompt="p1", response="r1")
         store.children["L1"] = n1
 
-        result = fold_range(store, "mystore.L1", "mystore.L1")
+        result = fold_palnode_range(store, "mystore.L1", "mystore.L1")
 
-        assert isinstance(result, StoreNode)
+        assert isinstance(result, PalNode)
         assert result.entry_type == "store"
         assert "L1" in store.children  # original unchanged
 
@@ -2061,12 +2061,12 @@ class TestFindAncestor:
     def test_find_nearest_l_ancestor(self, ctx_env):
         store = _make_root()
         update_index(store.directory, store.store_id)
-        add_child(store, "mystore", "L1", _make_node(entry_type="store"))
-        add_child(store, "mystore.L1", "Q0", _make_node(entry_type="query"))
-        add_child(store, "mystore.L1.Q0", "F0", _make_node(entry_type="fork"))
-        add_child(store, "mystore.L1.Q0.F0", "thinkdeep", _make_node(entry_type="tool"))
+        add_palnode(store, "mystore", "L1", _make_node(entry_type="store"))
+        add_palnode(store, "mystore.L1", "Q0", _make_node(entry_type="query"))
+        add_palnode(store, "mystore.L1.Q0", "F0", _make_node(entry_type="fork"))
+        add_palnode(store, "mystore.L1.Q0.F0", "thinkdeep", _make_node(entry_type="tool"))
 
-        result = find_ancestor(store, "mystore.L1.Q0.F0.thinkdeep", is_l_ancestor)
+        result = find_palnode_ancestor(store, "mystore.L1.Q0.F0.thinkdeep", is_l_ancestor)
 
         assert result is not None
         path, node = result
@@ -2076,12 +2076,12 @@ class TestFindAncestor:
     def test_find_nearest_fork(self, ctx_env):
         store = _make_root()
         update_index(store.directory, store.store_id)
-        add_child(store, "mystore", "F0", _make_node(entry_type="fork"))
-        add_child(store, "mystore.F0", "L1", _make_node(entry_type="store"))
-        add_child(store, "mystore.F0.L1", "F0", _make_node(entry_type="fork"))
-        add_child(store, "mystore.F0.L1.F0", "analyze", _make_node(entry_type="tool"))
+        add_palnode(store, "mystore", "F0", _make_node(entry_type="fork"))
+        add_palnode(store, "mystore.F0", "L1", _make_node(entry_type="store"))
+        add_palnode(store, "mystore.F0.L1", "F0", _make_node(entry_type="fork"))
+        add_palnode(store, "mystore.F0.L1.F0", "analyze", _make_node(entry_type="tool"))
 
-        result = find_ancestor(store, "mystore.F0.L1.F0.analyze", is_fork_ancestor)
+        result = find_palnode_ancestor(store, "mystore.F0.L1.F0.analyze", is_fork_ancestor)
 
         assert result is not None
         path, node = result
@@ -2092,22 +2092,22 @@ class TestFindAncestor:
     def test_no_match_returns_none(self, ctx_env):
         store = _make_root()
         update_index(store.directory, store.store_id)
-        add_child(store, "mystore", "L1", _make_node(entry_type="store"))
-        add_child(store, "mystore.L1", "Q0", _make_node(entry_type="query"))
+        add_palnode(store, "mystore", "L1", _make_node(entry_type="store"))
+        add_palnode(store, "mystore.L1", "Q0", _make_node(entry_type="query"))
 
-        result = find_ancestor(store, "mystore.L1.Q0", is_fork_ancestor)
+        result = find_palnode_ancestor(store, "mystore.L1.Q0", is_fork_ancestor)
 
         assert result is None
 
     def test_returns_deepest_match(self, ctx_env):
         store = _make_root()
         update_index(store.directory, store.store_id)
-        add_child(store, "mystore", "L1", _make_node(entry_type="store"))
-        add_child(store, "mystore.L1", "F0", _make_node(entry_type="fork"))
-        add_child(store, "mystore.L1.F0", "L1", _make_node(entry_type="store"))
-        add_child(store, "mystore.L1.F0.L1", "Q0", _make_node(entry_type="query"))
+        add_palnode(store, "mystore", "L1", _make_node(entry_type="store"))
+        add_palnode(store, "mystore.L1", "F0", _make_node(entry_type="fork"))
+        add_palnode(store, "mystore.L1.F0", "L1", _make_node(entry_type="store"))
+        add_palnode(store, "mystore.L1.F0.L1", "Q0", _make_node(entry_type="query"))
 
-        result = find_ancestor(store, "mystore.L1.F0.L1.Q0", is_l_ancestor)
+        result = find_palnode_ancestor(store, "mystore.L1.F0.L1.Q0", is_l_ancestor)
 
         assert result is not None
         path, _ = result
@@ -2126,7 +2126,7 @@ class TestCollectSubtreeFiles:
         child = _make_node(entry_type="query", files=["b.py"])
         node.children["Q0"] = child
 
-        result = collect_subtree_files(node)
+        result = collect_palnode_files(node)
 
         assert result == ["a.py", "b.py"]
 
@@ -2135,7 +2135,7 @@ class TestCollectSubtreeFiles:
         child = _make_node(entry_type="query", files=["b.py", "c.py"])
         node.children["Q0"] = child
 
-        result = collect_subtree_files(node)
+        result = collect_palnode_files(node)
 
         assert result == ["a.py", "b.py", "c.py"]
         assert len(result) == 3
@@ -2143,7 +2143,7 @@ class TestCollectSubtreeFiles:
     def test_empty_subtree(self):
         node = _make_node(entry_type="store", files=[])
 
-        result = collect_subtree_files(node)
+        result = collect_palnode_files(node)
 
         assert result == []
 
@@ -2157,6 +2157,6 @@ class TestCollectSubtreeFiles:
         level1.children["1"] = level2
         level2.children["2"] = level3
 
-        result = collect_subtree_files(root)
+        result = collect_palnode_files(root)
 
         assert result == ["root.py", "l1.py", "l2.py", "l3.py"]

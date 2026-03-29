@@ -4,7 +4,7 @@
 
 The context store tools give you a persistent, queryable knowledge repository that lives across conversations. Rather than repeatedly re-explaining a project to each tool call, you initialize a named store once, build it up in layers, and query it as many times as needed. Context accumulates in layers; queries branch into independent threads that can themselves be continued or layered further.
 
-Four tools form the system: `ctxinit` creates named stores, `ctxstore` builds and extends them, `ctxquery` interrogates them (forking or continuing depending on target), and `ctxlist` discovers existing stores registered to a project directory.
+Four tools form the system: `palinit` creates named stores, `palstore` builds and extends them, `palquery` interrogates them (forking or continuing depending on target), and `pallist` discovers existing stores registered to a project directory.
 
 ## Thinking Mode
 
@@ -20,20 +20,20 @@ Every node in the store tree has a human-readable path that encodes its lineage.
 
 | Segment | Meaning | Example |
 |---------|---------|---------|
-| `<name>` | Root store created by `ctxinit` | `myproject` |
-| `.<name>.L<n>` | Layer `n` appended by `ctxstore` | `myproject.L1`, `myproject.L2` |
+| `<name>` | Root store created by `palinit` | `myproject` |
+| `.<name>.L<n>` | Layer `n` appended by `palstore` | `myproject.L1`, `myproject.L2` |
 | `.<name>.Q<n>` | Query fork `n` branched from a store node | `myproject.L2.Q0` |
 | `.<name>.Q<n>.<m>` | Follow-up `m` continued from a query node | `myproject.L2.Q0.1` |
 | `.<name>.Q<n>.L<m>` | Layer `m` appended to a query node | `myproject.L2.Q0.L1` |
 
 ### Threading Model
 
-The node type at the target `store_id` determines what `ctxstore` and `ctxquery` do:
+The node type at the target `store_id` determines what `palstore` and `palquery` do:
 
 | Operation | On store node | On query node |
 |-----------|--------------|---------------|
-| `ctxstore` | Append layer (same thread) | Append layer (same thread) |
-| `ctxquery` | Fork to new thread | Continue same thread |
+| `palstore` | Append layer (same thread) | Append layer (same thread) |
+| `palquery` | Fork to new thread | Continue same thread |
 
 - **Append**: The new node joins the same conversation thread as the target. Full prior history is visible to the model.
 - **Fork**: A new independent thread branches from the target checkpoint. The parent thread is never modified.
@@ -42,25 +42,25 @@ The node type at the target `store_id` determines what `ctxstore` and `ctxquery`
 ### Complete Path Example
 
 ```
-ctxinit(directory="/path", store_name="myproject")
+palinit(directory="/path", store_name="myproject")
   → "myproject"
 
-ctxstore(store_id="myproject", prompt="...")
+palstore(store_id="myproject", prompt="...")
   → "myproject.L1"
 
-ctxstore(store_id="myproject.L1", prompt="...")
+palstore(store_id="myproject.L1", prompt="...")
   → "myproject.L2"
 
-ctxquery(store_id="myproject.L2", prompt="...")
+palquery(store_id="myproject.L2", prompt="...")
   → "myproject.L2.Q0"         (fork: new thread branched from L2)
 
-ctxquery(store_id="myproject.L2.Q0", prompt="...")
+palquery(store_id="myproject.L2.Q0", prompt="...")
   → "myproject.L2.Q0.1"       (continue: extends the Q0 thread)
 
-ctxquery(store_id="myproject.L2", prompt="...")
+palquery(store_id="myproject.L2", prompt="...")
   → "myproject.L2.Q1"         (fork: second independent branch from L2)
 
-ctxstore(store_id="myproject.L2.Q0.1", prompt="...")
+palstore(store_id="myproject.L2.Q0.1", prompt="...")
   → "myproject.L2.Q0.L1"      (layer appended to query thread Q0.1)
 ```
 
@@ -78,9 +78,9 @@ myproject
 
 ---
 
-## ctxinit — Create a Named Store
+## palinit — Create a Named Store
 
-`ctxinit` creates a new named root store and registers it with a project directory. It does not contact any model — it is a pure registry operation. The resulting `store_id` is the store name you provide.
+`palinit` creates a new named root store and registers it with a project directory. It does not contact any model — it is a pure registry operation. The resulting `store_id` is the store name you provide.
 
 ### Parameters
 
@@ -91,9 +91,9 @@ myproject
 
 ### Behavior
 
-`ctxinit` validates that `store_name` is unique within the directory's registry, creates the root entry, and returns the `store_id`. No model call is made. The store is empty until the first `ctxstore` call.
+`palinit` validates that `store_name` is unique within the directory's registry, creates the root entry, and returns the `store_id`. No model call is made. The store is empty until the first `palstore` call.
 
-Always check `ctxlist` before calling `ctxinit` — if a store already exists for your project, initialize from that instead.
+Always check `pallist` before calling `palinit` — if a store already exists for your project, initialize from that instead.
 
 ### Response
 
@@ -102,7 +102,7 @@ The new `store_id` (equal to `store_name`) and a confirmation that the store was
 ### Example
 
 ```
-ctxinit(
+palinit(
   store_name="pal-mcp",
   directory="/home/user/dev/opt/pal-mcp-server"
 )
@@ -111,16 +111,16 @@ ctxinit(
 
 ---
 
-## ctxstore — Build and Extend the Store
+## palstore — Build and Extend the Store
 
-`ctxstore` is the write path. Every call appends a new layer to an existing node. The `store_id` parameter is always required — use `ctxinit` to create the root first.
+`palstore` is the write path. Every call appends a new layer to an existing node. The `store_id` parameter is always required — use `palinit` to create the root first.
 
 ### Parameters
 
 | Parameter | Required | Description |
 |-----------|----------|-------------|
 | `prompt` | Yes | Content or context to store in this layer |
-| `store_id` | Yes | The node to extend. Must already exist (created by `ctxinit` or returned by a prior tool call) |
+| `store_id` | Yes | The node to extend. Must already exist (created by `palinit` or returned by a prior tool call) |
 | `context_label` | No | Human-readable label for this layer (e.g., `"auth subsystem"`, `"migration plan"`) |
 | `absolute_file_paths` | No | Files to include as additional context in this layer |
 | `media` | No | Images to include in this layer (absolute paths) |
@@ -129,9 +129,9 @@ ctxinit(
 
 ### Behavior
 
-`ctxstore` loads the full prior history of the target node's thread and presents it to the model alongside the new layer prompt. The model synthesizes the new content against everything it already knows, updating its index of entities, decisions, relationships, and open questions.
+`palstore` loads the full prior history of the target node's thread and presents it to the model alongside the new layer prompt. The model synthesizes the new content against everything it already knows, updating its index of entities, decisions, relationships, and open questions.
 
-The returned `store_id` is the new layer path (e.g., `"pal-mcp.L1"`). Pass this as `store_id` to the next `ctxstore` call to continue appending to the same thread.
+The returned `store_id` is the new layer path (e.g., `"pal-mcp.L1"`). Pass this as `store_id` to the next `palstore` call to continue appending to the same thread.
 
 Querying or layering on any node in the same thread gives the model the same accumulated history — the path encodes lineage, not a separate history.
 
@@ -153,7 +153,7 @@ The model returns a synthesis of the stored layer: key entities, concepts, files
 
 ```
 First layer — seed the store:
-  ctxstore(
+  palstore(
     store_id="pal-mcp",
     prompt="PAL MCP server: MCP protocol server connecting Claude/Gemini/Codex to external AI
             models. Provider registry pattern. Conversation memory: stateless MCP → stateful
@@ -165,10 +165,10 @@ First layer — seed the store:
   → store_id: "pal-mcp.L1"
 
 Second layer — deepen:
-  ctxstore(
+  palstore(
     store_id="pal-mcp.L1",
-    prompt="Context store redesign: store_id is now a human-readable path. ctxinit creates
-            roots. ctxquery forks on store nodes, continues on query nodes. ctxfork removed.",
+    prompt="Context store redesign: store_id is now a human-readable path. palinit creates
+            roots. palquery forks on store nodes, continues on query nodes. palfork removed.",
     context_label="context path redesign"
   )
   → store_id: "pal-mcp.L2"
@@ -176,9 +176,9 @@ Second layer — deepen:
 
 ---
 
-## ctxquery — Query the Store
+## palquery — Query the Store
 
-`ctxquery` interrogates an existing node. Its behavior depends on the target node type:
+`palquery` interrogates an existing node. Its behavior depends on the target node type:
 
 - **On a store node** (`entry_type="store"`): creates a new independent fork thread. Returns a `.Q<n>` path.
 - **On a query node** (`entry_type="query"`): continues the existing query thread. Returns a `.Q<n>.<m>` path.
@@ -196,7 +196,7 @@ This means querying is naturally exploratory. Multiple forks from the same store
 
 ### Behavior
 
-`ctxquery` loads the full history of the target node's thread. The model answers strictly from stored material, citing layers by label or path. If the query cannot be answered from what is stored, the model says so explicitly rather than speculating.
+`palquery` loads the full history of the target node's thread. The model answers strictly from stored material, citing layers by label or path. If the query cannot be answered from what is stored, the model says so explicitly rather than speculating.
 
 **Fork path** (target is a store node): A new conversation thread is created branching from the target's checkpoint. The parent thread is never modified. The response includes the new `.Q<n>` path as the returned `store_id`.
 
@@ -210,26 +210,26 @@ The model's answer with layer citations in the form `"From [label / path]: ..."`
 
 ```
 Fork from a store node:
-  ctxquery(
+  palquery(
     store_id="pal-mcp.L2",
     prompt="How does store_id map to the conversation thread system?"
   )
   → store_id: "pal-mcp.L2.Q0"
   → "From [context path redesign / pal-mcp.L2]: The store_id is now a
-     human-readable path. ctxinit creates the root; each ctxstore appends
+     human-readable path. palinit creates the root; each palstore appends
      .L<n> to the current path..."
 
 Follow-up on the query thread:
-  ctxquery(
+  palquery(
     store_id="pal-mcp.L2.Q0",
-    prompt="What determines whether ctxquery forks or continues?"
+    prompt="What determines whether palquery forks or continues?"
   )
   → store_id: "pal-mcp.L2.Q0.1"
   → "From [context path redesign / pal-mcp.L2]: The target node type
      determines behavior. Store nodes fork; query nodes continue..."
 
 Second independent fork from the same store node:
-  ctxquery(
+  palquery(
     store_id="pal-mcp.L2",
     prompt="Which files were modified in the context path redesign?"
   )
@@ -238,11 +238,11 @@ Second independent fork from the same store node:
 
 ---
 
-## ctxlist — Discover Registered Stores
+## pallist — Discover Registered Stores
 
-`ctxlist` reads the per-directory registry and returns all known stores, optionally filtered by project directory. It requires no model and makes no external API calls — it is a pure registry lookup.
+`pallist` reads the per-directory registry and returns all known stores, optionally filtered by project directory. It requires no model and makes no external API calls — it is a pure registry lookup.
 
-Use `ctxlist` at the start of a session to find whether a store already exists for your current project before calling `ctxinit`.
+Use `pallist` at the start of a session to find whether a store already exists for your current project before calling `palinit`.
 
 ### Parameters
 
@@ -252,7 +252,7 @@ Use `ctxlist` at the start of a session to find whether a store already exists f
 
 ### Behavior
 
-`ctxlist` reads the registry and returns all matching entries in a tree view organized by root store name. Each entry shows its path, label, layer count, creation timestamp, and node type.
+`pallist` reads the registry and returns all matching entries in a tree view organized by root store name. Each entry shows its path, label, layer count, creation timestamp, and node type.
 
 ### Response
 
@@ -274,10 +274,10 @@ pal-mcp
 ### Example
 
 ```
-ctxlist(directory="/home/user/dev/opt/pal-mcp-server")
+pallist(directory="/home/user/dev/opt/pal-mcp-server")
 → Returns all nodes registered under that project path.
 
-ctxlist()
+pallist()
 → Returns all nodes across all projects.
 ```
 
@@ -289,14 +289,14 @@ ctxlist()
 
 ```
 Start of project — initialize the store:
-  ctxinit(
+  palinit(
     store_name="pal-mcp",
     directory="/path/to/project"
   )
   → store_id: "pal-mcp"
 
 Seed the first layer:
-  ctxstore(
+  palstore(
     store_id="pal-mcp",
     prompt="[Project overview, goals, architecture, open questions]",
     context_label="project overview",
@@ -305,7 +305,7 @@ Seed the first layer:
   → store_id: "pal-mcp.L1"
 
 As work progresses — deepen the store:
-  ctxstore(
+  palstore(
     store_id="pal-mcp.L1",
     prompt="[Completed refactor details, new design decisions]",
     context_label="refactor complete"
@@ -317,7 +317,7 @@ As work progresses — deepen the store:
 
 ```
 Fork a query thread from the latest layer:
-  ctxquery(
+  palquery(
     store_id="pal-mcp.L2",
     prompt="What was the root cause of the token overflow bug?"
   )
@@ -325,7 +325,7 @@ Fork a query thread from the latest layer:
   → Cited answer; new fork thread created; parent L2 unchanged.
 
 Ask a follow-up on the same query thread:
-  ctxquery(
+  palquery(
     store_id="pal-mcp.L2.Q0",
     prompt="Which files were affected by that fix?"
   )
@@ -337,7 +337,7 @@ Ask a follow-up on the same query thread:
 
 ```
 Build out a query thread into a longer investigation:
-  ctxstore(
+  palstore(
     store_id="pal-mcp.L2.Q0.1",
     prompt="[Detailed findings from the investigation, conclusions]",
     context_label="overflow investigation complete"
@@ -350,11 +350,11 @@ Build out a query thread into a longer investigation:
 
 ```
 Beginning a new session — check what already exists:
-  ctxlist(directory="/path/to/project")
+  pallist(directory="/path/to/project")
   → Found: "pal-mcp" with layers L1, L2 and query forks L2.Q0, L2.Q1
 
 Resume at the latest layer:
-  ctxstore(
+  palstore(
     store_id="pal-mcp.L2",
     prompt="[New session context, picking up from last handoff]",
     context_label="session 4 pickup"
@@ -382,4 +382,4 @@ Each entry records:
 | `parent_store_id` | Path of the parent node this was branched or appended from |
 | `created_at` | UTC timestamp of node creation |
 
-The registry is written atomically (temp file + rename) to prevent corruption on concurrent access. `ctxlist` reads directly from this index without touching conversation memory.
+The registry is written atomically (temp file + rename) to prevent corruption on concurrent access. `pallist` reads directly from this index without touching conversation memory.

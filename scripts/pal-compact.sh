@@ -37,5 +37,5 @@ else
 fi
 
 jq -n --arg store "$store_name" '{
-  systemMessage: ("Compaction complete — context store re-armed: " + $store + ". IMPERATIVE: Before proceeding with ANY work, you MUST execute these recovery steps in order: (1) Run mcp__pal__ctxlist(store_id=\"" + $store + "\") to see the full layer tree. (2) Run mcp__pal__ctxread on the last 2-3 layers to restore the most recent handoff — these contain all decisions, anti-patterns, critical context, and next steps. (3) Read the active plan file in its entirety using the Read tool — check .claude/plans/ for the active plan referenced in the handoff layers. Do NOT skip these steps or attempt to infer context from the compaction summary alone.")
+  systemMessage: ("Compaction complete — context store re-armed: " + $store + ". IMPERATIVE: Before proceeding with ANY work, you MUST execute these recovery steps in order: (1) Run mcp__pal__pallist(store_id=\"" + $store + "\") to see the full layer tree. (2) Run mcp__pal__palread on the last 2-3 layers to restore the most recent handoff — these contain all decisions, anti-patterns, critical context, and next steps. (3) Read the active plan file in its entirety using the Read tool — check .claude/plans/ for the active plan referenced in the handoff layers. Do NOT skip these steps or attempt to infer context from the compaction summary alone.")
 }'

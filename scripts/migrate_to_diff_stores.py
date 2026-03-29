@@ -31,9 +31,9 @@ _PROJECT_ROOT = os.path.dirname(_SCRIPT_DIR)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
-from utils.context_store import (  # noqa: E402
-    StoreNode,
-    StoreRoot,
+from utils.palstore import (  # noqa: E402
+    PalNode,
+    PalRoot,
     load_index,
     save_store,
 )
@@ -57,7 +57,7 @@ def _get_mtime_from_header(header_mtime: str) -> str:
     return header_mtime.strip()
 
 
-def _sorted_l_keys(children: dict[str, StoreNode]) -> list[str]:
+def _sorted_l_keys(children: dict[str, PalNode]) -> list[str]:
     """Return L-node keys sorted numerically."""
     keys = [k for k in children if k[0] == "L" and k[1:].isdigit()]
     keys.sort(key=lambda k: int(k[1:]))
@@ -65,7 +65,7 @@ def _sorted_l_keys(children: dict[str, StoreNode]) -> list[str]:
 
 
 def _migrate_node_content(
-    node: StoreNode,
+    node: PalNode,
     state: dict[str, str],
     layer_key: str,
     dry_run: bool,
@@ -117,7 +117,7 @@ def _migrate_node_content(
 
 
 def _migrate_children(
-    children: dict[str, StoreNode],
+    children: dict[str, PalNode],
     state: dict[str, str],
     dry_run: bool,
     depth: int = 0,
@@ -157,7 +157,7 @@ def _migrate_children(
     return total_savings, nodes_modified
 
 
-def migrate_store(store: StoreRoot, dry_run: bool = True) -> tuple[int, int]:
+def migrate_store(store: PalRoot, dry_run: bool = True) -> tuple[int, int]:
     """Migrate a single store to diff-based file representation.
 
     Returns (total_token_savings, nodes_modified).
@@ -204,7 +204,7 @@ def main() -> None:
 
         try:
             with open(store_path) as f:
-                store = StoreRoot.model_validate(json.load(f))
+                store = PalRoot.model_validate(json.load(f))
         except (json.JSONDecodeError, ValueError) as exc:
             print(f"  SKIP {store_id}: invalid JSON ({exc})")
             continue

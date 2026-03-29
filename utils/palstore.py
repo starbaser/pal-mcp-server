@@ -2,7 +2,7 @@
 Tree-structured storage layer for context stores.
 
 Replaces context_registry.py with a file-per-store layout where each store is a
-self-contained JSON tree rooted at StoreRoot. Per-directory folders isolate stores
+self-contained JSON tree rooted at PalRoot. Per-directory folders isolate stores
 by project; a global index provides fast store_id lookup without scanning.
 
 Storage layout:
@@ -73,7 +73,7 @@ def _is_l_node_key(key: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
-class StoreNode(BaseModel):
+class PalNode(BaseModel):
     """A single node in the context store tree."""
 
     entry_type: Literal["store", "query", "tool", "fork"]
@@ -85,17 +85,17 @@ class StoreNode(BaseModel):
     response: str = ""
     content: str = ""  # Full API exchange: assembled prompt (with files) + model response
     tool_name: str | None = None
-    children: dict[str, StoreNode] = {}
+    children: dict[str, PalNode] = {}
 
 
-class StoreRoot(BaseModel):
+class PalRoot(BaseModel):
     """Root of a context store JSON file."""
 
     store_id: str
     directory: str
     label: str | None = None
     created_at: str
-    children: dict[str, StoreNode] = {}
+    children: dict[str, PalNode] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -138,20 +138,20 @@ def _atomic_write(path: str, data: dict | BaseModel) -> None:
 # ---------------------------------------------------------------------------
 
 
-def load_store(directory: str, store_id: str) -> StoreRoot | None:
+def load_store(directory: str, store_id: str) -> PalRoot | None:
     """Load a store JSON file. Return None if the file does not exist or is corrupt."""
     path = get_store_path(directory, store_id)
     if not os.path.exists(path):
         return None
     try:
         with open(path) as f:
-            return StoreRoot.model_validate(json.load(f))
+            return PalRoot.model_validate(json.load(f))
     except (json.JSONDecodeError, OSError, ValueError):
         return None
 
 
-def save_store(store: StoreRoot) -> None:
-    """Atomically persist a StoreRoot to disk."""
+def save_store(store: PalRoot) -> None:
+    """Atomically persist a PalRoot to disk."""
     path = get_store_path(store.directory, store.store_id)
     _atomic_write(path, store)
 
@@ -188,7 +188,7 @@ def rename_store(directory: str, old_id: str, new_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def resolve_node(store: StoreRoot, store_id: str) -> StoreNode | None:
+def resolve_palnode(store: PalRoot, store_id: str) -> PalNode | None:
     """Walk a dot-delimited path to a node.
 
     The root store_id prefix is stripped before traversal. Returns None for
@@ -198,8 +198,8 @@ def resolve_node(store: StoreRoot, store_id: str) -> StoreNode | None:
     if not segments:
         return None
 
-    current: dict[str, StoreNode] = store.children
-    node: StoreNode | None = None
+    current: dict[str, PalNode] = store.children
+    node: PalNode | None = None
     for seg in segments:
         node = current.get(seg)
         if node is None:
@@ -208,7 +208,7 @@ def resolve_node(store: StoreRoot, store_id: str) -> StoreNode | None:
     return node
 
 
-def add_child(store: StoreRoot, parent_path: str, child_key: str, node: StoreNode) -> str:
+def add_palnode(store: PalRoot, parent_path: str, child_key: str, node: PalNode) -> str:
     """Insert a child node at parent_path and return the full path to the new node.
 
     When parent_path equals the store root id, the node is added directly to
@@ -222,7 +222,7 @@ def add_child(store: StoreRoot, parent_path: str, child_key: str, node: StoreNod
     if parent_path == store.store_id:
         parent_type = "root"
     else:
-        parent = resolve_node(store, parent_path)
+        parent = resolve_palnode(store, parent_path)
         if parent is None:
             raise KeyError(f"parent path not found in store: {parent_path}")
         parent_type = parent.entry_type
@@ -237,11 +237,11 @@ def add_child(store: StoreRoot, parent_path: str, child_key: str, node: StoreNod
     if parent_path == store.store_id:
         store.children[child_key] = node
     else:
-        resolve_node(store, parent_path).children[child_key] = node
+        resolve_palnode(store, parent_path).children[child_key] = node
     return f"{parent_path}.{child_key}"
 
 
-def walk_ancestry(store: StoreRoot, store_id: str) -> list[StoreNode]:
+def walk_palnode_ancestry(store: PalRoot, store_id: str) -> list[PalNode]:
     """Return nodes from the root down to (and including) the target.
 
     Layers are cumulative: when the target segment at any level is an L-node,
@@ -255,8 +255,8 @@ def walk_ancestry(store: StoreRoot, store_id: str) -> list[StoreNode]:
     if not segments:
         return []
 
-    ancestry: list[StoreNode] = []
-    current: dict[str, StoreNode] = store.children
+    ancestry: list[PalNode] = []
+    current: dict[str, PalNode] = store.children
     for seg in segments:
         node = current.get(seg)
         if node is None:
@@ -271,23 +271,23 @@ def walk_ancestry(store: StoreRoot, store_id: str) -> list[StoreNode]:
     return ancestry
 
 
-def walk_range(store: StoreRoot, start_path: str, end_path: str) -> list[StoreNode]:
+def walk_palnode_range(store: PalRoot, start_path: str, end_path: str) -> list[PalNode]:
     """Return the ancestor chain from start_path through end_path (inclusive).
 
-    Uses the same cumulative L-node logic as walk_ancestry. The start node must
+    Uses the same cumulative L-node logic as walk_palnode_ancestry. The start node must
     appear in the ancestry of end_path — either as a direct tree ancestor or as
     a preceding L-sibling at the same level. Raises ValueError when start is not
     reachable from end's ancestry.
     """
-    start_node = resolve_node(store, start_path)
+    start_node = resolve_palnode(store, start_path)
     if start_node is None:
         raise ValueError(f"Start node not found: {start_path}")
 
-    end_node = resolve_node(store, end_path)
+    end_node = resolve_palnode(store, end_path)
     if end_node is None:
         raise ValueError(f"End node not found: {end_path}")
 
-    ancestry = walk_ancestry(store, end_path)
+    ancestry = walk_palnode_ancestry(store, end_path)
 
     start_idx = None
     for i, node in enumerate(ancestry):
@@ -301,7 +301,7 @@ def walk_range(store: StoreRoot, start_path: str, end_path: str) -> list[StoreNo
     return ancestry[start_idx:]
 
 
-def get_last_layer_path(store: StoreRoot, parent_path: str | None = None) -> str | None:
+def get_last_layer_path(store: PalRoot, parent_path: str | None = None) -> str | None:
     """Return dotted path to the highest-numbered L-child, or None if no layers exist."""
     if parent_path is None:
         parent_path = store.store_id
@@ -309,7 +309,7 @@ def get_last_layer_path(store: StoreRoot, parent_path: str | None = None) -> str
     if parent_path == store.store_id:
         container = store.children
     else:
-        parent_node = resolve_node(store, parent_path)
+        parent_node = resolve_palnode(store, parent_path)
         container = parent_node.children if parent_node is not None else {}
 
     indices = [int(k[1:]) for k in container if _is_l_node_key(k)]
@@ -318,7 +318,7 @@ def get_last_layer_path(store: StoreRoot, parent_path: str | None = None) -> str
     return f"{parent_path}.L{max(indices)}"
 
 
-def resolve_root_alias(store: StoreRoot, store_id: str) -> str:
+def resolve_root_alias(store: PalRoot, store_id: str) -> str:
     """Resolve root store_id alias to the current top layer path.
 
     Root store_id is shorthand for the latest L-child. Returns store_id
@@ -332,7 +332,7 @@ def resolve_root_alias(store: StoreRoot, store_id: str) -> str:
     return last
 
 
-def get_next_key(store: StoreRoot, parent_path: str, prefix: str) -> str:
+def get_next_key(store: PalRoot, parent_path: str, prefix: str) -> str:
     """Compute the next available child key for a given prefix at parent_path.
 
     Prefix rules:
@@ -344,7 +344,7 @@ def get_next_key(store: StoreRoot, parent_path: str, prefix: str) -> str:
     if parent_path == store.store_id:
         siblings = store.children
     else:
-        parent = resolve_node(store, parent_path)
+        parent = resolve_palnode(store, parent_path)
         siblings = parent.children if parent is not None else {}
 
     if prefix == "":
@@ -361,7 +361,7 @@ def get_next_key(store: StoreRoot, parent_path: str, prefix: str) -> str:
     raise ValueError(f"Unsupported prefix for get_next_key: {prefix!r}")
 
 
-def resolve_layer_insertion_point(store: StoreRoot, store_id: str) -> str:
+def resolve_layer_insertion_point(store: PalRoot, store_id: str) -> str:
     """Return the parent path where the next L-node should be inserted.
 
     When store_id points directly to an L-node (e.g. 'myproject.L7'), the next
@@ -385,7 +385,7 @@ def resolve_layer_insertion_point(store: StoreRoot, store_id: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def detach_node(store: StoreRoot, node_path: str) -> StoreNode:
+def detach_palnode(store: PalRoot, node_path: str) -> PalNode:
     """Remove a node from its parent and return it. Siblings are not renumbered.
 
     The detached node retains its full subtree intact. Raises ValueError if
@@ -401,7 +401,7 @@ def detach_node(store: StoreRoot, node_path: str) -> StoreNode:
         parent_container = store.children
     else:
         parent_path_str = f"{store.store_id}.{'.'.join(segments[:-1])}"
-        parent_node = resolve_node(store, parent_path_str)
+        parent_node = resolve_palnode(store, parent_path_str)
         if parent_node is None:
             raise KeyError(f"Parent path not found: {parent_path_str}")
         parent_container = parent_node.children
@@ -412,10 +412,10 @@ def detach_node(store: StoreRoot, node_path: str) -> StoreNode:
     return parent_container.pop(target_key)
 
 
-def move_node(store: StoreRoot, source_path: str, dest_parent: str, dest_key: str) -> str:
+def move_palnode(store: PalRoot, source_path: str, dest_parent: str, dest_key: str) -> str:
     """Detach a node and reattach at a new location. Returns the new dot-path.
 
-    If add_child raises (validation failure), the node is reinserted at its
+    If add_palnode raises (validation failure), the node is reinserted at its
     original location and the exception is re-raised.
     """
     _, src_segments = parse_store_path(source_path)
@@ -427,42 +427,42 @@ def move_node(store: StoreRoot, source_path: str, dest_parent: str, dest_key: st
         original_parent_container = store.children
     else:
         orig_parent_path = f"{store.store_id}.{'.'.join(src_segments[:-1])}"
-        orig_parent_node = resolve_node(store, orig_parent_path)
+        orig_parent_node = resolve_palnode(store, orig_parent_path)
         if orig_parent_node is None:
             raise KeyError(f"Source parent not found: {orig_parent_path}")
         original_parent_container = orig_parent_node.children
 
-    node = detach_node(store, source_path)
+    node = detach_palnode(store, source_path)
     try:
-        return add_child(store, dest_parent, dest_key, node)
+        return add_palnode(store, dest_parent, dest_key, node)
     except Exception:
         original_parent_container[original_key] = node
         raise
 
 
-def copy_node(store: StoreRoot, source_path: str, dest_parent: str, dest_key: str) -> str:
+def copy_palnode(store: PalRoot, source_path: str, dest_parent: str, dest_key: str) -> str:
     """Deep copy a node to a new location. Returns the new dot-path.
 
     The original node is unchanged. Raises KeyError if source_path is not found.
     Raises ValueError if the destination is structurally invalid.
     """
-    source = resolve_node(store, source_path)
+    source = resolve_palnode(store, source_path)
     if source is None:
         raise KeyError(f"Source node not found: {source_path}")
     clone = source.model_copy(deep=True)
-    return add_child(store, dest_parent, dest_key, clone)
+    return add_palnode(store, dest_parent, dest_key, clone)
 
 
-def fold_range(store: StoreRoot, start_path: str, end_path: str) -> StoreNode:
-    """Aggregate a range of ancestor nodes into a single new StoreNode.
+def fold_palnode_range(store: PalRoot, start_path: str, end_path: str) -> PalNode:
+    """Aggregate a range of ancestor nodes into a single new PalNode.
 
     Does NOT insert the result — returns the folded node for the caller to place.
     Fork nodes in the range are skipped when collecting files (they carry no
     prompt/response content). The returned node has entry_type="store".
     """
-    from utils.context_builder import build_context_from_ancestry
+    from utils.palstore_builder import build_context_from_ancestry
 
-    nodes = walk_range(store, start_path, end_path)
+    nodes = walk_palnode_range(store, start_path, end_path)
     content = build_context_from_ancestry(nodes)
 
     seen: set[str] = set()
@@ -476,12 +476,12 @@ def fold_range(store: StoreRoot, start_path: str, end_path: str) -> StoreNode:
                 files.append(f)
 
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    return StoreNode(entry_type="store", content=content, files=files, timestamp=timestamp, prompt="", response="")
+    return PalNode(entry_type="store", content=content, files=files, timestamp=timestamp, prompt="", response="")
 
 
-def find_ancestor(
-    store: StoreRoot, node_path: str, predicate: Callable[[str, StoreNode], bool]
-) -> tuple[str, StoreNode] | None:
+def find_palnode_ancestor(
+    store: PalRoot, node_path: str, predicate: Callable[[str, PalNode], bool]
+) -> tuple[str, PalNode] | None:
     """Walk from root toward node_path, returning the deepest ancestor matching predicate.
 
     The predicate receives (segment_key, node) for each ancestor in the path.
@@ -492,8 +492,8 @@ def find_ancestor(
     if not segments:
         return None
 
-    last_match: tuple[str, StoreNode] | None = None
-    current: dict[str, StoreNode] = store.children
+    last_match: tuple[str, PalNode] | None = None
+    current: dict[str, PalNode] = store.children
 
     for i, seg in enumerate(segments[:-1]):
         node = current.get(seg)
@@ -507,17 +507,17 @@ def find_ancestor(
     return last_match
 
 
-def is_l_ancestor(key: str, node: StoreNode) -> bool:  # noqa: ARG001
+def is_l_ancestor(key: str, node: PalNode) -> bool:  # noqa: ARG001
     """Predicate: True when the ancestor key is an L-node key."""
     return _is_l_node_key(key)
 
 
-def is_fork_ancestor(key: str, node: StoreNode) -> bool:  # noqa: ARG001
+def is_fork_ancestor(key: str, node: PalNode) -> bool:  # noqa: ARG001
     """Predicate: True when the ancestor node is a fork."""
     return node.entry_type == "fork"
 
 
-def collect_subtree_files(node: StoreNode) -> list[str]:
+def collect_palnode_files(node: PalNode) -> list[str]:
     """Recursively gather all unique file paths from a node and its descendants.
 
     Preserves insertion order. DFS traversal.
@@ -525,7 +525,7 @@ def collect_subtree_files(node: StoreNode) -> list[str]:
     seen: set[str] = set()
     result: list[str] = []
 
-    def _collect(n: StoreNode) -> None:
+    def _collect(n: PalNode) -> None:
         for f in n.files:
             if f not in seen:
                 seen.add(f)
@@ -551,7 +551,7 @@ def _get_key_index(key: str) -> int:
     return int(m.group(1))
 
 
-def delete_node_with_shift(store: StoreRoot, node_path: str) -> dict:
+def delete_palnode_with_shift(store: PalRoot, node_path: str) -> dict:
     """Delete a node and shift subsequent same-prefix siblings down by one.
 
     Accepts a full dot-path like 'myproject.L5' or 'myproject.L2.F1'.
@@ -574,7 +574,7 @@ def delete_node_with_shift(store: StoreRoot, node_path: str) -> dict:
         parent_path = store.store_id
     else:
         parent_path_str = f"{store.store_id}.{'.'.join(segments[:-1])}"
-        parent_node = resolve_node(store, parent_path_str)
+        parent_node = resolve_palnode(store, parent_path_str)
         if parent_node is None:
             raise KeyError(f"Parent path not found: {parent_path_str}")
         parent_container = parent_node.children
@@ -782,13 +782,13 @@ def list_armed_stores() -> dict:
 # ---------------------------------------------------------------------------
 
 
-def list_stores(directory: str | None = None) -> list[StoreRoot]:
-    """Return loaded StoreRoot objects, optionally filtered to a single directory."""
+def list_stores(directory: str | None = None) -> list[PalRoot]:
+    """Return loaded PalRoot objects, optionally filtered to a single directory."""
     if directory is not None:
         folder = get_store_dir(directory)
         if not os.path.isdir(folder):
             return []
-        roots: list[StoreRoot] = []
+        roots: list[PalRoot] = []
         for entry in os.scandir(folder):
             if entry.name.endswith(".json"):
                 store_id = entry.name[:-5]
@@ -797,7 +797,7 @@ def list_stores(directory: str | None = None) -> list[StoreRoot]:
                     roots.append(store)
         return roots
 
-    results: list[StoreRoot] = []
+    results: list[PalRoot] = []
     if not os.path.isdir(_CTX_DIR):
         return results
     for dir_entry in os.scandir(_CTX_DIR):
@@ -808,7 +808,7 @@ def list_stores(directory: str | None = None) -> list[StoreRoot]:
                 continue
             try:
                 with open(file_entry.path) as f:
-                    store = StoreRoot.model_validate(json.load(f))
+                    store = PalRoot.model_validate(json.load(f))
                 results.append(store)
             except (json.JSONDecodeError, OSError, ValueError):
                 continue

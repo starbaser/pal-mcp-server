@@ -11,14 +11,22 @@ from utils.context_store import (
     StoreRoot,
     add_child,
     arm_store,
+    collect_subtree_files,
+    copy_node,
+    detach_node,
     disarm_store,
     encode_directory,
+    find_ancestor,
+    fold_range,
     get_armed_store,
     get_last_layer_path,
     get_next_key,
+    is_fork_ancestor,
+    is_l_ancestor,
     list_armed_stores,
     list_stores,
     load_store,
+    move_node,
     parse_store_path,
     rebuild_index,
     resolve_layer_insertion_point,
@@ -1813,3 +1821,342 @@ class TestCtxStoreSiblingBug:
 
         next_key = get_next_key(store, parent, "L")
         assert next_key == "L4"
+
+
+# ---------------------------------------------------------------------------
+# TestDetachNode
+# ---------------------------------------------------------------------------
+
+
+class TestDetachNode:
+    def test_detach_leaf(self, ctx_env):
+        store = _make_root()
+        update_index(store.directory, store.store_id)
+        add_child(store, "mystore", "L1", _make_node(entry_type="store", prompt="hello"))
+
+        node = detach_node(store, "mystore.L1")
+
+        assert "L1" not in store.children
+        assert node.prompt == "hello"
+
+    def test_detach_with_subtree(self, ctx_env):
+        store = _make_root()
+        update_index(store.directory, store.store_id)
+        add_child(store, "mystore", "L1", _make_node(entry_type="store", prompt="parent"))
+        add_child(store, "mystore.L1", "Q0", _make_node(entry_type="query", prompt="child"))
+
+        node = detach_node(store, "mystore.L1")
+
+        assert "L1" not in store.children
+        assert "Q0" in node.children
+        assert node.children["Q0"].prompt == "child"
+
+    def test_detach_nonexistent_raises(self, ctx_env):
+        store = _make_root()
+        update_index(store.directory, store.store_id)
+
+        with pytest.raises(KeyError):
+            detach_node(store, "mystore.L99")
+
+    def test_detach_root_raises(self, ctx_env):
+        store = _make_root()
+        update_index(store.directory, store.store_id)
+
+        with pytest.raises(ValueError):
+            detach_node(store, "mystore")
+
+    def test_siblings_not_renumbered(self, ctx_env):
+        store = _make_root()
+        update_index(store.directory, store.store_id)
+        add_child(store, "mystore", "L1", _make_node(entry_type="store", prompt="one"))
+        add_child(store, "mystore", "L2", _make_node(entry_type="store", prompt="two"))
+        add_child(store, "mystore", "L3", _make_node(entry_type="store", prompt="three"))
+
+        detach_node(store, "mystore.L2")
+
+        assert "L1" in store.children
+        assert "L2" not in store.children
+        assert "L3" in store.children
+        assert store.children["L1"].prompt == "one"
+        assert store.children["L3"].prompt == "three"
+
+
+# ---------------------------------------------------------------------------
+# TestMoveNode
+# ---------------------------------------------------------------------------
+
+
+class TestMoveNode:
+    def test_move_between_parents(self, ctx_env):
+        store = _make_root()
+        update_index(store.directory, store.store_id)
+        add_child(store, "mystore", "F0", _make_node(entry_type="fork"))
+        add_child(store, "mystore", "F1", _make_node(entry_type="fork"))
+        add_child(store, "mystore.F0", "L1", _make_node(entry_type="store", prompt="moveme"))
+
+        new_path = move_node(store, "mystore.F0.L1", "mystore.F1", "L1")
+
+        assert new_path == "mystore.F1.L1"
+        assert "L1" not in store.children["F0"].children
+        assert "L1" in store.children["F1"].children
+        assert store.children["F1"].children["L1"].prompt == "moveme"
+
+    def test_move_preserves_subtree(self, ctx_env):
+        store = _make_root()
+        update_index(store.directory, store.store_id)
+        add_child(store, "mystore", "F0", _make_node(entry_type="fork"))
+        add_child(store, "mystore", "F1", _make_node(entry_type="fork"))
+        add_child(store, "mystore.F0", "L1", _make_node(entry_type="store", prompt="parent"))
+        add_child(store, "mystore.F0.L1", "Q0", _make_node(entry_type="query", prompt="child"))
+
+        move_node(store, "mystore.F0.L1", "mystore.F1", "L1")
+
+        moved = store.children["F1"].children["L1"]
+        assert "Q0" in moved.children
+        assert moved.children["Q0"].prompt == "child"
+
+    def test_move_invalid_dest_rollback(self, ctx_env):
+        store = _make_root()
+        update_index(store.directory, store.store_id)
+        add_child(store, "mystore", "L1", _make_node(entry_type="store", prompt="original"))
+
+        with pytest.raises((ValueError, KeyError)):
+            # Q0 cannot be a child of root — invalid dest
+            move_node(store, "mystore.L1", "mystore", "Q0")
+
+        assert "L1" in store.children
+        assert store.children["L1"].prompt == "original"
+
+    def test_move_returns_new_path(self, ctx_env):
+        store = _make_root()
+        update_index(store.directory, store.store_id)
+        add_child(store, "mystore", "F0", _make_node(entry_type="fork"))
+        add_child(store, "mystore.F0", "L1", _make_node(entry_type="store", prompt="x"))
+
+        result = move_node(store, "mystore.F0.L1", "mystore", "L1")
+
+        assert result == "mystore.L1"
+
+
+# ---------------------------------------------------------------------------
+# TestCopyNode
+# ---------------------------------------------------------------------------
+
+
+class TestCopyNode:
+    def test_copy_creates_independent_clone(self, ctx_env):
+        store = _make_root()
+        update_index(store.directory, store.store_id)
+        add_child(store, "mystore", "L1", _make_node(entry_type="store", prompt="orig"))
+        add_child(store, "mystore.L1", "Q0", _make_node(entry_type="query", prompt="orig-child"))
+        add_child(store, "mystore", "F0", _make_node(entry_type="fork"))
+
+        copy_node(store, "mystore.L1", "mystore.F0", "L1")
+
+        # Mutate copy; original must be unchanged
+        store.children["F0"].children["L1"].prompt = "modified"
+        assert store.children["L1"].prompt == "orig"
+
+    def test_copy_preserves_content(self, ctx_env):
+        store = _make_root()
+        update_index(store.directory, store.store_id)
+        add_child(
+            store,
+            "mystore",
+            "L1",
+            _make_node(entry_type="store", prompt="the prompt", response="the response", files=["a.py", "b.py"]),
+        )
+        add_child(store, "mystore", "F0", _make_node(entry_type="fork"))
+
+        copy_node(store, "mystore.L1", "mystore.F0", "L1")
+        copy_node_obj = store.children["F0"].children["L1"]
+
+        assert copy_node_obj.prompt == "the prompt"
+        assert copy_node_obj.response == "the response"
+        assert copy_node_obj.files == ["a.py", "b.py"]
+
+    def test_copy_to_invalid_dest_raises(self, ctx_env):
+        store = _make_root()
+        update_index(store.directory, store.store_id)
+        add_child(store, "mystore", "L1", _make_node(entry_type="store", prompt="x"))
+
+        with pytest.raises(ValueError):
+            # Q0 is not valid at root
+            copy_node(store, "mystore.L1", "mystore", "Q0")
+
+        # Original must still be present
+        assert "L1" in store.children
+
+
+# ---------------------------------------------------------------------------
+# TestFoldRange
+# ---------------------------------------------------------------------------
+
+
+class TestFoldRange:
+    def test_fold_chain(self, ctx_env):
+        from utils.context_builder import build_context_from_ancestry
+
+        store = _make_root()
+        update_index(store.directory, store.store_id)
+        n1 = _make_node(entry_type="store", prompt="q1", response="r1")
+        n2 = _make_node(entry_type="query", prompt="q2", response="r2")
+        n3 = _make_node(entry_type="tool", prompt="q3", response="r3")
+        store.children["L1"] = n1
+        n1.children["Q0"] = n2
+        n2.children["1"] = n3
+
+        result = fold_range(store, "mystore.L1", "mystore.L1.Q0.1")
+
+        expected_content = build_context_from_ancestry([n1, n2, n3])
+        assert result.content == expected_content
+
+    def test_fold_skips_forks(self, ctx_env):
+        store = _make_root()
+        update_index(store.directory, store.store_id)
+        n1 = _make_node(entry_type="store", prompt="q1", response="r1", files=["f1.py"])
+        fork = _make_node(entry_type="fork")
+        n3 = _make_node(entry_type="store", prompt="q3", response="r3", files=["f3.py"])
+        store.children["L1"] = n1
+        n1.children["F0"] = fork
+        fork.children["L1"] = n3
+
+        result = fold_range(store, "mystore.L1", "mystore.L1.F0.L1")
+
+        # Fork's files (empty) contribute nothing; fork-type skipped
+        assert "f1.py" in result.files
+        assert "f3.py" in result.files
+
+    def test_fold_unions_files(self, ctx_env):
+        store = _make_root()
+        update_index(store.directory, store.store_id)
+        n1 = _make_node(entry_type="store", prompt="p1", response="r1", files=["a.py", "b.py"])
+        n2 = _make_node(entry_type="query", prompt="p2", response="r2", files=["b.py", "c.py"])
+        store.children["L1"] = n1
+        n1.children["Q0"] = n2
+
+        result = fold_range(store, "mystore.L1", "mystore.L1.Q0")
+
+        assert result.files == ["a.py", "b.py", "c.py"]
+
+    def test_fold_returns_store_node(self, ctx_env):
+        store = _make_root()
+        update_index(store.directory, store.store_id)
+        n1 = _make_node(entry_type="store", prompt="p1", response="r1")
+        store.children["L1"] = n1
+
+        result = fold_range(store, "mystore.L1", "mystore.L1")
+
+        assert isinstance(result, StoreNode)
+        assert result.entry_type == "store"
+        assert "L1" in store.children  # original unchanged
+
+
+# ---------------------------------------------------------------------------
+# TestFindAncestor
+# ---------------------------------------------------------------------------
+
+
+class TestFindAncestor:
+    def test_find_nearest_l_ancestor(self, ctx_env):
+        store = _make_root()
+        update_index(store.directory, store.store_id)
+        add_child(store, "mystore", "L1", _make_node(entry_type="store"))
+        add_child(store, "mystore.L1", "Q0", _make_node(entry_type="query"))
+        add_child(store, "mystore.L1.Q0", "F0", _make_node(entry_type="fork"))
+        add_child(store, "mystore.L1.Q0.F0", "thinkdeep", _make_node(entry_type="tool"))
+
+        result = find_ancestor(store, "mystore.L1.Q0.F0.thinkdeep", is_l_ancestor)
+
+        assert result is not None
+        path, node = result
+        assert path == "mystore.L1"
+        assert node.entry_type == "store"
+
+    def test_find_nearest_fork(self, ctx_env):
+        store = _make_root()
+        update_index(store.directory, store.store_id)
+        add_child(store, "mystore", "F0", _make_node(entry_type="fork"))
+        add_child(store, "mystore.F0", "L1", _make_node(entry_type="store"))
+        add_child(store, "mystore.F0.L1", "F0", _make_node(entry_type="fork"))
+        add_child(store, "mystore.F0.L1.F0", "analyze", _make_node(entry_type="tool"))
+
+        result = find_ancestor(store, "mystore.F0.L1.F0.analyze", is_fork_ancestor)
+
+        assert result is not None
+        path, node = result
+        # Deepest fork ancestor is mystore.F0.L1.F0
+        assert path == "mystore.F0.L1.F0"
+        assert node.entry_type == "fork"
+
+    def test_no_match_returns_none(self, ctx_env):
+        store = _make_root()
+        update_index(store.directory, store.store_id)
+        add_child(store, "mystore", "L1", _make_node(entry_type="store"))
+        add_child(store, "mystore.L1", "Q0", _make_node(entry_type="query"))
+
+        result = find_ancestor(store, "mystore.L1.Q0", is_fork_ancestor)
+
+        assert result is None
+
+    def test_returns_deepest_match(self, ctx_env):
+        store = _make_root()
+        update_index(store.directory, store.store_id)
+        add_child(store, "mystore", "L1", _make_node(entry_type="store"))
+        add_child(store, "mystore.L1", "F0", _make_node(entry_type="fork"))
+        add_child(store, "mystore.L1.F0", "L1", _make_node(entry_type="store"))
+        add_child(store, "mystore.L1.F0.L1", "Q0", _make_node(entry_type="query"))
+
+        result = find_ancestor(store, "mystore.L1.F0.L1.Q0", is_l_ancestor)
+
+        assert result is not None
+        path, _ = result
+        # Both L1 ancestors exist; deepest is mystore.L1.F0.L1
+        assert path == "mystore.L1.F0.L1"
+
+
+# ---------------------------------------------------------------------------
+# TestCollectSubtreeFiles
+# ---------------------------------------------------------------------------
+
+
+class TestCollectSubtreeFiles:
+    def test_collects_from_node_and_children(self):
+        node = _make_node(entry_type="store", files=["a.py"])
+        child = _make_node(entry_type="query", files=["b.py"])
+        node.children["Q0"] = child
+
+        result = collect_subtree_files(node)
+
+        assert result == ["a.py", "b.py"]
+
+    def test_deduplicates(self):
+        node = _make_node(entry_type="store", files=["a.py", "b.py"])
+        child = _make_node(entry_type="query", files=["b.py", "c.py"])
+        node.children["Q0"] = child
+
+        result = collect_subtree_files(node)
+
+        assert result == ["a.py", "b.py", "c.py"]
+        assert len(result) == 3
+
+    def test_empty_subtree(self):
+        node = _make_node(entry_type="store", files=[])
+
+        result = collect_subtree_files(node)
+
+        assert result == []
+
+    def test_deep_nesting(self):
+        root = _make_node(entry_type="store", files=["root.py"])
+        level1 = _make_node(entry_type="query", files=["l1.py"])
+        level2 = _make_node(entry_type="query", files=["l2.py"])
+        level3 = _make_node(entry_type="tool", files=["l3.py"])
+
+        root.children["Q0"] = level1
+        level1.children["1"] = level2
+        level2.children["2"] = level3
+
+        result = collect_subtree_files(root)
+
+        assert result == ["root.py", "l1.py", "l2.py", "l3.py"]

@@ -20,7 +20,8 @@ import json
 import os
 import re
 import tempfile
-from typing import Literal
+from datetime import datetime, timezone
+from typing import Callable, Literal
 
 from pydantic import BaseModel
 
@@ -377,6 +378,163 @@ def resolve_layer_insertion_point(store: StoreRoot, store_id: str) -> str:
             return store.store_id
         return f"{store.store_id}.{'.'.join(segments[:-1])}"
     return store_id
+
+
+# ---------------------------------------------------------------------------
+# N-ary tree manipulation primitives
+# ---------------------------------------------------------------------------
+
+
+def detach_node(store: StoreRoot, node_path: str) -> StoreNode:
+    """Remove a node from its parent and return it. Siblings are not renumbered.
+
+    The detached node retains its full subtree intact. Raises ValueError if
+    node_path resolves to the root (no segments). Raises KeyError if not found.
+    """
+    _, segments = parse_store_path(node_path)
+    if not segments:
+        raise ValueError(f"Cannot detach root store: {node_path}")
+
+    target_key = segments[-1]
+
+    if len(segments) == 1:
+        parent_container = store.children
+    else:
+        parent_path_str = f"{store.store_id}.{'.'.join(segments[:-1])}"
+        parent_node = resolve_node(store, parent_path_str)
+        if parent_node is None:
+            raise KeyError(f"Parent path not found: {parent_path_str}")
+        parent_container = parent_node.children
+
+    if target_key not in parent_container:
+        raise KeyError(f"Node not found: {node_path}")
+
+    return parent_container.pop(target_key)
+
+
+def move_node(store: StoreRoot, source_path: str, dest_parent: str, dest_key: str) -> str:
+    """Detach a node and reattach at a new location. Returns the new dot-path.
+
+    If add_child raises (validation failure), the node is reinserted at its
+    original location and the exception is re-raised.
+    """
+    _, src_segments = parse_store_path(source_path)
+    if not src_segments:
+        raise ValueError(f"Cannot move root store: {source_path}")
+
+    original_key = src_segments[-1]
+    if len(src_segments) == 1:
+        original_parent_container = store.children
+    else:
+        orig_parent_path = f"{store.store_id}.{'.'.join(src_segments[:-1])}"
+        orig_parent_node = resolve_node(store, orig_parent_path)
+        if orig_parent_node is None:
+            raise KeyError(f"Source parent not found: {orig_parent_path}")
+        original_parent_container = orig_parent_node.children
+
+    node = detach_node(store, source_path)
+    try:
+        return add_child(store, dest_parent, dest_key, node)
+    except Exception:
+        original_parent_container[original_key] = node
+        raise
+
+
+def copy_node(store: StoreRoot, source_path: str, dest_parent: str, dest_key: str) -> str:
+    """Deep copy a node to a new location. Returns the new dot-path.
+
+    The original node is unchanged. Raises KeyError if source_path is not found.
+    Raises ValueError if the destination is structurally invalid.
+    """
+    source = resolve_node(store, source_path)
+    if source is None:
+        raise KeyError(f"Source node not found: {source_path}")
+    clone = source.model_copy(deep=True)
+    return add_child(store, dest_parent, dest_key, clone)
+
+
+def fold_range(store: StoreRoot, start_path: str, end_path: str) -> StoreNode:
+    """Aggregate a range of ancestor nodes into a single new StoreNode.
+
+    Does NOT insert the result — returns the folded node for the caller to place.
+    Fork nodes in the range are skipped when collecting files (they carry no
+    prompt/response content). The returned node has entry_type="store".
+    """
+    from utils.context_builder import build_context_from_ancestry
+
+    nodes = walk_range(store, start_path, end_path)
+    content = build_context_from_ancestry(nodes)
+
+    seen: set[str] = set()
+    files: list[str] = []
+    for node in nodes:
+        if node.entry_type == "fork":
+            continue
+        for f in node.files:
+            if f not in seen:
+                seen.add(f)
+                files.append(f)
+
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return StoreNode(entry_type="store", content=content, files=files, timestamp=timestamp, prompt="", response="")
+
+
+def find_ancestor(
+    store: StoreRoot, node_path: str, predicate: Callable[[str, StoreNode], bool]
+) -> tuple[str, StoreNode] | None:
+    """Walk from root toward node_path, returning the deepest ancestor matching predicate.
+
+    The predicate receives (segment_key, node) for each ancestor in the path.
+    Returns (path, node) for the deepest match, or None if no match is found.
+    The target node itself is not checked — only its ancestors.
+    """
+    _, segments = parse_store_path(node_path)
+    if not segments:
+        return None
+
+    last_match: tuple[str, StoreNode] | None = None
+    current: dict[str, StoreNode] = store.children
+
+    for i, seg in enumerate(segments[:-1]):
+        node = current.get(seg)
+        if node is None:
+            break
+        current_path = f"{store.store_id}.{'.'.join(segments[:i + 1])}"
+        if predicate(seg, node):
+            last_match = (current_path, node)
+        current = node.children
+
+    return last_match
+
+
+def is_l_ancestor(key: str, node: StoreNode) -> bool:  # noqa: ARG001
+    """Predicate: True when the ancestor key is an L-node key."""
+    return _is_l_node_key(key)
+
+
+def is_fork_ancestor(key: str, node: StoreNode) -> bool:  # noqa: ARG001
+    """Predicate: True when the ancestor node is a fork."""
+    return node.entry_type == "fork"
+
+
+def collect_subtree_files(node: StoreNode) -> list[str]:
+    """Recursively gather all unique file paths from a node and its descendants.
+
+    Preserves insertion order. DFS traversal.
+    """
+    seen: set[str] = set()
+    result: list[str] = []
+
+    def _collect(n: StoreNode) -> None:
+        for f in n.files:
+            if f not in seen:
+                seen.add(f)
+                result.append(f)
+        for child in n.children.values():
+            _collect(child)
+
+    _collect(node)
+    return result
 
 
 def _get_key_prefix(key: str) -> str:

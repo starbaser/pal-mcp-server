@@ -378,8 +378,8 @@ class TestResolveStoreContinuation:
 
         # FORK mode: auto-fork F0 created under root, tool node under fork
         assert result == "myproject.F0.thinkdeep"
-        # continuation_id is now a hydrated thread UUID, not the store path
-        assert args["continuation_id"] != "myproject"
+        # Store context built directly — no ThreadContext hydration
+        assert args.get("_store_context_built") is True
 
         bridge = args["_store_bridge"]
         assert bridge["tool_path"] == "myproject.F0.thinkdeep"
@@ -416,12 +416,12 @@ class TestResolveStoreContinuation:
         args = {"continuation_id": "myproject.F0.thinkdeep"}
         result = _resolve_store_continuation("thinkdeep", args)
 
-        # CONTINUE: same tool on same tool node — returns the same path
-        assert result == "myproject.F0.thinkdeep"
-        assert args["continuation_id"] != "myproject.F0.thinkdeep"
+        # CONTINUE: same tool — creates numeric child for the new turn
+        assert result == "myproject.F0.thinkdeep.1"
+        assert args.get("_store_context_built") is True
 
         bridge = args["_store_bridge"]
-        assert bridge["tool_path"] == "myproject.F0.thinkdeep"
+        assert bridge["tool_path"] == "myproject.F0.thinkdeep.1"
         assert bridge["tool_name"] == "thinkdeep"
         assert bridge["mode"] == "continue"
 
@@ -456,7 +456,7 @@ class TestResolveStoreContinuation:
 
         # FORK: analyze on a thinkdeep tool node creates F0 under thinkdeep, then analyze under that
         assert result == "myproject.F0.thinkdeep.F0.analyze"
-        assert args["continuation_id"] != "myproject.F0.thinkdeep"
+        assert args.get("_store_context_built") is True
 
         bridge = args["_store_bridge"]
         assert bridge["tool_path"] == "myproject.F0.thinkdeep.F0.analyze"

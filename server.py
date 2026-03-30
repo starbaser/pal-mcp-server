@@ -859,17 +859,19 @@ def _build_store_listing() -> str:
 
 
 def _resolve_store_continuation(tool_name: str, arguments: dict) -> str | None:
-    """If continuation_id is a store path, hydrate a thread for non-ctx tool bridging.
+    """If continuation_id is a store path, build context directly from PalNode ancestry.
 
     Returns the path-based store_id for response injection, or None if
     continuation_id is a regular UUID (not a store path).
 
     Two modes:
-    - CONTINUE: target node is a tool node for the same tool. The agent keeps the
-      same continuation_id; the response is persisted back to the existing node.
+    - CONTINUE: target node is a tool node for the same tool. A numeric child
+      is created for the new turn, preserving each turn as a separate PalNode.
     - FORK: target is any other node type. An auto-fork (F0, F1, ...) is created
-      under the target, and a tool node is placed under the fork. The agent gets
-      the tool node path as its continuation_id.
+      under the target, and a tool node is placed under the fork.
+
+    Both modes build conversation context directly from PalNode ancestry via
+    build_store_context() — no ThreadContext intermediate.
     """
     from datetime import datetime, timezone
 
@@ -882,7 +884,7 @@ def _resolve_store_continuation(tool_name: str, arguments: dict) -> str | None:
         resolve_store_location,
         save_store,
     )
-    from utils.palstore_builder import hydrate_thread_context
+    from utils.palstore_builder import build_store_context
 
     continuation_id = arguments.get("continuation_id", "")
     if not continuation_id:
@@ -903,27 +905,21 @@ def _resolve_store_continuation(tool_name: str, arguments: dict) -> str | None:
 
     node = resolve_palnode(store, continuation_id)
 
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
     if node and node.entry_type == "tool" and node.tool_name == tool_name:
-        # CONTINUE: same tool on same tool node — agent keeps the same path
-        tool_path = continuation_id
-
-        # Hydrate thread from ancestry (includes the tool node itself)
-        thread_context = hydrate_thread_context(store, tool_path)
-        arguments["continuation_id"] = thread_context.thread_id
-
-        arguments["_store_bridge"] = {
-            "store": store,
-            "tool_path": tool_path,
-            "tool_name": tool_name,
-            "mode": "continue",
-        }
-
-        logger.info(f"Store continuation CONTINUE: {tool_path} (hydrated thread {thread_context.thread_id})")
-        return tool_path
+        # CONTINUE: same tool — create numeric child for the new turn
+        child_key = get_next_key(store, continuation_id, "")
+        turn_node = PalNode(
+            entry_type="tool",
+            tool_name=tool_name,
+            timestamp=now,
+        )
+        tool_path = add_palnode(store, continuation_id, child_key, turn_node)
+        save_store(store)
+        mode = "continue"
     else:
         # FORK: auto-create fork node, then tool child under it
-        now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
         fork_key = get_next_key(store, continuation_id, "F")
         fork_node = PalNode(
             entry_type="fork",
@@ -938,24 +934,21 @@ def _resolve_store_continuation(tool_name: str, arguments: dict) -> str | None:
             timestamp=now,
         )
         tool_path = add_palnode(store, fork_path, tool_name, tool_node)
-
         save_store(store)
+        mode = "fork"
 
-        # Hydrate thread from ancestry (through the fork to the tool node)
-        thread_context = hydrate_thread_context(store, tool_path)
-        arguments["continuation_id"] = thread_context.thread_id
+    # Build context directly from PalNode ancestry — no ThreadContext needed
+    build_store_context(store, tool_path, arguments)
 
-        arguments["_store_bridge"] = {
-            "store": store,
-            "tool_path": tool_path,
-            "tool_name": tool_name,
-            "mode": "fork",
-        }
+    arguments["_store_bridge"] = {
+        "store": store,
+        "tool_path": tool_path,
+        "tool_name": tool_name,
+        "mode": mode,
+    }
 
-        logger.info(
-            f"Store continuation FORK: {continuation_id} → {tool_path} (hydrated thread {thread_context.thread_id})"
-        )
-        return tool_path
+    logger.info(f"Store continuation {mode.upper()}: {continuation_id} → {tool_path}")
+    return tool_path
 
 
 def _inject_store_path_continuation(result: list, store_path: str, arguments: dict | None = None) -> list:
@@ -1231,29 +1224,27 @@ async def _call_tool_impl(name: str, arguments: dict[str, Any], tools: dict) -> 
     # Handle thread context reconstruction if continuation_id is present
     _store_path = None
     if "continuation_id" in arguments and arguments["continuation_id"]:
-        # Resolve store_id → thread UUID with fork/continue semantics
+        # Resolve store_id → build context directly from PalNode ancestry (or return None for UUID)
         _store_path = _resolve_store_continuation(name, arguments)
 
-        # Check if tool declares ephemeral continuation (skips user turn recording)
-        _tool = tools.get(name)
-        if _tool and getattr(_tool, "ephemeral", False):
-            arguments["_ephemeral_query"] = True
-        continuation_id = arguments["continuation_id"]
-        logger.debug(f"Resuming conversation thread: {continuation_id}")
-        logger.debug(
-            f"[CONVERSATION_DEBUG] Tool '{name}' resuming thread {continuation_id} with {len(arguments)} arguments"
-        )
-        logger.debug(f"[CONVERSATION_DEBUG] Original arguments keys: {list(arguments.keys())}")
+        if not arguments.get("_store_context_built"):
+            # Legacy UUID path — use existing ThreadContext reconstruction
+            _tool = tools.get(name)
+            if _tool and getattr(_tool, "ephemeral", False):
+                arguments["_ephemeral_query"] = True
+            continuation_id = arguments["continuation_id"]
+            logger.debug(f"Resuming conversation thread (UUID): {continuation_id}")
 
-        # Log to activity file for monitoring
-        try:
-            mcp_activity_logger = logging.getLogger("mcp_activity")
-            mcp_activity_logger.info(f"CONVERSATION_RESUME: {name} resuming thread {continuation_id}")
-        except Exception:
-            pass
+            try:
+                mcp_activity_logger = logging.getLogger("mcp_activity")
+                mcp_activity_logger.info(f"CONVERSATION_RESUME: {name} resuming thread {continuation_id}")
+            except Exception:
+                pass
 
-        arguments = await reconstruct_thread_context(arguments)
-        logger.debug(f"[CONVERSATION_DEBUG] After thread reconstruction, arguments keys: {list(arguments.keys())}")
+            arguments = await reconstruct_thread_context(arguments)
+        else:
+            logger.debug(f"Store context built for {name} at {_store_path}")
+
         if "_remaining_tokens" in arguments:
             logger.debug(f"[CONVERSATION_DEBUG] Remaining token budget: {arguments['_remaining_tokens']:,}")
 
@@ -2051,6 +2042,44 @@ async def main():
         )
 
 
+# Header → env var mapping for HTTP mode
+_HEADER_ENV_MAP = {
+    "x-gemini-api-key": "GEMINI_API_KEY",
+    "x-google-api-key": "GOOGLE_API_KEY",
+    "x-openai-api-key": "OPENAI_API_KEY",
+    "x-openrouter-api-key": "OPENROUTER_API_KEY",
+    "x-zai-api-key": "ZAI_API_KEY",
+    "x-xai-api-key": "XAI_API_KEY",
+    "x-default-model": "DEFAULT_MODEL",
+    "x-default-thinking-mode-thinkdeep": "DEFAULT_THINKING_MODE_THINKDEEP",
+}
+
+
+def _env_from_headers_middleware(app):
+    """ASGI middleware that extracts x-* headers and sets env vars on first request."""
+    _configured = False
+
+    async def middleware(scope, receive, send):
+        nonlocal _configured
+        if scope["type"] == "http" and not _configured:
+            injected = 0
+            for header_bytes, value_bytes in scope.get("headers", []):
+                header = header_bytes.decode("latin-1").lower()
+                env_var = _HEADER_ENV_MAP.get(header)
+                if env_var and value_bytes:
+                    val = value_bytes.decode("latin-1")
+                    if val and not os.environ.get(env_var):
+                        os.environ[env_var] = val
+                        injected += 1
+            if injected:
+                logger.info(f"Injected {injected} env var(s) from request headers, reconfiguring providers")
+                configure_providers()
+            _configured = True
+        await app(scope, receive, send)
+
+    return middleware
+
+
 async def main_http(host: str = "127.0.0.1", port: int = 3001):
     """Run dual MCP servers over streamable HTTP."""
     import contextlib
@@ -2097,7 +2126,7 @@ async def main_http(host: str = "127.0.0.1", port: int = 3001):
 
     starlette_app = Starlette(
         routes=[
-            Mount("/pal/mcp", app=pal_manager.handle_request),
+            Mount("/pal/mcp", app=_env_from_headers_middleware(pal_manager.handle_request)),
             Mount("/palstore/mcp", app=palstore_manager.handle_request),
         ],
         lifespan=lifespan,

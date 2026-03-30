@@ -21,7 +21,7 @@ import os
 import re
 import tempfile
 from datetime import datetime, timezone
-from typing import Callable, Literal
+from typing import Any, Callable, Literal
 
 from pydantic import BaseModel, model_validator
 
@@ -84,6 +84,7 @@ class PalNode(BaseModel):
     files: list[str] = []
     input: str = ""  # render_markdown_output(input_dict) — tool call data
     output: str = ""  # render_markdown_output(output_dict) — tool response
+    metadata: dict[str, Any] = {}  # workflow state, model info, arbitrary tool metadata
     children: dict[str, PalNode] = {}
 
     @model_validator(mode="before")

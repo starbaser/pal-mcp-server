@@ -62,7 +62,7 @@ def test_render_basic_tool_output():
     md = render_markdown_output(data)
 
     assert md.startswith("---\n")
-    assert "json:" in md
+    assert "status: success" in md
     assert "store_id: my-store" in md
     assert "total_pages: 5" in md
     # Content extracted to section

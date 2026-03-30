@@ -337,10 +337,10 @@ class NarrateTool(WorkflowTool):
 
                 label = node.label or f"layer {page_num}"
                 content_parts = []
-                if node.prompt:
-                    content_parts.append(node.prompt)
-                if node.response:
-                    content_parts.append(node.response)
+                if node.input:
+                    content_parts.append(node.input)
+                if node.output:
+                    content_parts.append(node.output)
 
                 if content_parts:
                     page_text = "\n\n".join(content_parts)

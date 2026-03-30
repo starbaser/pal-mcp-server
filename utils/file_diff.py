@@ -192,11 +192,11 @@ def build_file_state_from_ancestry(ancestors: list[PalNode]) -> dict[str, str]:
     state: dict[str, str] = {}
     for node in ancestors:
         files = getattr(node, "files", None) or []
-        content_blob = getattr(node, "content", "") or ""
-        if not files or not content_blob:
+        input_blob = getattr(node, "input", "") or ""
+        if not files or not input_blob:
             continue
         for file_path in files:
-            extracted = extract_file_from_content_blob(content_blob, file_path)
+            extracted = extract_file_from_content_blob(input_blob, file_path)
             if extracted is not None:
                 state[file_path] = extracted
     return state

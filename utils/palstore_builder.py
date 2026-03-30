@@ -21,12 +21,12 @@ logger = logging.getLogger(__name__)
 def build_context_from_ancestry(ancestors: list[PalNode], include_files: bool = True) -> str:
     """Build formatted conversation history from ancestor chain.
 
-    Each ancestor node's prompt+response becomes a user/assistant turn pair in the history.
-    Fork nodes (entry_type="fork") are skipped since they have no prompt/response.
+    Each ancestor node's input+output becomes a user/assistant turn pair in the history.
+    Fork nodes (entry_type="fork") are skipped since they have no input/output.
 
-    Returns empty string if no ancestors have prompt+response content.
+    Returns empty string if no ancestors have input+output content.
     """
-    content_nodes = [n for n in ancestors if getattr(n, "entry_type", None) != "fork" and n.prompt and n.response]
+    content_nodes = [n for n in ancestors if getattr(n, "entry_type", None) != "fork" and n.input and n.output]
 
     if not content_nodes:
         return ""
@@ -36,18 +36,11 @@ def build_context_from_ancestry(ancestors: list[PalNode], include_files: bool = 
     turn_num = 0
     for node in content_nodes:
         turn_num += 1
-        # Extract the full prompt (with file blobs) from content when available.
-        # content format: "{full_prompt}\n\n---\n\n{response}"
-        content = getattr(node, "content", "")
-        if content:
-            user_turn = content.split("\n\n---\n\n", 1)[0]
-        else:
-            user_turn = node.prompt
         parts.append(f"--- Turn {turn_num} (user) ---")
-        parts.append(user_turn)
+        parts.append(node.input)
         parts.append("")
         parts.append(f"--- Turn {turn_num} (assistant) ---")
-        parts.append(node.response)
+        parts.append(node.output)
         parts.append("")
 
     if include_files:
@@ -73,10 +66,10 @@ def hydrate_thread_context(store: PalRoot, node_path: str) -> ThreadContext:
     """Create an ephemeral ThreadContext from store tree for non-ctx tool bridge.
 
     Walks the ancestry from root to the target node, creates ConversationTurn objects
-    from each ancestor's prompt+response, and stores the resulting thread in
+    from each ancestor's input+output, and stores the resulting thread in
     conversation_memory so reconstruct_thread_context can find it.
 
-    Fork nodes (entry_type="fork") are skipped — they carry no prompt/response content.
+    Fork nodes (entry_type="fork") are skipped — they carry no input/output content.
 
     The hydrated thread is ephemeral; the store tree remains the source of truth.
     """
@@ -91,16 +84,11 @@ def hydrate_thread_context(store: PalRoot, node_path: str) -> ThreadContext:
         if getattr(ancestor, "entry_type", None) == "fork":
             continue
 
-        # Prefer content blob (full API exchange) over separate prompt/response
-        content = getattr(ancestor, "content", "")
-        if content:
-            add_turn(thread_id, "user", content)
-        elif ancestor.prompt or ancestor.response:
-            files = getattr(ancestor, "files", None) or None
-            if ancestor.prompt:
-                add_turn(thread_id, "user", ancestor.prompt, files=files)
-            if ancestor.response:
-                add_turn(thread_id, "assistant", ancestor.response)
+        files = getattr(ancestor, "files", None) or None
+        if ancestor.input:
+            add_turn(thread_id, "user", ancestor.input, files=files)
+        if ancestor.output:
+            add_turn(thread_id, "assistant", ancestor.output)
 
     thread = get_thread(thread_id)
     if thread is None:

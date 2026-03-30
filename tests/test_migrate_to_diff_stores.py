@@ -68,7 +68,7 @@ class TestMigrateStore:
         assert modified == 1
 
         # L2's content should no longer have BEGIN FILE for /a.py
-        l2_content = store.children["L2"].content
+        l2_content = store.children["L2"].input
         assert "BEGIN FILE: /a.py" not in l2_content
 
     def test_small_change_produces_diff(self):
@@ -86,7 +86,7 @@ class TestMigrateStore:
         )
 
         migrate_store(store, dry_run=False)
-        l2_content = store.children["L2"].content
+        l2_content = store.children["L2"].input
         assert "BEGIN DIFF: /a.py" in l2_content
         assert "+added_line" in l2_content
 
@@ -100,10 +100,10 @@ class TestMigrateStore:
                 {"files": {"/a.py": "content"}},
             ]
         )
-        original_l1 = store.children["L1"].content
+        original_l1 = store.children["L1"].input
 
         migrate_store(store, dry_run=False)
-        assert store.children["L1"].content == original_l1
+        assert store.children["L1"].input == original_l1
 
     def test_dry_run_no_writes(self):
         """Dry run should report savings but not modify content."""
@@ -115,11 +115,11 @@ class TestMigrateStore:
                 {"files": {"/a.py": "same\n"}},
             ]
         )
-        original_l2 = store.children["L2"].content
+        original_l2 = store.children["L2"].input
 
         savings, _ = migrate_store(store, dry_run=True)
         assert savings > 0
-        assert store.children["L2"].content == original_l2
+        assert store.children["L2"].input == original_l2
 
     def test_no_files_no_savings(self):
         """Store with no file attachments should have zero savings."""
@@ -159,4 +159,4 @@ class TestMigrateStore:
             ]
         )
         migrate_store(store, dry_run=False)
-        assert "also important" in store.children["L2"].content
+        assert "also important" in store.children["L2"].output

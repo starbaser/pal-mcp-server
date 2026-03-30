@@ -23,7 +23,7 @@ import tempfile
 from datetime import datetime, timezone
 from typing import Callable, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 from config import PAL_STORAGE_DIR
 
@@ -78,14 +78,37 @@ class PalNode(BaseModel):
 
     entry_type: Literal["store", "query", "tool", "fork"]
     label: str | None = None
-    timestamp: str  # ISO 8601
+    timestamp: str = ""  # ISO 8601
     model: str | None = None
-    files: list[str] = []
-    prompt: str = ""
-    response: str = ""
-    content: str = ""  # Full API exchange: assembled prompt (with files) + model response
     tool_name: str | None = None
+    files: list[str] = []
+    input: str = ""  # render_markdown_output(input_dict) — tool call data
+    output: str = ""  # render_markdown_output(output_dict) — tool response
     children: dict[str, PalNode] = {}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_legacy_fields(cls, data):
+        """Transparently migrate legacy prompt/response/content fields to input/output."""
+        if isinstance(data, dict):
+            if "input" not in data:
+                content = data.get("content", "")
+                if content:
+                    user_portion = content.split("\n\n---\n\n", 1)[0]
+                    for marker in ["=== CONTEXT LAYER SUBMISSION ===", "=== CONTEXT STORE QUERY ==="]:
+                        idx = user_portion.rfind(marker)
+                        if idx >= 0:
+                            data["input"] = user_portion[idx:]
+                            break
+                    else:
+                        data["input"] = data.get("prompt", "")
+                else:
+                    data["input"] = data.get("prompt", "")
+            if "output" not in data:
+                data["output"] = data.get("response", "")
+            for field in ("prompt", "response", "content"):
+                data.pop(field, None)
+        return data
 
 
 class PalRoot(BaseModel):
@@ -458,12 +481,12 @@ def fold_palnode_range(store: PalRoot, start_path: str, end_path: str) -> PalNod
 
     Does NOT insert the result — returns the folded node for the caller to place.
     Fork nodes in the range are skipped when collecting files (they carry no
-    prompt/response content). The returned node has entry_type="store".
+    input/output content). The returned node has entry_type="store".
     """
     from utils.palstore_builder import build_context_from_ancestry
 
     nodes = walk_palnode_range(store, start_path, end_path)
-    content = build_context_from_ancestry(nodes)
+    folded_history = build_context_from_ancestry(nodes)
 
     seen: set[str] = set()
     files: list[str] = []
@@ -476,7 +499,7 @@ def fold_palnode_range(store: PalRoot, start_path: str, end_path: str) -> PalNod
                 files.append(f)
 
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    return PalNode(entry_type="store", content=content, files=files, timestamp=timestamp, prompt="", response="")
+    return PalNode(entry_type="store", input=folded_history, files=files, timestamp=timestamp)
 
 
 def find_palnode_ancestor(

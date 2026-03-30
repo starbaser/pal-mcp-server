@@ -62,16 +62,15 @@ def _render_store_tree(store, root_path: str = "", indent: int = 0) -> list[str]
                     label_part = f"{key}. {node.label}"
                 else:
                     label_part = key
-                prompt_part = f'  "{_truncate_label(node.prompt, 60)}"' if node.prompt else ""
                 date_part = f" — {ts}" if ts else ""
                 files_part = ""
                 if node.files:
                     basenames = ", ".join(os.path.basename(f) for f in node.files)
                     files_part = f" — {basenames}"
-                lines.append(f"{p}- [{label_part}](#{full_path}){prompt_part}{date_part}{files_part}")
+                lines.append(f"{p}- [{label_part}](#{full_path}){date_part}{files_part}")
             elif etype == "query":
                 display_key = f".{key}" if key.isdigit() else key
-                prompt_part = f'  "{_truncate_label(node.prompt, 60)}"' if node.prompt else ""
+                prompt_part = f'  "{_truncate_label(node.label, 60)}"' if node.label else ""
                 date_part = f" — {ts}" if ts else ""
                 lines.append(f"{p}- [{display_key}](#{full_path}){prompt_part}{date_part}")
             elif etype == "fork":
@@ -407,6 +406,7 @@ class PalStoreTool(PalStoreBaseTool):
 
         label_line = f"\n[Label: {request.context_label}]" if request.context_label else ""
         base = f"=== CONTEXT LAYER SUBMISSION ==={label_line}\n\n{user_content}{file_section}"
+        self._last_base_prompt = base
 
         injected = getattr(self, "_injected_history", "")
         full_prompt = f"{injected}\n\n{base}" if injected else base
@@ -483,6 +483,7 @@ class PalStoreTool(PalStoreBaseTool):
         self, _continuation_id: str, response_text: str, request, model_info: Optional[dict]
     ) -> None:
         from utils.palstore import PalNode, add_palnode, save_store
+        from utils.response_formatter import render_markdown_output
 
         store = getattr(self, "_store", None)
         insertion_parent = getattr(self, "_insertion_parent", None)
@@ -492,11 +493,21 @@ class PalStoreTool(PalStoreBaseTool):
             return
 
         raw = getattr(self, "_last_raw_response", response_text)
-        full_prompt = getattr(self, "_last_full_prompt", "")
         model_name = model_info.get("model_name") if model_info else None
+        provider = model_info.get("provider") if model_info else None
 
-        # Build content blob: full API exchange (prompt with files + model response)
-        content = f"{full_prompt}\n\n---\n\n{raw}" if full_prompt else raw
+        input_dict = {
+            "tool_name": self.get_name(),
+            "model": model_name,
+            "store_id": getattr(self, "_store_id", None),
+            "context_label": getattr(request, "context_label", None),
+            "prompt": getattr(self, "_last_base_prompt", ""),
+        }
+        output_dict = {
+            "status": "success",
+            "content": raw,
+            "metadata": {"model_used": model_name, "provider_used": provider},
+        }
 
         node = PalNode(
             entry_type="store",
@@ -504,9 +515,8 @@ class PalStoreTool(PalStoreBaseTool):
             timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             model=model_name,
             files=self.get_request_files(request),
-            prompt=self.get_request_prompt(request),
-            response=raw,
-            content=content,
+            input=render_markdown_output(input_dict),
+            output=render_markdown_output(output_dict),
         )
 
         add_palnode(store, insertion_parent, next_key, node)
@@ -667,6 +677,7 @@ class PalQueryTool(PalStoreBaseTool):
 
         injected = getattr(self, "_injected_history", "")
         base = f"=== CONTEXT STORE QUERY ===\n\n{user_content}{file_section}"
+        self._last_base_prompt = base
 
         full_prompt = f"{injected}\n\n{base}" if injected else base
         self._last_full_prompt = full_prompt
@@ -700,6 +711,7 @@ class PalQueryTool(PalStoreBaseTool):
         self, _continuation_id: str, response_text: str, request, model_info: Optional[dict]
     ) -> None:
         from utils.palstore import PalNode, add_palnode, save_store
+        from utils.response_formatter import render_markdown_output
 
         store = getattr(self, "_store", None)
         parent_path = getattr(self, "_parent_path", None)
@@ -711,11 +723,21 @@ class PalQueryTool(PalStoreBaseTool):
             return
 
         raw = getattr(self, "_last_raw_response", response_text)
-        full_prompt = getattr(self, "_last_full_prompt", "")
         model_name = model_info.get("model_name") if model_info else None
+        provider = model_info.get("provider") if model_info else None
         prompt = self.get_request_prompt(request)
 
-        content = f"{full_prompt}\n\n---\n\n{raw}" if full_prompt else raw
+        input_dict = {
+            "tool_name": self.get_name(),
+            "model": model_name,
+            "store_id": getattr(self, "_store_id", None),
+            "prompt": getattr(self, "_last_base_prompt", ""),
+        }
+        output_dict = {
+            "status": "success",
+            "content": raw,
+            "metadata": {"model_used": model_name, "provider_used": provider},
+        }
 
         node = PalNode(
             entry_type=child_entry_type,
@@ -723,9 +745,8 @@ class PalQueryTool(PalStoreBaseTool):
             timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             model=model_name,
             files=self.get_request_files(request),
-            prompt=prompt,
-            response=raw,
-            content=content,
+            input=render_markdown_output(input_dict),
+            output=render_markdown_output(output_dict),
         )
 
         add_palnode(store, parent_path, next_key, node)
@@ -1056,8 +1077,8 @@ class PalReadTool(BaseTool):
                 model=node.model,
                 timestamp=node.timestamp,
                 files=node.files,
-                prompt=node.prompt,
-                response=node.response,
+                input_text=node.input,
+                output_text=node.output,
             )
 
         tool_output = ToolOutput(
@@ -1379,10 +1400,10 @@ class PalExportTool(BaseTool):
                 lines.append(f"- `{f}`")
             lines.append("")
 
-        if node.prompt:
-            lines.extend(["### Prompt", "", node.prompt, ""])
-        if node.response:
-            lines.extend(["### Response", "", node.response, ""])
+        if node.input:
+            lines.extend(["### Input", "", node.input, ""])
+        if node.output:
+            lines.extend(["### Output", "", node.output, ""])
 
         return lines
 
@@ -1729,10 +1750,10 @@ class PalFileReadTool(BaseTool):
         matches.sort(key=lambda m: m[1], reverse=True)
         node_path, timestamp, target_node = matches[0]
 
-        # Try extracting from content blob
+        # Try extracting from input blob (file content is embedded in the input field)
         extracted = None
-        if target_node.content:
-            extracted = self._extract_file_from_blob(target_node.content, file_path)
+        if target_node.input:
+            extracted = self._extract_file_from_blob(target_node.input, file_path)
 
         source = "store"
         if extracted is None:

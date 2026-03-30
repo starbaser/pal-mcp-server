@@ -1024,13 +1024,20 @@ def _inject_store_path_continuation(result: list, store_path: str, arguments: di
     # Persist tool response back to store tree
     if bridge and response_text is not None:
         from utils.palstore import resolve_palnode, save_store
+        from utils.response_formatter import render_markdown_output
 
         try:
             tool_node = resolve_palnode(bridge["store"], bridge["tool_path"])
             if tool_node is not None:
-                # Update the existing tool node with the response content
-                tool_node.prompt = arguments.get("prompt", "") if arguments else ""
-                tool_node.response = response_text
+                prompt = arguments.get("_original_user_prompt", arguments.get("prompt", "")) if arguments else ""
+                input_dict = {
+                    "tool_name": tool_node.tool_name,
+                    "model": arguments.get("model") if arguments else None,
+                    "prompt": prompt,
+                }
+                output_dict = {"content": response_text}
+                tool_node.input = render_markdown_output(input_dict)
+                tool_node.output = render_markdown_output(output_dict)
                 tool_node.timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
                 save_store(bridge["store"])
                 logger.info(
@@ -1091,8 +1098,8 @@ def _save_response_content(
             model=model,
             timestamp=timestamp,
             files=files,
-            prompt=prompt,
-            response=content,
+            input_text=prompt,
+            output_text=content,
         )
 
         if cid:

@@ -75,17 +75,11 @@ def _migrate_node_content(
     Replaces duplicate BEGIN FILE blocks with diffs or omissions based on
     the running file state. Returns the token savings (original - new).
     """
-    content = node.content
-    if not content:
+    user_turn = node.input
+    if not user_turn:
         return 0
 
-    # Split into user_turn and response
-    parts = content.split("\n\n---\n\n", 1)
-    if len(parts) != 2:
-        return 0
-    user_turn, response = parts
-
-    original_tokens = count_tokens(content)
+    original_tokens = count_tokens(user_turn)
     modified_turn = user_turn
 
     # Find all file blocks in the user turn and process in reverse order
@@ -106,12 +100,11 @@ def _migrate_node_content(
         # Replace the original block with the new representation
         modified_turn = modified_turn[: match.start()] + representation + modified_turn[match.end() :]
 
-    new_content = f"{modified_turn}\n\n---\n\n{response}"
-    new_tokens = count_tokens(new_content)
+    new_tokens = count_tokens(modified_turn)
     savings = original_tokens - new_tokens
 
     if not dry_run and savings > 0:
-        node.content = new_content
+        node.input = modified_turn
 
     return max(savings, 0)
 
@@ -137,7 +130,7 @@ def _migrate_children(
 
         # For the first L-node at this level, just populate state (no diffing)
         if i == 0:
-            blobs = extract_file_blobs(node.content) if node.content else {}
+            blobs = extract_file_blobs(node.input) if node.input else {}
             for path, content in blobs.items():
                 state[path] = content
         else:

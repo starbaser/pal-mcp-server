@@ -73,7 +73,6 @@ from tools import (  # noqa: E402
 )
 from tools.models import ToolOutput  # noqa: E402
 from tools.palstore import (
-    PalArmTool,
     PalCopyTool,
     PalDeleteTool,
     PalExportTool,
@@ -302,55 +301,23 @@ TOOLS = {
     "version": VersionTool(),  # Display server version and system information
     "imagegen": ImageGenTool(),  # Native AI image generation and editing
     "perceive": PerceiveTool(),  # Structured media intelligence extraction (image, video, audio)
-    "palinit": PalInitTool(),  # Create a named context store
-    "palstore": PalStoreTool(),  # Store context layers in a persistent store
-    "palquery": PalQueryTool(),  # Query against a context store
-    "pallist": PalListTool(),  # List context stores and their full node trees
-    "palfork": PalForkTool(),  # Create a fork point in a context store tree
-    "palread": PalReadTool(),  # Read content of a specific context store node
-    "paltraverse": PalTraverseTool(),  # Traverse a node range and render full thread rehydration
-    "palarm": PalArmTool(),  # Arm/disarm a store for auto-revival on SessionStart
-    "palrename": PalRenameTool(),  # Rename a root context store
-    "palexport": PalExportTool(),  # Export entire store to self-contained markdown
-    "palfilelist": PalFileListTool(),  # List files attached across a store tree
-    "palfileread": PalFileReadTool(),  # Read a specific file's content from a store node
-    "palmove": PalMoveTool(),  # Move a node to a new tree location
-    "palcopy": PalCopyTool(),  # Deep copy a node to a new location
-    "palfold": PalFoldTool(),  # Fold ancestry range into single node + insert
-    "paldelete": PalDeleteTool(),  # Delete a node and shift siblings
+    "newtree": PalInitTool(),
+    "writenode": PalStoreTool(),
+    "querynode": PalQueryTool(),
+    "listnode": PalListTool(),
+    "forknode": PalForkTool(),
+    "readnode": PalReadTool(),
+    "traversenode": PalTraverseTool(),
+    "renamenode": PalRenameTool(),
+    "exportnode": PalExportTool(),
+    "listfiles": PalFileListTool(),
+    "readfile": PalFileReadTool(),
+    "movenode": PalMoveTool(),
+    "copynode": PalCopyTool(),
+    "foldnode": PalFoldTool(),
+    "deletenode": PalDeleteTool(),
 }
 TOOLS = filter_disabled_tools(TOOLS)
-
-# Tool profiles for dual HTTP server mode
-PALSTORE_TOOL_NAMES = {
-    "palinit",
-    "palstore",
-    "palquery",
-    "palfork",
-    "pallist",
-    "palread",
-    "paltraverse",
-    "palarm",
-    "palrename",
-    "palexport",
-    "palfilelist",
-    "palfileread",
-    "palmove",
-    "palcopy",
-    "palfold",
-    "paldelete",
-}
-
-
-def split_tools(all_tools: dict) -> tuple[dict, dict]:
-    """Split tools into (pal_tools, palstore_tools) for dual server mode."""
-    palstore = {k: v for k, v in all_tools.items() if k in PALSTORE_TOOL_NAMES}
-    pal = {k: v for k, v in all_tools.items() if k not in PALSTORE_TOOL_NAMES}
-    for k in ESSENTIAL_TOOLS:
-        if k in all_tools:
-            palstore[k] = all_tools[k]
-    return pal, palstore
-
 
 # Rich prompt templates for all tools
 PROMPT_TEMPLATES = {
@@ -449,33 +416,33 @@ PROMPT_TEMPLATES = {
         "description": "Show server version and system information",
         "template": "Show PAL MCP Server version",
     },
-    "palinit": {
-        "name": "palinit",
+    "newtree": {
+        "name": "newtree",
         "description": "Create a named context store",
         "template": "Initialize context store",
     },
-    "palstore": {
-        "name": "palstore",
+    "writenode": {
+        "name": "writenode",
         "description": "Store context layers in a persistent store",
         "template": "Store context with {model}",
     },
-    "palquery": {
-        "name": "palquery",
+    "querynode": {
+        "name": "querynode",
         "description": "Query a context store without changing its state",
         "template": "Query context store with {model}",
     },
-    "pallist": {
-        "name": "pallist",
+    "listnode": {
+        "name": "listnode",
         "description": "List context stores for a directory",
         "template": "List context stores",
     },
-    "palfilelist": {
-        "name": "palfilelist",
+    "listfiles": {
+        "name": "listfiles",
         "description": "List files attached across a context store tree",
         "template": "List files in context store",
     },
-    "palfileread": {
-        "name": "palfileread",
+    "readfile": {
+        "name": "readfile",
         "description": "Read stored file content from a context store node",
         "template": "Read file from context store",
     },
@@ -1969,22 +1936,6 @@ def _build_handshake_instructions() -> str:
     return instructions
 
 
-def create_mcp_server(name: str, tools: dict, instructions: str) -> Server:
-    """Create an MCP Server instance with the given tool subset."""
-    s = Server(name)
-    s.instructions = instructions
-
-    @s.list_tools()
-    async def _list_tools():
-        return await _list_tools_impl(tools)
-
-    @s.call_tool()
-    async def _call_tool(tool_name, arguments):
-        return await _call_tool_impl(tool_name, arguments, tools)
-
-    return s
-
-
 async def main():
     """
     Main entry point for the MCP server.
@@ -2042,118 +1993,10 @@ async def main():
         )
 
 
-# Header → env var mapping for HTTP mode
-_HEADER_ENV_MAP = {
-    "x-gemini-api-key": "GEMINI_API_KEY",
-    "x-google-api-key": "GOOGLE_API_KEY",
-    "x-openai-api-key": "OPENAI_API_KEY",
-    "x-openrouter-api-key": "OPENROUTER_API_KEY",
-    "x-zai-api-key": "ZAI_API_KEY",
-    "x-xai-api-key": "XAI_API_KEY",
-    "x-default-model": "DEFAULT_MODEL",
-    "x-default-thinking-mode-thinkdeep": "DEFAULT_THINKING_MODE_THINKDEEP",
-}
-
-
-def _env_from_headers_middleware(app):
-    """ASGI middleware that extracts x-* headers and sets env vars on first request."""
-    _configured = False
-
-    async def middleware(scope, receive, send):
-        nonlocal _configured
-        if scope["type"] == "http" and not _configured:
-            injected = 0
-            for header_bytes, value_bytes in scope.get("headers", []):
-                header = header_bytes.decode("latin-1").lower()
-                env_var = _HEADER_ENV_MAP.get(header)
-                if env_var and value_bytes:
-                    val = value_bytes.decode("latin-1")
-                    if val and not os.environ.get(env_var):
-                        os.environ[env_var] = val
-                        injected += 1
-            if injected:
-                logger.info(f"Injected {injected} env var(s) from request headers, reconfiguring providers")
-                configure_providers()
-            _configured = True
-        await app(scope, receive, send)
-
-    return middleware
-
-
-async def main_http(host: str = "127.0.0.1", port: int = 3001):
-    """Run dual MCP servers over streamable HTTP."""
-    import contextlib
-
-    import uvicorn
-    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
-    from starlette.applications import Starlette
-    from starlette.routing import Mount
-
-    configure_providers()
-
-    logger.info("PAL MCP Server starting in HTTP mode...")
-    logger.info(f"Log level: {log_level}")
-
-    from config import IS_AUTO_MODE
-
-    if IS_AUTO_MODE:
-        logger.info("Model mode: AUTO")
-    else:
-        logger.info(f"Model mode: Fixed model '{DEFAULT_MODEL}'")
-
-    logger.info(f"Available tools: {list(TOOLS.keys())}")
-
-    handshake = _build_handshake_instructions()
-    pal_tools, palstore_tools = split_tools(TOOLS)
-
-    logger.info(f"PAL server tools ({len(pal_tools)}): {sorted(pal_tools.keys())}")
-    logger.info(f"PalStore server tools ({len(palstore_tools)}): {sorted(palstore_tools.keys())}")
-
-    pal_srv = create_mcp_server("pal", pal_tools, handshake)
-    palstore_srv = create_mcp_server("palstore", palstore_tools, handshake)
-
-    pal_manager = StreamableHTTPSessionManager(app=pal_srv, stateless=True)
-    palstore_manager = StreamableHTTPSessionManager(app=palstore_srv, stateless=True)
-
-    @contextlib.asynccontextmanager
-    async def lifespan(app):
-        async with pal_manager.run():
-            async with palstore_manager.run():
-                logger.info(f"HTTP server ready on {host}:{port}")
-                logger.info(f"  PAL:      http://{host}:{port}/pal/mcp")
-                logger.info(f"  PalStore: http://{host}:{port}/palstore/mcp")
-                yield
-
-    starlette_app = Starlette(
-        routes=[
-            Mount("/pal/mcp", app=_env_from_headers_middleware(pal_manager.handle_request)),
-            Mount("/palstore/mcp", app=palstore_manager.handle_request),
-        ],
-        lifespan=lifespan,
-    )
-
-    config = uvicorn.Config(starlette_app, host=host, port=port, log_level="info")
-    uvi_server = uvicorn.Server(config)
-    await uvi_server.serve()
-
-
 def run():
     """Console script entry point for pal-mcp-server."""
-    import sys
-
     try:
-        if "--http" in sys.argv:
-            host = "127.0.0.1"
-            port = 3001
-            if "--host" in sys.argv:
-                idx = sys.argv.index("--host")
-                host = sys.argv[idx + 1]
-            if "--port" in sys.argv:
-                idx = sys.argv.index("--port")
-                port = int(sys.argv[idx + 1])
-            asyncio.run(main_http(host=host, port=port))
-        else:
-            asyncio.run(main())
+        asyncio.run(main())
     except KeyboardInterrupt:
         pass
 

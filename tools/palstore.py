@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 STORE_ID_DESCRIPTION = (
     "Dot-path identifier for a context store node. Root stores use a plain name (e.g. 'myproject'). "
     "Child nodes extend the path with dot notation (e.g. 'myproject.L1', 'myproject.L1.Q1'). "
-    "Use pallist to discover existing store_ids. Returned by palinit, palstore, palquery, and palfork."
+    "Use listnode to discover existing store_ids. Returned by newtree, writenode, querynode, and forknode."
 )
 
 
@@ -165,19 +165,19 @@ class PalStoreBaseTool(SimpleTool):
 
 
 # ---------------------------------------------------------------------------
-# palinit
+# newtree
 # ---------------------------------------------------------------------------
 
 
 class PalInitTool(BaseTool):
     def get_name(self) -> str:
-        return "palinit"
+        return "newtree"
 
     def get_description(self) -> str:
         return (
             "Create a new named context store and register it to a project directory. "
-            "Run pallist first to check for an existing store before creating a new one; "
-            "use palstore to add context layers after creation."
+            "Run listnode first to check for an existing store before creating a new one; "
+            "use writenode to add context layers after creation."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -264,7 +264,7 @@ class PalInitTool(BaseTool):
                 f"Context store created.\n\n"
                 f"store_id: {store_name}\n"
                 f"directory: {directory}\n\n"
-                f'Use palstore(store_id="{store_name}", ...) to add context layers.'
+                f'Use writenode(store_id="{store_name}", ...) to add context layers.'
             ),
             content_type="text",
             metadata={"store_id": store_name, "directory": directory},
@@ -273,19 +273,19 @@ class PalInitTool(BaseTool):
 
 
 # ---------------------------------------------------------------------------
-# palstore
+# writenode
 # ---------------------------------------------------------------------------
 
 
 class PalStoreTool(PalStoreBaseTool):
     def get_name(self) -> str:
-        return "palstore"
+        return "writenode"
 
     def get_description(self) -> str:
         return (
             "Add a context layer to an existing store, embedding files and prose for an external model to process. "
             "Each call appends a new numbered layer (L1, L2, …); seed 4–6 key files per layer for best results. "
-            "Use palinit to create a store first, then palquery to retrieve stored context."
+            "Use newtree to create a store first, then querynode to retrieve stored context."
         )
 
     def get_request_model(self):
@@ -364,7 +364,7 @@ class PalStoreTool(PalStoreBaseTool):
         if not store_id:
             error = ToolOutput(
                 status="error",
-                content="palstore requires a store_id. Use palinit to create a store first.",
+                content="writenode requires a store_id. Use newtree to create a store first.",
                 content_type="text",
             )
             return [TextContent(type="text", text=error.model_dump_json())]
@@ -489,7 +489,7 @@ class PalStoreTool(PalStoreBaseTool):
         insertion_parent = getattr(self, "_insertion_parent", None)
         next_key = getattr(self, "_next_key", None)
         if store is None or insertion_parent is None or next_key is None:
-            logger.warning("palstore: missing store state in _record_assistant_turn, skipping write")
+            logger.warning("writenode: missing store state in _record_assistant_turn, skipping write")
             return
 
         raw = getattr(self, "_last_raw_response", response_text)
@@ -524,19 +524,19 @@ class PalStoreTool(PalStoreBaseTool):
 
 
 # ---------------------------------------------------------------------------
-# palquery
+# querynode
 # ---------------------------------------------------------------------------
 
 
 class PalQueryTool(PalStoreBaseTool):
     def get_name(self) -> str:
-        return "palquery"
+        return "querynode"
 
     def get_description(self) -> str:
         return (
             "Ask a question against a context store — sends all stored layers to an external model for analysis. "
             "Use for targeted questions, not context revival. Each query is recorded as a child node. "
-            "For context revival, prefer palread (metadata + summary) + palfilelist → palfileread (selective file content)."
+            "For context revival, prefer readnode (metadata + summary) + listfiles → readfile (selective file content)."
         )
 
     def get_request_model(self):
@@ -602,7 +602,7 @@ class PalQueryTool(PalStoreBaseTool):
         if not store_id:
             error = ToolOutput(
                 status="error",
-                content="palquery requires a store_id. Create a store with palinit first.",
+                content="querynode requires a store_id. Create a store with newtree first.",
                 content_type="text",
             )
             return [TextContent(type="text", text=error.model_dump_json())]
@@ -719,7 +719,7 @@ class PalQueryTool(PalStoreBaseTool):
         child_entry_type = getattr(self, "_child_entry_type", "query")
 
         if store is None or parent_path is None or next_key is None:
-            logger.warning("palquery: missing store state in _record_assistant_turn, skipping write")
+            logger.warning("querynode: missing store state in _record_assistant_turn, skipping write")
             return
 
         raw = getattr(self, "_last_raw_response", response_text)
@@ -754,19 +754,19 @@ class PalQueryTool(PalStoreBaseTool):
 
 
 # ---------------------------------------------------------------------------
-# palfork
+# forknode
 # ---------------------------------------------------------------------------
 
 
 class PalForkTool(BaseTool):
     def get_name(self) -> str:
-        return "palfork"
+        return "forknode"
 
     def get_description(self) -> str:
         return (
             "Create a fork point in a context store, branching from any node to explore alternatives "
             "without disrupting the main lineage. Returns a new store_id for the fork branch. "
-            "Use pallist to find the store_id to fork from; use palstore or palquery with the returned fork store_id."
+            "Use listnode to find the store_id to fork from; use writenode or querynode with the returned fork store_id."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -865,18 +865,18 @@ class PalForkTool(BaseTool):
 
 
 # ---------------------------------------------------------------------------
-# pallist
+# listnode
 # ---------------------------------------------------------------------------
 
 
 class PalListTool(BaseTool):
     def get_name(self) -> str:
-        return "pallist"
+        return "listnode"
 
     def get_description(self) -> str:
         return (
-            "List context stores and their full node trees, returning store_ids needed for palstore, palquery, "
-            "palread, palfork, and palarm. Filter by directory to scope to a project, "
+            "List context stores and their full node trees, returning store_ids needed for writenode, querynode, "
+            "readnode, forknode, and armnode. Filter by directory to scope to a project, "
             "or pass store_id to drill into a specific subtree."
         )
 
@@ -895,7 +895,7 @@ class PalListTool(BaseTool):
                     "type": "string",
                     "description": (
                         "Show only the subtree rooted at this node (e.g. 'myproject' or 'myproject.L2'). "
-                        "Use palread for the full content of a single node."
+                        "Use readnode for the full content of a single node."
                     ),
                 },
             },
@@ -982,19 +982,19 @@ class PalListTool(BaseTool):
 
 
 # ---------------------------------------------------------------------------
-# palread
+# readnode
 # ---------------------------------------------------------------------------
 
 
 class PalReadTool(BaseTool):
     def get_name(self) -> str:
-        return "palread"
+        return "readnode"
 
     def get_description(self) -> str:
         return (
             "Read a context store node's metadata, prompt, and response — the primary tool for context revival. "
             "Returns label, model, timestamp, file list, prompt text, and response text. "
-            "After reading, use palfilelist to see attached files, then palfileread to selectively load relevant ones."
+            "After reading, use listfiles to see attached files, then readfile to selectively load relevant ones."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -1091,19 +1091,19 @@ class PalReadTool(BaseTool):
 
 
 # ---------------------------------------------------------------------------
-# palarm
+# armnode
 # ---------------------------------------------------------------------------
 
 
 class PalArmTool(BaseTool):
     def get_name(self) -> str:
-        return "palarm"
+        return "armnode"
 
     def get_description(self) -> str:
         return (
             "Arm a context store for automatic revival at every session start, "
-            "so the SessionStart hook runs pallist and palquery to restore project context without manual steps. "
-            "Pass disarm=true to remove the armed state; use pallist to find the store_id to arm."
+            "so the SessionStart hook runs listnode and querynode to restore project context without manual steps. "
+            "Pass disarm=true to remove the armed state; use listnode to find the store_id to arm."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -1114,14 +1114,14 @@ class PalArmTool(BaseTool):
                     "type": "string",
                     "description": (
                         "Root store_id to arm for auto-revival (e.g. 'myproject'). "
-                        "Must be an existing root store — use pallist to confirm."
+                        "Must be an existing root store — use listnode to confirm."
                     ),
                 },
                 "directory": {
                     "type": "string",
                     "description": (
                         "Absolute path to the project directory. "
-                        "Must match the directory the store was registered to at palinit time."
+                        "Must match the directory the store was registered to at newtree time."
                     ),
                 },
                 "disarm": {
@@ -1179,7 +1179,7 @@ class PalArmTool(BaseTool):
         if location is None:
             tool_output = ToolOutput(
                 status="error",
-                content=f'Store "{store_id}" not found. Use palinit to create it first.',
+                content=f'Store "{store_id}" not found. Use newtree to create it first.',
                 content_type="text",
             )
             return [TextContent(type="text", text=tool_output.model_dump_json())]
@@ -1211,7 +1211,7 @@ class PalArmTool(BaseTool):
             content=(
                 f"Armed: store '{store_id}' will auto-revive on every SessionStart for '{directory}'.\n\n"
                 f"Revival sequence fires automatically — no further action needed.\n"
-                f'To disarm: palarm(store_id="{store_id}", directory="{directory}", disarm=true)'
+                f'To disarm: armnode(store_id="{store_id}", directory="{directory}", disarm=true)'
             ),
             content_type="text",
             metadata={"store_id": store_id, "directory": directory, "armed": True},
@@ -1220,18 +1220,18 @@ class PalArmTool(BaseTool):
 
 
 # ---------------------------------------------------------------------------
-# palrename
+# renamenode
 # ---------------------------------------------------------------------------
 
 
 class PalRenameTool(BaseTool):
     def get_name(self) -> str:
-        return "palrename"
+        return "renamenode"
 
     def get_description(self) -> str:
         return (
             "Rename a root context store, updating the store file, index, and any armed state atomically. "
-            "Use pallist to confirm the current store_id before renaming."
+            "Use listnode to confirm the current store_id before renaming."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -1240,7 +1240,7 @@ class PalRenameTool(BaseTool):
             "properties": {
                 "store_id": {
                     "type": "string",
-                    "description": "Current root store_id to rename (e.g. 'myproject'). Use pallist to confirm it exists.",
+                    "description": "Current root store_id to rename (e.g. 'myproject'). Use listnode to confirm it exists.",
                 },
                 "new_name": {
                     "type": "string",
@@ -1313,13 +1313,13 @@ class PalRenameTool(BaseTool):
 
 
 # ---------------------------------------------------------------------------
-# palexport
+# exportnode
 # ---------------------------------------------------------------------------
 
 
 class PalExportTool(BaseTool):
     def get_name(self) -> str:
-        return "palexport"
+        return "exportnode"
 
     def get_description(self) -> str:
         return (
@@ -1514,19 +1514,19 @@ class PalExportTool(BaseTool):
 
 
 # ---------------------------------------------------------------------------
-# palfilelist
+# listfiles
 # ---------------------------------------------------------------------------
 
 
 class PalFileListTool(BaseTool):
     def get_name(self) -> str:
-        return "palfilelist"
+        return "listfiles"
 
     def get_description(self) -> str:
         return (
             "List all files attached across a context store tree, grouped by node. "
             "Shows which files were seeded into each layer with timestamps and labels. "
-            "Part of the context revival flow: palread → palfilelist → palfileread on context-relevant files."
+            "Part of the context revival flow: readnode → listfiles → readfile on context-relevant files."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -1624,19 +1624,19 @@ class PalFileListTool(BaseTool):
 
 
 # ---------------------------------------------------------------------------
-# palfileread
+# readfile
 # ---------------------------------------------------------------------------
 
 
 class PalFileReadTool(BaseTool):
     def get_name(self) -> str:
-        return "palfileread"
+        return "readfile"
 
     def get_description(self) -> str:
         return (
             "Read a specific file from a context store node's stored content blob (falls back to disk). "
-            "Use after palfilelist to selectively load only the files relevant to the current task. "
-            "This targeted approach avoids the token cost of palquery, which sends all layers to an external model."
+            "Use after listfiles to selectively load only the files relevant to the current task. "
+            "This targeted approach avoids the token cost of querynode, which sends all layers to an external model."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -1741,7 +1741,7 @@ class PalFileReadTool(BaseTool):
         if not matches:
             error = ToolOutput(
                 status="error",
-                content=f"File '{file_path}' not found in any node under '{store_id}'. Use palfilelist to discover attached files.",
+                content=f"File '{file_path}' not found in any node under '{store_id}'. Use listfiles to discover attached files.",
                 content_type="text",
             )
             return [TextContent(type="text", text=error.model_dump_json())]
@@ -1790,13 +1790,13 @@ class PalFileReadTool(BaseTool):
 
 
 # ---------------------------------------------------------------------------
-# paltraverse
+# traversenode
 # ---------------------------------------------------------------------------
 
 
 class PalTraverseTool(BaseTool):
     def get_name(self) -> str:
-        return "paltraverse"
+        return "traversenode"
 
     def get_description(self) -> str:
         return (
@@ -1812,7 +1812,7 @@ class PalTraverseTool(BaseTool):
             "properties": {
                 "store_id": {
                     "type": "string",
-                    "description": "Root store name (e.g. 'myproject'). Use pallist to discover store names.",
+                    "description": "Root store name (e.g. 'myproject'). Use listnode to discover store names.",
                 },
                 "start_node": {
                     "type": "string",
@@ -1910,18 +1910,18 @@ class PalTraverseTool(BaseTool):
 
 
 # ---------------------------------------------------------------------------
-# palmove
+# movenode
 # ---------------------------------------------------------------------------
 
 
 class PalMoveTool(BaseTool):
     def get_name(self) -> str:
-        return "palmove"
+        return "movenode"
 
     def get_description(self) -> str:
         return (
             "Move a context store node to a new location in the tree. Detaches from source and "
-            "reattaches at destination with rollback on failure. Use pallist to find node paths."
+            "reattaches at destination with rollback on failure. Use listnode to find node paths."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -2029,18 +2029,18 @@ class PalMoveTool(BaseTool):
 
 
 # ---------------------------------------------------------------------------
-# palcopy
+# copynode
 # ---------------------------------------------------------------------------
 
 
 class PalCopyTool(BaseTool):
     def get_name(self) -> str:
-        return "palcopy"
+        return "copynode"
 
     def get_description(self) -> str:
         return (
             "Deep copy a context store node to a new location, preserving the original. "
-            "Use pallist to find node paths."
+            "Use listnode to find node paths."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -2148,18 +2148,18 @@ class PalCopyTool(BaseTool):
 
 
 # ---------------------------------------------------------------------------
-# palfold
+# foldnode
 # ---------------------------------------------------------------------------
 
 
 class PalFoldTool(BaseTool):
     def get_name(self) -> str:
-        return "palfold"
+        return "foldnode"
 
     def get_description(self) -> str:
         return (
             "Fold an ancestry range of nodes into a single aggregated node and insert it into the tree. "
-            "Aggregates prompt/response content and unions file references. Use pallist to find node paths."
+            "Aggregates prompt/response content and unions file references. Use listnode to find node paths."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -2300,18 +2300,18 @@ class PalFoldTool(BaseTool):
 
 
 # ---------------------------------------------------------------------------
-# paldelete
+# deletenode
 # ---------------------------------------------------------------------------
 
 
 class PalDeleteTool(BaseTool):
     def get_name(self) -> str:
-        return "paldelete"
+        return "deletenode"
 
     def get_description(self) -> str:
         return (
             "Delete a context store node and shift subsequent same-prefix siblings down to fill the gap. "
-            "Use pallist to find node paths."
+            "Use listnode to find node paths."
         )
 
     def get_input_schema(self) -> dict[str, Any]:

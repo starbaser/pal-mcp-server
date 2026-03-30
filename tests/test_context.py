@@ -16,7 +16,7 @@ class TestPalInitTool:
         self.tool = PalInitTool()
 
     def test_tool_metadata(self):
-        assert self.tool.get_name() == "palinit"
+        assert self.tool.get_name() == "newtree"
         assert "create" in self.tool.get_description().lower()
         assert self.tool.requires_model() is False
         assert self.tool.get_model_category() is ToolModelCategory.FAST_RESPONSE
@@ -71,7 +71,7 @@ class TestPalStoreTool:
         self.tool = PalStoreTool()
 
     def test_tool_metadata(self):
-        assert self.tool.get_name() == "palstore"
+        assert self.tool.get_name() == "writenode"
         assert "layer" in self.tool.get_description().lower()
         assert self.tool.get_model_category() is ToolModelCategory.EXTENDED_REASONING
 
@@ -91,7 +91,7 @@ class TestPalStoreTool:
         assert len(result) == 1
         payload = json.loads(result[0].text)
         assert payload["status"] == "error"
-        assert "palinit" in payload["content"].lower()
+        assert "newtree" in payload["content"].lower()
 
     async def test_store_id_not_found(self):
         with patch("utils.palstore.resolve_store_location", return_value=None):
@@ -121,7 +121,7 @@ class TestPalQueryTool:
         self.tool = PalQueryTool()
 
     def test_tool_metadata(self):
-        assert self.tool.get_name() == "palquery"
+        assert self.tool.get_name() == "querynode"
         assert "query" in self.tool.get_description().lower()
 
     def test_schema_structure(self):
@@ -157,7 +157,7 @@ class TestPalListTool:
         self.tool = PalListTool()
 
     def test_tool_metadata(self):
-        assert self.tool.get_name() == "pallist"
+        assert self.tool.get_name() == "listnode"
 
     def test_requires_model_false(self):
         assert self.tool.requires_model() is False
@@ -212,7 +212,7 @@ class TestContextEphemeralGuard:
         from server import reconstruct_thread_context
         from utils.conversation_memory import add_turn, create_thread, get_thread
 
-        thread_id = create_thread("palstore", {"prompt": "init"}, model_name="test-model")
+        thread_id = create_thread("writenode", {"prompt": "init"}, model_name="test-model")
         add_turn(thread_id, "assistant", "Stored initial context", model_name="test-model", model_provider="custom")
 
         arguments = {
@@ -236,7 +236,7 @@ class TestContextEphemeralGuard:
         from server import reconstruct_thread_context
         from utils.conversation_memory import add_turn, create_thread, get_thread
 
-        thread_id = create_thread("palstore", {"prompt": "init"}, model_name="test-model")
+        thread_id = create_thread("writenode", {"prompt": "init"}, model_name="test-model")
         add_turn(thread_id, "assistant", "Stored initial context", model_name="test-model", model_provider="custom")
 
         arguments = {
@@ -260,12 +260,12 @@ class TestContextEphemeralGuard:
     def test_palquery_registered_in_tools(self):
         from server import TOOLS
 
-        assert "palquery" in TOOLS
+        assert "querynode" in TOOLS
 
     def test_palstore_registered_in_tools(self):
         from server import TOOLS
 
-        assert "palstore" in TOOLS
+        assert "writenode" in TOOLS
 
 
 class TestContextForkChain:
@@ -274,11 +274,11 @@ class TestContextForkChain:
     async def test_fork_creates_parent_chain(self):
         from utils.conversation_memory import add_turn, create_thread, get_thread_chain
 
-        parent_id = create_thread("palstore", {"prompt": "parent init"}, model_name="gemini-test")
+        parent_id = create_thread("writenode", {"prompt": "parent init"}, model_name="gemini-test")
         add_turn(parent_id, "user", "Store this context")
         add_turn(parent_id, "assistant", "Context stored", model_name="gemini-test", model_provider="google")
 
-        fork_id = create_thread("palquery", {"prompt": "fork start"}, parent_thread_id=parent_id)
+        fork_id = create_thread("querynode", {"prompt": "fork start"}, parent_thread_id=parent_id)
 
         chain = get_thread_chain(fork_id)
 
@@ -289,7 +289,7 @@ class TestContextForkChain:
     async def test_fork_does_not_modify_parent(self):
         from utils.conversation_memory import add_turn, create_thread, get_thread
 
-        parent_id = create_thread("palstore", {"prompt": "parent"}, model_name="gemini-test")
+        parent_id = create_thread("writenode", {"prompt": "parent"}, model_name="gemini-test")
         add_turn(parent_id, "user", "Initial store")
         add_turn(parent_id, "assistant", "Acknowledged", model_name="gemini-test", model_provider="google")
 
@@ -297,7 +297,7 @@ class TestContextForkChain:
         assert parent_before is not None
         parent_turn_count = len(parent_before.turns)
 
-        fork_id = create_thread("palquery", {"prompt": "fork"}, parent_thread_id=parent_id)
+        fork_id = create_thread("querynode", {"prompt": "fork"}, parent_thread_id=parent_id)
         add_turn(fork_id, "user", "Fork query 1")
         add_turn(fork_id, "assistant", "Fork answer 1", model_name="gemini-test", model_provider="google")
         add_turn(fork_id, "user", "Fork query 2")
@@ -309,13 +309,13 @@ class TestContextForkChain:
     async def test_multi_level_fork_chain(self):
         from utils.conversation_memory import add_turn, create_thread, get_thread_chain
 
-        id_a = create_thread("palstore", {"prompt": "root"}, model_name="test-model")
+        id_a = create_thread("writenode", {"prompt": "root"}, model_name="test-model")
         add_turn(id_a, "assistant", "Root context", model_name="test-model", model_provider="custom")
 
-        id_b = create_thread("palquery", {"prompt": "fork-b"}, parent_thread_id=id_a)
+        id_b = create_thread("querynode", {"prompt": "fork-b"}, parent_thread_id=id_a)
         add_turn(id_b, "assistant", "Fork B context", model_name="test-model", model_provider="custom")
 
-        id_c = create_thread("palquery", {"prompt": "fork-c"}, parent_thread_id=id_b)
+        id_c = create_thread("querynode", {"prompt": "fork-c"}, parent_thread_id=id_b)
 
         chain = get_thread_chain(id_c)
 
@@ -687,7 +687,7 @@ class TestStrictHistoryEnforcement:
             thread_id="test-strict",
             created_at="2026-01-01T00:00:00Z",
             last_updated_at="2026-01-01T00:00:00Z",
-            tool_name="palstore",
+            tool_name="writenode",
             turns=turns,
             initial_context={},
         )
@@ -770,7 +770,7 @@ class TestStrictHistoryEnforcement:
             thread_id="test-fits",
             created_at="2026-01-01T00:00:00Z",
             last_updated_at="2026-01-01T00:00:01Z",
-            tool_name="palstore",
+            tool_name="writenode",
             turns=turns,
             initial_context={},
         )

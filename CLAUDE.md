@@ -45,7 +45,7 @@ CLI Client (Claude/Gemini/Codex)
        │
        ▼
    Tool.execute()
-       │ reconstruct_thread_context()
+       │ build_store_context() / reconstruct_thread_context()
        ▼
    Conversation Memory (utils/conversation_memory.py)
        │ Provider selection
@@ -64,11 +64,11 @@ CLI Client (Claude/Gemini/Codex)
 - `handle_call_tool()` routes requests, resolves models, reconstructs conversation context
 - `configure_providers()` registers providers based on API keys
 - `parse_model_option()` splits `"model:option"` format (e.g. `"gemini-pro:for"` → model + option), preserving OpenRouter suffixes (`:free`, `:beta`, `:preview`)
-- Store continuation: `_resolve_store_continuation()` hydrates threads from context store paths (not just UUIDs). Two modes: CONTINUE (same tool, same node) and FORK (auto-create fork + tool child)
+- Store continuation: `_resolve_store_continuation()` calls `build_store_context()` directly from context store paths (not just UUIDs). Two modes: CONTINUE (creates numeric child node per turn) and FORK (auto-create fork + tool child). Store paths skip `reconstruct_thread_context` — dispatch in `handle_call_tool` is bifurcated.
 - Response post-processing pipeline: `_inject_store_path_continuation()` → `_save_response_content()` → `_apply_output_format()`
 
 **`tools/`** — MCP tool implementations. Two base classes:
-- `SimpleTool` (`tools/simple/base.py`) — single request/response (chat, clink, imagegen, perceive, pal tools)
+- `SimpleTool` (`tools/simple/base.py`) — single request/response (chat, clink, imagegen, perceive, context store tools)
 - `WorkflowTool` (`tools/workflow/base.py`) — multi-step workflows with expert analysis (analyze, codereview, debug, planner, etc.)
 
 Both inherit from `BaseTool` (`tools/shared/base_tool.py`). Required methods: `get_name()`, `get_description()`, `get_input_schema()`, `get_system_prompt()`, `execute()`.
@@ -86,7 +86,7 @@ Both inherit from `BaseTool` (`tools/shared/base_tool.py`). Required methods: `g
 - `build_conversation_history()`: Phase 1 collects turns in REVERSE chronological order (newest-first for token budgeting), Phase 2 reverses back to chronological for LLM presentation
 - `get_conversation_file_list()`: deduplicates files across turns, newest reference wins
 
-**`systemprompts/`** — Each tool has a corresponding `*_prompt.py` file (1:1 naming convention). Tools without prompts (clink, pal*, listmodels, version, apilookup, challenge) return `""` from `get_system_prompt()`.
+**`systemprompts/`** — Each tool has a corresponding `*_prompt.py` file (1:1 naming convention). Tools without prompts (clink, context store tools, listmodels, version, apilookup, challenge) return `""` from `get_system_prompt()`.
 
 **`config.py`** — Central configuration: version, model defaults, token limits, storage paths, timeouts
 
@@ -101,12 +101,12 @@ Models are resolved early at the MCP boundary in `handle_call_tool()`:
 4. Pass resolved context to tool
 
 Tools declare their preferred model tier via `get_model_category()` → `ToolModelCategory`:
-- `EXTENDED_REASONING` — most tools (codereview, debug, analyze, thinkdeep, palstore, palquery, etc.)
-- `FAST_RESPONSE` — chat, listmodels, version, pallist, palread, palarm, palfork, palinit, palrename, palexport, palfilelist, palfileread
+- `EXTENDED_REASONING` — most tools (codereview, debug, analyze, thinkdeep, writenode, querynode, etc.)
+- `FAST_RESPONSE` — chat, listmodels, version, listnode, readnode, forknode, newtree, renamenode, exportnode, listfiles, readfile
 - `BALANCED` — perceive, clink
 - `IMAGE_GENERATION` — imagegen
 
-Tools that override `requires_model() → False` bypass model resolution entirely: clink, planner, consensus, docgen, tracer, challenge, apilookup, listmodels, version, and all pal* tools except palstore and palquery.
+Tools that override `requires_model() → False` bypass model resolution entirely: clink, planner, consensus, docgen, tracer, challenge, apilookup, listmodels, version, and all context store tools except writenode and querynode.
 
 ### Tool System
 
@@ -127,13 +127,23 @@ Tools that override `requires_model() → False` bypass model resolution entirel
 **Context Tools** (`tools/palstore.py`) have a split inheritance:
 ```
 BaseTool (direct) ─── PalInitTool, PalForkTool, PalListTool, PalReadTool,
-                      PalArmTool, PalRenameTool, PalExportTool,
-                      PalFileListTool, PalFileReadTool
+                      PalRenameTool, PalExportTool,
+                      PalFileListTool, PalFileReadTool,
+                      PalMoveTool, PalCopyTool, PalFoldTool, PalDeleteTool,
+                      PalTraverseTool
                       (requires_model=False, pure filesystem)
 
 SimpleTool → PalStoreBaseTool ─── PalStoreTool, PalQueryTool
                                   (requires_model=True, thinking_mode="max")
 ```
+
+**PalNode model** (`utils/palstore.py`):
+- Fields: `input: str`, `output: str`, `metadata: dict[str, Any] = {}`
+- `input` = full tool call data rendered via `render_markdown_output()` (uses `oboros.tome.dumps` — TOME BFS-linearized markdown with `§` sigils)
+- `output` = full tool response rendered via `render_markdown_output()`
+- `model_validator(mode="before")` transparently migrates legacy `prompt`/`response`/`content` fields
+- Each node stores only its own layer's data — the O(n²) content duplication bug is fixed
+- `format_layer_markdown` (used by `readnode`/`exportnode`) accepts `input_text`/`output_text` params
 
 **Context Store Tree Rules** (`utils/palstore.py`):
 
@@ -150,6 +160,8 @@ tool      │    ✗    │    ✗    │    ✓    │    ✓    │    ✗
 ```
 
 Key rule: **L-nodes cannot have L-children**. `PalStoreTool` uses `resolve_layer_insertion_point()` to find the correct sibling-level parent when called on an L-node path (e.g., `myproject.L7` → inserts `L8` at root, not `L7.L1`).
+
+**`utils/palstore_builder.py`** — `build_store_context()` builds enhanced arguments directly from PalNode ancestry for a given store path. Replaces the former `hydrate_thread_context` approach. Uses token-budgeted history building via `_build_budgeted_history()`.
 
 ### MCP Transport Limits
 
@@ -194,47 +206,27 @@ class MyTool(BaseTool):
 
 Register in `server.py` TOOLS dict. Tools that bypass model resolution override `requires_model() -> False`.
 
-## Context Revival (palarm)
+## Context Store Tool Reference
 
-The `palarm` tool is a single-fire tripwire: it arms a context store for revival on the next user prompt, then automatically disarms. When armed, a `SessionStart` hook injects `additionalContext` forcing Claude to run `pallist` + `palquery` to restore project context, then removes the armed entry so subsequent prompts proceed normally.
+MCP tool names use the verb-node convention. Source class names (e.g. `PalStoreTool`) are unchanged.
 
-After compaction, a `PostCompact` hook auto-arms the most recently used store for the project, so the next tool call triggers a full revival from the store (compaction summaries are lossy).
-
-### How It Works
-
-```
-palarm tool ──▶ ~/.claude/pal/context/armed.json
-                { "/path/to/project": "my-project" }
-
-SessionStart hook ──▶ reads armed.json
-                  ──▶ looks up cwd
-                  ──▶ injects revival additionalContext
-                  ──▶ removes cwd entry (disarms)
-
-PostCompact hook ──▶ reads store-index.json
-                 ──▶ finds most recent store for cwd
-                 ──▶ arms it in compact-armed.json
-
-PreToolUse hook ──▶ reads compact-armed.json
-                ──▶ if armed: injects revival + disarms
-                ──▶ fires on next tool call (immediate post-compact)
-```
-
-The tripwire uses two separate armed files and hook events:
-
-| Scenario | Armed file | Hook | Fires on resume? |
-|----------|-----------|------|-------------------|
-| Manual arm (palarm) | `armed.json` | `SessionStart` | No |
-| Post-compact auto-arm | `compact-armed.json` | `PreToolUse` | N/A (same session) |
-
-Hook scripts are at `scripts/pal-arm.sh` and `scripts/pal-compact.sh`.
-
-### Storage
-
-- Armed state: `~/.claude/pal/context/armed.json` (directory → store_id mapping)
-- Compact armed state: `~/.claude/pal/context/compact-armed.json`
-- Store index: `~/.claude/pal/context/store-index.json`
-- MCP handshake shows `[armed]` marker on armed stores
+| MCP tool name  | Source class     | Model required |
+|----------------|------------------|----------------|
+| `newtree`      | PalInitTool      | No             |
+| `writenode`    | PalStoreTool     | Yes            |
+| `querynode`    | PalQueryTool     | Yes            |
+| `listnode`     | PalListTool      | No             |
+| `readnode`     | PalReadTool      | No             |
+| `forknode`     | PalForkTool      | No             |
+| `renamenode`   | PalRenameTool    | No             |
+| `exportnode`   | PalExportTool    | No             |
+| `listfiles`    | PalFileListTool  | No             |
+| `readfile`     | PalFileReadTool  | No             |
+| `traversenode` | PalTraverseTool  | No             |
+| `movenode`     | PalMoveTool      | No             |
+| `copynode`     | PalCopyTool      | No             |
+| `foldnode`     | PalFoldTool      | No             |
+| `deletenode`   | PalDeleteTool    | No             |
 
 ## Environment Variables
 
@@ -268,6 +260,4 @@ Quick simulator mode covers: cross-tool continuation, conversation threading, co
 
 ## CI/CD
 
-- **PR tests** (`test.yml`): Matrix across Python 3.10/3.11/3.12, runs lint + unit tests
-- **Release** (`semantic-release.yml`): `python-semantic-release` on push to `main`, syncs version to `config.py` via `scripts/sync_version.py`
-- **Docker** (`docker-pr.yml`, `docker-release.yml`): Multi-platform builds (`linux/amd64,linux/arm64`) to `ghcr.io`
+GitHub Actions workflows have been removed. `requires-python = ">=3.13"`.

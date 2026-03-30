@@ -23,6 +23,7 @@ import atexit
 import json
 import logging
 import os
+import re
 import sys
 import time
 from logging.handlers import RotatingFileHandler
@@ -1092,6 +1093,89 @@ def _inject_saved_content_path(result: list, filepath: str) -> list:
     return processed
 
 
+_GEN_BLOCK_RE = re.compile(
+    r"^(?P<fence>`{3,})"
+    r"(?P<lang>[^\r\n]*)"
+    r"\r?\n"
+    r"#!/>[ \t]+(?P<filename>[^\r\n]+?)[ \t]*\r?\n"
+    r"(?P<body>.*?)\r?\n"
+    r"(?P=fence)[ \t]*(?:\r?\n|$)",
+    re.MULTILINE | re.DOTALL,
+)
+
+_UUID_PREFIX_RE = re.compile(r"^[0-9a-f]{8}-?[0-9a-f]{4}-?", re.IGNORECASE)
+
+
+def _resolve_gen_call_id(continuation_id: str | None) -> str:
+    """Derive a short directory name from a continuation_id."""
+    from datetime import datetime
+
+    if not continuation_id:
+        return datetime.now().strftime("%Y%m%d_%H%M%S")
+    if _UUID_PREFIX_RE.match(continuation_id):
+        return continuation_id.replace("-", "")[:12]
+    return continuation_id.split(".")[-1][:16]
+
+
+def _extract_gen_files(result: list, continuation_id: str | None, cwd: str) -> list:
+    """Extract #!/> file blocks from tool response content and save to disk."""
+    from config import CODE_STORAGE_DIR
+    from utils.palstore import encode_directory
+
+    if not result:
+        return result
+    try:
+        data = json.loads(result[0].text)
+    except (json.JSONDecodeError, AttributeError, IndexError):
+        return result
+    if not isinstance(data, dict) or data.get("status") == "error":
+        return result
+
+    content = data.get("content", "")
+    if not content:
+        return result
+
+    matches = list(_GEN_BLOCK_RE.finditer(content))
+    if not matches:
+        return result
+
+    call_id = _resolve_gen_call_id(continuation_id)
+    target_dir = Path(CODE_STORAGE_DIR) / encode_directory(cwd) / call_id
+    saved_paths: list[str] = []
+
+    for match in matches:
+        filename = match.group("filename").strip()
+        parts = Path(filename).parts
+        if not parts or any(p in ("..", "") for p in parts) or filename.startswith("/") or filename.startswith("\\"):
+            logger.warning("palshebang: rejected unsafe filename %r", filename)
+            continue
+
+        target_dir.mkdir(parents=True, exist_ok=True)
+        file_path = (target_dir / filename).resolve()
+        if not file_path.is_relative_to(target_dir.resolve()):
+            logger.warning("palshebang: path traversal blocked for %r", filename)
+            continue
+
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        body = match.group("body")
+        file_path.write_text(body + "\n" if not body.endswith("\n") else body, encoding="utf-8")
+        saved_paths.append(str(file_path))
+        logger.info("palshebang: extracted %s", file_path)
+
+    if saved_paths:
+        def _strip_shebang(m: re.Match) -> str:
+            fence = m.group("fence")
+            lang = m.group("lang")
+            body = m.group("body")
+            return f"{fence}{lang}\n{body}\n{fence}\n"
+
+        data["content"] = _GEN_BLOCK_RE.sub(_strip_shebang, content)
+        data["gen_files"] = saved_paths
+        result = [TextContent(type="text", text=json.dumps(data))] + list(result[1:])
+
+    return result
+
+
 def _apply_output_format(result: list, raw: bool) -> list:
     """Route tool results through the appropriate output formatter.
 
@@ -1259,6 +1343,7 @@ async def _call_tool_impl(name: str, arguments: dict[str, Any], tools: dict) -> 
             if saved_path:
                 result = _inject_saved_content_path(result, saved_path)
 
+            result = _extract_gen_files(result, arguments.get("continuation_id"), os.getcwd())
             result = _apply_output_format(result, raw_output)
             return result
 
@@ -1333,6 +1418,7 @@ async def _call_tool_impl(name: str, arguments: dict[str, Any], tools: dict) -> 
         if saved_path:
             result = _inject_saved_content_path(result, saved_path)
 
+        result = _extract_gen_files(result, arguments.get("continuation_id"), os.getcwd())
         result = _apply_output_format(result, raw_output)
 
         # Log completion to activity file

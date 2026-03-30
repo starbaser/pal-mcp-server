@@ -171,10 +171,8 @@ class BaseTool(ABC):
     def get_capability_system_prompts(self, capabilities: Optional["ModelCapabilities"]) -> list[str]:
         """Return additional system prompt snippets gated on model capabilities.
 
-        Subclasses can override this hook to append capability-specific
-        instructions (for example, enabling code-generation exports when a
-        model advertises support). The default implementation returns an empty
-        list so no extra instructions are appended.
+        The default implementation returns the universal #!/> file extraction
+        sigil prompt. Subclasses can override and call super() to extend.
 
         Args:
             capabilities: The resolved capabilities for the active model.
@@ -182,8 +180,9 @@ class BaseTool(ABC):
         Returns:
             List of prompt fragments to append after the base system prompt.
         """
+        from systemprompts import PALSHEBANG_PROMPT
 
-        return []
+        return [PALSHEBANG_PROMPT]
 
     def _augment_system_prompt_with_capabilities(
         self, base_prompt: str, capabilities: Optional["ModelCapabilities"]

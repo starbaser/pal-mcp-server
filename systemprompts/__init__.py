@@ -8,9 +8,9 @@ from .codereview_prompt import CODEREVIEW_PROMPT
 from .consensus_prompt import CONSENSUS_PROMPT
 from .debug_prompt import DEBUG_ISSUE_PROMPT
 from .docgen_prompt import DOCGEN_PROMPT
-from .generate_code_prompt import GENERATE_CODE_PROMPT
 from .imagegen_prompt import IMAGEGEN_PROMPT
 from .narrate_prompt import NARRATE_PROMPT
+from .palshebang_prompt import PALSHEBANG_PROMPT
 from .palstore_prompt import CONTEXT_PROMPT
 from .perceive_prompt import PERCEIVE_PROMPT
 from .planner_prompt import PLANNER_PROMPT
@@ -26,7 +26,6 @@ __all__ = [
     "CODEREVIEW_PROMPT",
     "DEBUG_ISSUE_PROMPT",
     "DOCGEN_PROMPT",
-    "GENERATE_CODE_PROMPT",
     "ANALYZE_PROMPT",
     "CHAT_PROMPT",
     "CONSENSUS_PROMPT",
@@ -39,5 +38,6 @@ __all__ = [
     "IMAGEGEN_PROMPT",
     "PERCEIVE_PROMPT",
     "NARRATE_PROMPT",
+    "PALSHEBANG_PROMPT",
     "TRACER_PROMPT",
 ]

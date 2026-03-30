@@ -65,7 +65,8 @@ CLI Client (Claude/Gemini/Codex)
 - `configure_providers()` registers providers based on API keys
 - `parse_model_option()` splits `"model:option"` format (e.g. `"gemini-pro:for"` → model + option), preserving OpenRouter suffixes (`:free`, `:beta`, `:preview`)
 - Store continuation: `_resolve_store_continuation()` calls `build_store_context()` directly from context store paths (not just UUIDs). Two modes: CONTINUE (creates numeric child node per turn) and FORK (auto-create fork + tool child). Store paths skip `reconstruct_thread_context` — dispatch in `handle_call_tool` is bifurcated.
-- Response post-processing pipeline: `_inject_store_path_continuation()` → `_save_response_content()` → `_apply_output_format()`
+- Response post-processing pipeline: `_inject_store_path_continuation()` → `_save_response_content()` → `_inject_saved_content_path()` → `_extract_gen_files()` → `_apply_output_format()`
+- `_extract_gen_files()`: universal `#!/>` sigil extraction from model responses — saves complete files to `CODE_STORAGE_DIR/{encoded_cwd}/{call_id}/`, strips sigil blocks from response content, adds `gen_files` metadata
 
 **`tools/`** — MCP tool implementations. Two base classes:
 - `SimpleTool` (`tools/simple/base.py`) — single request/response (chat, clink, imagegen, perceive, context store tools)
@@ -86,7 +87,7 @@ Both inherit from `BaseTool` (`tools/shared/base_tool.py`). Required methods: `g
 - `build_conversation_history()`: Phase 1 collects turns in REVERSE chronological order (newest-first for token budgeting), Phase 2 reverses back to chronological for LLM presentation
 - `get_conversation_file_list()`: deduplicates files across turns, newest reference wins
 
-**`systemprompts/`** — Each tool has a corresponding `*_prompt.py` file (1:1 naming convention). Tools without prompts (clink, context store tools, listmodels, version, apilookup, challenge) return `""` from `get_system_prompt()`.
+**`systemprompts/`** — Each tool has a corresponding `*_prompt.py` file (1:1 naming convention). Tools without prompts (clink, context store tools, listmodels, version, apilookup, challenge) return `""` from `get_system_prompt()`. `PALSHEBANG_PROMPT` (`systemprompts/palshebang_prompt.py`) is injected universally into every model-calling tool via `BaseTool.get_capability_system_prompts()` — it is not per-tool.
 
 **`config.py`** — Central configuration: version, model defaults, token limits, storage paths, timeouts
 

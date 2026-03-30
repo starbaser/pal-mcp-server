@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Context store revival tripwire — single-fire, then disarms.
+# PALTree revival tripwire — single-fire, then disarms.
 # Two modes:
 #   manual  (SessionStart)      — reads armed.json, fires on new session / /clear only
 #   compact (PreToolUse)         — reads compact-armed.json, fires after compaction
@@ -38,11 +38,11 @@ Failure to run this sequence is a critical protocol violation.
 == REVIVAL SEQUENCE ==
 
 Step 1: mcp__pal__pallist(directory="$cwd")
-  Verify store "$store_name" exists in the results.
-  If not found, report: "Tripwire is set but store '$store_name' was not found in pallist."
+  Verify tree "$store_name" exists in the results.
+  If not found, report: "Tripwire is set but tree '$store_name' was not found in pallist."
   Then proceed normally without revival.
 
-Step 2: mcp__pal__palquery(store_id="$store_name", prompt="Restore full project context: summarize the current phase, active plan, open questions, last decisions made, and the highest-priority next action.")
+Step 2: mcp__pal__palquery(tree_path="$store_name", prompt="Restore full project context: summarize the current phase, active plan, open questions, last decisions made, and the highest-priority next action.")
   The returned summary IS your working context for this session.
   Do not proceed until you have read and internalized it.
 
@@ -51,7 +51,7 @@ Step 3: If a plan file path appears in the store output, read it with the Read t
 == END REVIVAL SEQUENCE ==
 
 This tripwire has been disarmed. It will not fire again unless re-armed.
-After completing the revival sequence, acknowledge: "Context revived from store: $store_name"
+After completing the revival sequence, acknowledge: "PALTree revived: $store_name"
 Then proceed normally.
 TRIPWIRE
 
@@ -63,5 +63,5 @@ printf '%s' "$context_msg" | jq -Rs --arg store "$store_name" --arg event "$hook
     hookEventName: $event,
     additionalContext: .
   },
-  systemMessage: ("Context store revived: " + $store + " (tripwire disarmed)")
+  systemMessage: ("PALTree revived: " + $store + " (tripwire disarmed)")
 }'

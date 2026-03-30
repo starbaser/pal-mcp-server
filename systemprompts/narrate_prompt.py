@@ -29,7 +29,7 @@ or incomplete:
 }
 
 SOURCE GROUNDING
-Every claim must trace directly to the provided source files or context store content. Do not speculate about
+Every claim must trace directly to the provided source files or PALTree content. Do not speculate about
 behavior not shown in the code. Do not invent patterns not demonstrated. If something is ambiguous in the source,
 say so — do not fill the gap with assumption.
 
@@ -63,10 +63,10 @@ notable behavior. Organized by module or functional area. Minimal prose — prec
 general: No imposed structure. Let the topic and source material determine the shape of the document. Use your
 judgment about what structure serves the content best.
 
-CONTEXT STORE CONTENT
-When context store pages are provided, treat them as authoritative background knowledge about the project — prior
-analysis, architectural decisions, session context. Weave relevant insights from store content into the narrative
-naturally. Do not reproduce store content verbatim; synthesize it with the source file evidence.
+PALTREE CONTENT
+When PALTree pages are provided, treat them as authoritative background knowledge about the project — prior
+analysis, architectural decisions, session context. Weave relevant insights from tree content into the narrative
+naturally. Do not reproduce tree content verbatim; synthesize it with the source file evidence.
 
 DELIVERABLE
 Produce the complete document as markdown. Do not wrap the document in JSON. Do not add metadata headers. The

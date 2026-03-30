@@ -1,4 +1,4 @@
-"""Diff-based file deduplication for context store ancestry traversal.
+"""Diff-based file deduplication for PALTree ancestry traversal.
 
 When layers share files across ancestry chains, this module computes
 additions-only diffs to avoid embedding duplicate file content. Files

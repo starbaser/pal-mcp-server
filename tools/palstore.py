@@ -1,5 +1,5 @@
 """
-Context store tools — init, store, query, fork, list, read, arm, filelist, and fileread context stores.
+PALTree and PALNode tools — init, store, query, fork, list, read, filelist, and fileread PALTrees.
 """
 
 import logging
@@ -18,10 +18,10 @@ from .simple.base import SimpleTool
 
 logger = logging.getLogger(__name__)
 
-STORE_ID_DESCRIPTION = (
-    "Dot-path identifier for a context store node. Root stores use a plain name (e.g. 'myproject'). "
-    "Child nodes extend the path with dot notation (e.g. 'myproject.L1', 'myproject.L1.Q1'). "
-    "Use listnode to discover existing store_ids. Returned by newtree, writenode, querynode, and forknode."
+TREE_PATH_DESCRIPTION = (
+    "Dot-path to a PALNode in a PALTree. Root trees use a plain name (e.g. 'myproject'). "
+    "Child nodes extend with dot notation (e.g. 'myproject.L1', 'myproject.L1.Q1'). "
+    "Use treelist to discover tree paths. Returned by newtree, writenode, querynode, and forknode."
 )
 
 
@@ -109,14 +109,14 @@ class PalStoreRequest(ToolRequest):
     absolute_file_paths: Optional[list[str]] = Field(default_factory=list)
     media: Optional[list[str]] = Field(default_factory=list)
     context_label: Optional[str] = Field(default=None)
-    store_id: str = Field(...)
+    tree_path: str = Field(...)
 
 
 class PalQueryRequest(ToolRequest):
     prompt: str = Field(...)
     absolute_file_paths: Optional[list[str]] = Field(default_factory=list)
     media: Optional[list[str]] = Field(default_factory=list)
-    store_id: str = Field(...)
+    tree_path: str = Field(...)
 
 
 # ---------------------------------------------------------------------------
@@ -125,7 +125,7 @@ class PalQueryRequest(ToolRequest):
 
 
 class PalStoreBaseTool(SimpleTool):
-    """Shared base for context store tools that call external models."""
+    """Shared base for PALTree and PALNode tools that call external models."""
 
     def get_model_category(self):
         from tools.models import ToolModelCategory
@@ -175,9 +175,9 @@ class PalInitTool(BaseTool):
 
     def get_description(self) -> str:
         return (
-            "Create a new named context store and register it to a project directory. "
-            "Run listnode first to check for an existing store before creating a new one; "
-            "use writenode to add context layers after creation."
+            "Create a new named PALTree and register it to a project directory.\n"
+            "Run treelist first to check for an existing tree before creating a new one;\n"
+            "use writenode to add nodes after creation."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -187,9 +187,9 @@ class PalInitTool(BaseTool):
                 "store_name": {
                     "type": "string",
                     "description": (
-                        "Unique name for the context store (e.g. 'myproject'). "
+                        "Unique name for the PALTree (e.g. 'myproject'). "
                         "No dots allowed — dots are reserved for dot-path child notation. "
-                        "Becomes the root store_id."
+                        "Becomes the root tree_path."
                     ),
                 },
                 "directory": {
@@ -261,13 +261,13 @@ class PalInitTool(BaseTool):
         tool_output = ToolOutput(
             status="success",
             content=(
-                f"Context store created.\n\n"
-                f"store_id: {store_name}\n"
+                f"PALTree created.\n\n"
+                f"tree_path: {store_name}\n"
                 f"directory: {directory}\n\n"
-                f'Use writenode(store_id="{store_name}", ...) to add context layers.'
+                f'Use writenode(tree_path="{store_name}", ...) to add context layers.'
             ),
             content_type="text",
-            metadata={"store_id": store_name, "directory": directory},
+            metadata={"tree_path": store_name, "directory": directory},
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]
 
@@ -283,9 +283,9 @@ class PalStoreTool(PalStoreBaseTool):
 
     def get_description(self) -> str:
         return (
-            "Add a context layer to an existing store, embedding files and prose for an external model to process. "
-            "Each call appends a new numbered layer (L1, L2, …); seed 4–6 key files per layer for best results. "
-            "Use newtree to create a store first, then querynode to retrieve stored context."
+            "Add a context node to an existing PALTree, embedding files and prose for an external model to process.\n"
+            "Each call appends a new numbered layer (L1, L2, …); seed 4–6 key files per node for best results.\n"
+            "Use newtree to create a tree first, then querynode to retrieve stored context."
         )
 
     def get_request_model(self):
@@ -306,14 +306,14 @@ class PalStoreTool(PalStoreBaseTool):
                 "type": "string",
                 "description": "Short human-readable label for this layer (e.g. 'session 3 conversation').",
             },
-            "store_id": {"type": "string", "description": STORE_ID_DESCRIPTION},
+            "tree_path": {"type": "string", "description": TREE_PATH_DESCRIPTION},
         }
 
     def get_required_fields(self) -> list[str]:
-        return ["prompt", "store_id"]
+        return ["prompt", "tree_path"]
 
     def get_input_schema(self) -> dict[str, Any]:
-        required_fields = ["prompt", "store_id"]
+        required_fields = ["prompt", "tree_path"]
         if self.is_effective_auto_mode():
             required_fields.append("model")
 
@@ -338,7 +338,7 @@ class PalStoreTool(PalStoreBaseTool):
                     "type": "string",
                     "description": "Short human-readable label for this layer (e.g. 'session 3 conversation').",
                 },
-                "store_id": {"type": "string", "description": STORE_ID_DESCRIPTION},
+                "tree_path": {"type": "string", "description": TREE_PATH_DESCRIPTION},
                 "model": self.get_model_field_schema(),
                 "temperature": {
                     "type": "number",
@@ -360,11 +360,11 @@ class PalStoreTool(PalStoreBaseTool):
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
 
-        store_id = arguments.get("store_id", "")
+        store_id = arguments.get("tree_path", "")
         if not store_id:
             error = ToolOutput(
                 status="error",
-                content="writenode requires a store_id. Use newtree to create a store first.",
+                content="writenode requires a tree_path. Use newtree to create a tree first.",
                 content_type="text",
             )
             return [TextContent(type="text", text=error.model_dump_json())]
@@ -456,7 +456,7 @@ class PalStoreTool(PalStoreBaseTool):
 
     def format_response(self, response: str, _request: PalStoreRequest, _model_info: Optional[dict] = None) -> str:
         self._last_raw_response = response
-        return f"{response}\n\n---\n\nAGENT'S TURN: Context layer stored. Use the store_id to add more layers or query this store."
+        return f"{response}\n\n---\n\nAGENT'S TURN: Context layer stored. Use the tree_path to add more layers or query this tree."
 
     def _create_continuation_offer(self, _request, _model_info: Optional[dict] = None):
         from utils.palstore import get_next_key, resolve_layer_insertion_point
@@ -500,7 +500,7 @@ class PalStoreTool(PalStoreBaseTool):
         input_dict = {
             "tool_name": self.get_name(),
             "model": model_name,
-            "store_id": getattr(self, "_store_id", None),
+            "tree_path": getattr(self, "_store_id", None),
             "context_label": getattr(request, "context_label", None),
             "prompt": getattr(self, "_last_base_prompt", ""),
         }
@@ -535,9 +535,9 @@ class PalQueryTool(PalStoreBaseTool):
 
     def get_description(self) -> str:
         return (
-            "Ask a question against a context store — sends all stored layers to an external model for analysis. "
-            "Use for targeted questions, not context revival. Each query is recorded as a child node. "
-            "For context revival, prefer readnode (metadata + summary) + listfiles → readfile (selective file content)."
+            "Ask a question against a PALTree — sends all stored nodes to an external model for analysis.\n"
+            "Use for targeted questions, not context revival. Each query is recorded as a child node.\n"
+            "For context revival, prefer readnode (metadata + summary) + listnodefiles → readnodefile (selective file content)."
         )
 
     def get_request_model(self):
@@ -547,16 +547,16 @@ class PalQueryTool(PalStoreBaseTool):
         return {
             "prompt": {
                 "type": "string",
-                "description": "Question or instruction to run against the context store.",
+                "description": "Question or instruction to run against the PALTree.",
             },
-            "store_id": {"type": "string", "description": STORE_ID_DESCRIPTION},
+            "tree_path": {"type": "string", "description": TREE_PATH_DESCRIPTION},
         }
 
     def get_required_fields(self) -> list[str]:
-        return ["prompt", "store_id"]
+        return ["prompt", "tree_path"]
 
     def get_input_schema(self) -> dict[str, Any]:
-        required_fields = ["prompt", "store_id"]
+        required_fields = ["prompt", "tree_path"]
         if self.is_effective_auto_mode():
             required_fields.append("model")
 
@@ -565,7 +565,7 @@ class PalQueryTool(PalStoreBaseTool):
             "properties": {
                 "prompt": {
                     "type": "string",
-                    "description": "Question or instruction to run against the context store.",
+                    "description": "Question or instruction to run against the PALTree.",
                 },
                 "absolute_file_paths": {
                     "type": "array",
@@ -577,7 +577,7 @@ class PalQueryTool(PalStoreBaseTool):
                     "items": {"type": "string"},
                     "description": COMMON_FIELD_DESCRIPTIONS["media"],
                 },
-                "store_id": {"type": "string", "description": STORE_ID_DESCRIPTION},
+                "tree_path": {"type": "string", "description": TREE_PATH_DESCRIPTION},
                 "model": self.get_model_field_schema(),
                 "temperature": {
                     "type": "number",
@@ -599,11 +599,11 @@ class PalQueryTool(PalStoreBaseTool):
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
 
-        store_id = arguments.get("store_id", "")
+        store_id = arguments.get("tree_path", "")
         if not store_id:
             error = ToolOutput(
                 status="error",
-                content="querynode requires a store_id. Create a store with newtree first.",
+                content="querynode requires a tree_path. Create a tree with newtree first.",
                 content_type="text",
             )
             return [TextContent(type="text", text=error.model_dump_json())]
@@ -677,7 +677,7 @@ class PalQueryTool(PalStoreBaseTool):
                 file_section = f"\n\n=== CONTEXT FILES ===\n{file_content}\n=== END CONTEXT FILES ==="
 
         injected = getattr(self, "_injected_history", "")
-        base = f"=== CONTEXT STORE QUERY ===\n\n{user_content}{file_section}"
+        base = f"=== PALTREE QUERY ===\n\n{user_content}{file_section}"
         self._last_base_prompt = base
 
         full_prompt = f"{injected}\n\n{base}" if injected else base
@@ -686,7 +686,7 @@ class PalQueryTool(PalStoreBaseTool):
 
     def format_response(self, response: str, _request: PalQueryRequest, _model_info: Optional[dict] = None) -> str:
         self._last_raw_response = response
-        return f"{response}\n\n---\n\nAGENT'S TURN: Evaluate this response from the context store alongside your own analysis."
+        return f"{response}\n\n---\n\nAGENT'S TURN: Evaluate this response from the PALTree alongside your own analysis."
 
     def _create_continuation_offer(self, _request, _model_info: Optional[dict] = None):
         from utils.palstore import get_next_key
@@ -732,7 +732,7 @@ class PalQueryTool(PalStoreBaseTool):
         input_dict = {
             "tool_name": self.get_name(),
             "model": model_name,
-            "store_id": getattr(self, "_store_id", None),
+            "tree_path": getattr(self, "_store_id", None),
             "prompt": getattr(self, "_last_base_prompt", ""),
         }
         output_dict = {
@@ -766,25 +766,25 @@ class PalForkTool(BaseTool):
 
     def get_description(self) -> str:
         return (
-            "Create a fork point in a context store, branching from any node to explore alternatives "
-            "without disrupting the main lineage. Returns a new store_id for the fork branch. "
-            "Use listnode to find the store_id to fork from; use writenode or querynode with the returned fork store_id."
+            "Insert a fork node as a child of the target node in a PALTree, branching to explore alternatives\n"
+            "without disrupting the main lineage. Returns a new tree_path for the fork branch.\n"
+            "Use treelist to find the tree_path to fork from; use writenode or querynode with the returned fork tree_path."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
-                "store_id": {
+                "tree_path": {
                     "type": "string",
-                    "description": STORE_ID_DESCRIPTION,
+                    "description": TREE_PATH_DESCRIPTION,
                 },
                 "label": {
                     "type": "string",
                     "description": "Optional short label for the fork point (e.g. 'alt-approach-A').",
                 },
             },
-            "required": ["store_id"],
+            "required": ["tree_path"],
             "additionalProperties": False,
         }
 
@@ -822,7 +822,7 @@ class PalForkTool(BaseTool):
             save_store,
         )
 
-        store_id = arguments.get("store_id", "")
+        store_id = arguments.get("tree_path", "")
         label = arguments.get("label")
 
         location = resolve_store_location(store_id)
@@ -857,11 +857,11 @@ class PalForkTool(BaseTool):
             status="success",
             content=(
                 f"Fork created.\n\n"
-                f"store_id: {new_path}\n\n"
-                f"Use this store_id to build a new context branch from this point."
+                f"tree_path: {new_path}\n\n"
+                f"Use this tree_path to build a new branch from this point."
             ),
             content_type="text",
-            metadata={"store_id": new_path, "parent_store_id": store_id},
+            metadata={"tree_path": new_path, "parent_tree_path": store_id},
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]
 
@@ -873,13 +873,13 @@ class PalForkTool(BaseTool):
 
 class PalListTool(BaseTool):
     def get_name(self) -> str:
-        return "listnode"
+        return "treelist"
 
     def get_description(self) -> str:
         return (
-            "List context stores and their full node trees, returning store_ids needed for writenode, querynode, "
-            "readnode, forknode, and armnode. Filter by directory to scope to a project, "
-            "or pass store_id to drill into a specific subtree."
+            "List the current directory's PALTrees and their full node trees, returning tree_paths needed for writenode, querynode,\n"
+            "readnode, forknode, and other tools. Filter by directory to scope to a project,\n"
+            "or pass tree_path to drill into a specific subtree."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -893,7 +893,7 @@ class PalListTool(BaseTool):
                         "Omit to list all stores across all projects."
                     ),
                 },
-                "store_id": {
+                "tree_path": {
                     "type": "string",
                     "description": (
                         "Show only the subtree rooted at this node (e.g. 'myproject' or 'myproject.L2'). "
@@ -936,7 +936,7 @@ class PalListTool(BaseTool):
         from utils.palstore import list_stores, load_store, resolve_palnode, resolve_store_location
 
         directory = arguments.get("directory")
-        store_id = arguments.get("store_id")
+        store_id = arguments.get("tree_path")
 
         if store_id:
             location = resolve_store_location(store_id)
@@ -973,7 +973,7 @@ class PalListTool(BaseTool):
                 content = "\n".join(lines)
             else:
                 scope = f" for directory '{directory}'" if directory else ""
-                content = f"No context stores found{scope}."
+                content = f"No PALTrees found{scope}."
 
         tool_output = ToolOutput(
             status="success",
@@ -994,21 +994,21 @@ class PalReadTool(BaseTool):
 
     def get_description(self) -> str:
         return (
-            "Read a context store node's metadata, prompt, and response — the primary tool for context revival. "
-            "Returns label, model, timestamp, file list, prompt text, and response text. "
-            "After reading, use listfiles to see attached files, then readfile to selectively load relevant ones."
+            "Read a PALNode's metadata, input, and output — the primary tool for context revival.\n"
+            "Returns label, model, timestamp, file list, input text, and output text.\n"
+            "After reading, use listnodefiles to see attached files, then readnodefile to selectively load relevant ones."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
-                "store_id": {
+                "tree_path": {
                     "type": "string",
-                    "description": STORE_ID_DESCRIPTION,
+                    "description": TREE_PATH_DESCRIPTION,
                 },
             },
-            "required": ["store_id"],
+            "required": ["tree_path"],
             "additionalProperties": False,
         }
 
@@ -1039,7 +1039,7 @@ class PalReadTool(BaseTool):
         from tools.models import ToolOutput
         from utils.palstore import load_store, resolve_palnode, resolve_store_location
 
-        store_id = arguments.get("store_id", "")
+        store_id = arguments.get("tree_path", "")
 
         location = resolve_store_location(store_id)
         if location is None:
@@ -1087,173 +1087,44 @@ class PalReadTool(BaseTool):
             status="success",
             content=content,
             content_type="text",
-            metadata={"store_id": store_id},
+            metadata={"tree_path": store_id},
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]
 
 
 # ---------------------------------------------------------------------------
-# armnode
-# ---------------------------------------------------------------------------
-
-
-class PalArmTool(BaseTool):
-    def get_name(self) -> str:
-        return "armnode"
-
-    def get_description(self) -> str:
-        return (
-            "Arm a context store for automatic revival at every session start, "
-            "so the SessionStart hook runs listnode and querynode to restore project context without manual steps. "
-            "Pass disarm=true to remove the armed state; use listnode to find the store_id to arm."
-        )
-
-    def get_input_schema(self) -> dict[str, Any]:
-        return {
-            "type": "object",
-            "properties": {
-                "store_id": {
-                    "type": "string",
-                    "description": (
-                        "Root store_id to arm for auto-revival (e.g. 'myproject'). "
-                        "Must be an existing root store — use listnode to confirm."
-                    ),
-                },
-                "directory": {
-                    "type": "string",
-                    "description": (
-                        "Absolute path to the project directory. "
-                        "Must match the directory the store was registered to at newtree time."
-                    ),
-                },
-                "disarm": {
-                    "type": "boolean",
-                    "description": "Set true to remove the armed state for this directory. Defaults to false.",
-                    "default": False,
-                },
-            },
-            "required": ["store_id", "directory"],
-            "additionalProperties": False,
-        }
-
-    def get_annotations(self) -> dict:
-        return {"readOnlyHint": False, "idempotentHint": True, "openWorldHint": False}
-
-    def get_system_prompt(self) -> str:
-        return ""
-
-    def get_request_model(self):
-        return ToolRequest
-
-    def requires_model(self) -> bool:
-        return False
-
-    def get_model_category(self):
-        from tools.models import ToolModelCategory
-
-        return ToolModelCategory.FAST_RESPONSE
-
-    async def prepare_prompt(self, _request: ToolRequest) -> str:
-        return ""
-
-    def format_response(self, response: str, _request: ToolRequest, _model_info: Optional[dict] = None) -> str:
-        return response
-
-    async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
-        from tools.models import ToolOutput
-        from utils.palstore import arm_store, disarm_store, load_store, resolve_store_location
-
-        store_id = arguments.get("store_id", "")
-        directory = arguments.get("directory", "")
-        disarm = arguments.get("disarm", False)
-
-        if disarm:
-            disarm_store(directory)
-            tool_output = ToolOutput(
-                status="success",
-                content=f"Disarmed: '{directory}'. Revival will no longer fire on SessionStart.",
-                content_type="text",
-                metadata={"store_id": store_id, "directory": directory, "armed": False},
-            )
-            return [TextContent(type="text", text=tool_output.model_dump_json())]
-
-        location = resolve_store_location(store_id)
-        if location is None:
-            tool_output = ToolOutput(
-                status="error",
-                content=f'Store "{store_id}" not found. Use newtree to create it first.',
-                content_type="text",
-            )
-            return [TextContent(type="text", text=tool_output.model_dump_json())]
-
-        store_directory, root_id = location
-        store = load_store(store_directory, root_id)
-        if store is None:
-            tool_output = ToolOutput(
-                status="error",
-                content=f'Store file not found for "{store_id}".',
-                content_type="text",
-            )
-            return [TextContent(type="text", text=tool_output.model_dump_json())]
-
-        if store.directory != directory:
-            tool_output = ToolOutput(
-                status="error",
-                content=(
-                    f'Store "{store_id}" is registered to "{store.directory}", '
-                    f'not "{directory}". Use the correct directory.'
-                ),
-                content_type="text",
-            )
-            return [TextContent(type="text", text=tool_output.model_dump_json())]
-
-        arm_store(directory, store_id)
-        tool_output = ToolOutput(
-            status="success",
-            content=(
-                f"Armed: store '{store_id}' will auto-revive on every SessionStart for '{directory}'.\n\n"
-                f"Revival sequence fires automatically — no further action needed.\n"
-                f'To disarm: armnode(store_id="{store_id}", directory="{directory}", disarm=true)'
-            ),
-            content_type="text",
-            metadata={"store_id": store_id, "directory": directory, "armed": True},
-        )
-        return [TextContent(type="text", text=tool_output.model_dump_json())]
-
-
-# ---------------------------------------------------------------------------
-# renamenode
+# renametree
 # ---------------------------------------------------------------------------
 
 
 class PalRenameTool(BaseTool):
     def get_name(self) -> str:
-        return "renamenode"
+        return "renametree"
 
     def get_description(self) -> str:
         return (
-            "Rename a root context store, updating the store file, index, and any armed state atomically. "
-            "Use listnode to confirm the current store_id before renaming."
+            "Rename a root PALTree, updating the tree file, index, and any armed state atomically.\n"
+            "Use treelist to confirm the current tree_path before renaming."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
-                "store_id": {
+                "tree_path": {
                     "type": "string",
-                    "description": "Current root store_id to rename (e.g. 'myproject'). Use listnode to confirm it exists.",
+                    "description": "Current root tree_path to rename (e.g. 'myproject'). Use treelist to confirm it exists.",
                 },
                 "new_name": {
                     "type": "string",
-                    "description": "New name for the store (e.g. 'myproject-v2'). No dots allowed.",
+                    "description": "New name for the tree (e.g. 'myproject-v2'). No dots allowed.",
                 },
                 "directory": {
                     "type": "string",
-                    "description": "Absolute path to the project directory the store is associated with.",
+                    "description": "Absolute path to the project directory the tree is associated with.",
                 },
             },
-            "required": ["store_id", "new_name", "directory"],
+            "required": ["tree_path", "new_name", "directory"],
             "additionalProperties": False,
         }
 
@@ -1284,14 +1155,14 @@ class PalRenameTool(BaseTool):
         from tools.models import ToolOutput
         from utils.palstore import rename_store
 
-        store_id = arguments.get("store_id", "")
+        store_id = arguments.get("tree_path", "")
         new_name = arguments.get("new_name", "")
         directory = arguments.get("directory", "")
 
         if not store_id or not new_name or not directory:
             tool_output = ToolOutput(
                 status="error",
-                content="store_id, new_name, and directory are all required.",
+                content="tree_path, new_name, and directory are all required.",
                 content_type="text",
             )
             return [TextContent(type="text", text=tool_output.model_dump_json())]
@@ -1307,9 +1178,9 @@ class PalRenameTool(BaseTool):
 
         tool_output = ToolOutput(
             status="success",
-            content=(f"Store renamed.\n\nold store_id: {store_id}\nnew store_id: {new_name}\ndirectory: {directory}"),
+            content=(f"Tree renamed.\n\nold tree_path: {store_id}\nnew tree_path: {new_name}\ndirectory: {directory}"),
             content_type="text",
-            metadata={"store_id": new_name, "old_store_id": store_id, "directory": directory},
+            metadata={"tree_path": new_name, "old_tree_path": store_id, "directory": directory},
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]
 
@@ -1321,12 +1192,12 @@ class PalRenameTool(BaseTool):
 
 class PalExportTool(BaseTool):
     def get_name(self) -> str:
-        return "exportnode"
+        return "treedump"
 
     def get_description(self) -> str:
         return (
-            "Export an entire context store to a self-contained markdown file. "
-            "Serializes all layers, metadata, prompts, responses, and file references "
+            "Export an entire PALTree to a self-contained markdown file.\n"
+            "Serializes all nodes, metadata, inputs, outputs, and file references\n"
             "into a single portable document suitable for archival, handoffs, or direct file reads."
         )
 
@@ -1334,9 +1205,9 @@ class PalExportTool(BaseTool):
         return {
             "type": "object",
             "properties": {
-                "store_id": {
+                "tree_path": {
                     "type": "string",
-                    "description": STORE_ID_DESCRIPTION,
+                    "description": TREE_PATH_DESCRIPTION,
                 },
                 "output_path": {
                     "type": "string",
@@ -1346,7 +1217,7 @@ class PalExportTool(BaseTool):
                     ),
                 },
             },
-            "required": ["store_id", "output_path"],
+            "required": ["tree_path", "output_path"],
             "additionalProperties": False,
         }
 
@@ -1439,7 +1310,7 @@ class PalExportTool(BaseTool):
         from tools.models import ToolOutput
         from utils.palstore import load_store, resolve_store_location
 
-        store_id = arguments.get("store_id", "")
+        store_id = arguments.get("tree_path", "")
         output_path = arguments.get("output_path", "")
 
         if not output_path:
@@ -1470,7 +1341,7 @@ class PalExportTool(BaseTool):
         doc: list[str] = []
 
         # Header
-        doc.append(f"# Context Store Export: {store.store_id}")
+        doc.append(f"# PALTree Export: {store.store_id}")
         doc.append("")
 
         # Store metadata
@@ -1508,9 +1379,9 @@ class PalExportTool(BaseTool):
 
         tool_output = ToolOutput(
             status="success",
-            content=f"Exported store '{store.store_id}' ({n_layers} layers) to:\n{output_path}",
+            content=f"Exported tree '{store.store_id}' ({n_layers} layers) to:\n{output_path}",
             content_type="text",
-            metadata={"store_id": store_id, "output_path": output_path, "layers": n_layers},
+            metadata={"tree_path": store_id, "output_path": output_path, "layers": n_layers},
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]
 
@@ -1522,25 +1393,25 @@ class PalExportTool(BaseTool):
 
 class PalFileListTool(BaseTool):
     def get_name(self) -> str:
-        return "listfiles"
+        return "listnodefiles"
 
     def get_description(self) -> str:
         return (
-            "List all files attached across a context store tree, grouped by node. "
-            "Shows which files were seeded into each layer with timestamps and labels. "
-            "Part of the context revival flow: readnode → listfiles → readfile on context-relevant files."
+            "List all files attached across a PALTree, grouped by node.\n"
+            "Shows which files were seeded into each node with timestamps and labels.\n"
+            "Part of the context revival flow: readnode → listnodefiles → readnodefile on context-relevant files."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
-                "store_id": {
+                "tree_path": {
                     "type": "string",
-                    "description": STORE_ID_DESCRIPTION,
+                    "description": TREE_PATH_DESCRIPTION,
                 },
             },
-            "required": ["store_id"],
+            "required": ["tree_path"],
             "additionalProperties": False,
         }
 
@@ -1583,7 +1454,7 @@ class PalFileListTool(BaseTool):
         from tools.models import ToolOutput
         from utils.palstore import load_store, resolve_palnode, resolve_store_location
 
-        store_id = arguments.get("store_id", "")
+        store_id = arguments.get("tree_path", "")
 
         location = resolve_store_location(store_id)
         if location is None:
@@ -1632,29 +1503,29 @@ class PalFileListTool(BaseTool):
 
 class PalFileReadTool(BaseTool):
     def get_name(self) -> str:
-        return "readfile"
+        return "readnodefile"
 
     def get_description(self) -> str:
         return (
-            "Read a specific file from a context store node's stored content blob (falls back to disk). "
-            "Use after listfiles to selectively load only the files relevant to the current task. "
-            "This targeted approach avoids the token cost of querynode, which sends all layers to an external model."
+            "Read a specific file from a PALNode's stored content blob (falls back to disk).\n"
+            "Use after listnodefiles to selectively load only the files relevant to the current task.\n"
+            "This targeted approach avoids the token cost of querynode, which sends all nodes to an external model."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
         return {
             "type": "object",
             "properties": {
-                "store_id": {
+                "tree_path": {
                     "type": "string",
-                    "description": STORE_ID_DESCRIPTION,
+                    "description": TREE_PATH_DESCRIPTION,
                 },
                 "file_path": {
                     "type": "string",
                     "description": "Absolute path of the file to read (must match a path in the node's files list).",
                 },
             },
-            "required": ["store_id", "file_path"],
+            "required": ["tree_path", "file_path"],
             "additionalProperties": False,
         }
 
@@ -1710,7 +1581,7 @@ class PalFileReadTool(BaseTool):
         from tools.models import ToolOutput
         from utils.palstore import load_store, resolve_palnode, resolve_store_location
 
-        store_id = arguments.get("store_id", "")
+        store_id = arguments.get("tree_path", "")
         file_path = arguments.get("file_path", "")
 
         if not file_path:
@@ -1743,7 +1614,7 @@ class PalFileReadTool(BaseTool):
         if not matches:
             error = ToolOutput(
                 status="error",
-                content=f"File '{file_path}' not found in any node under '{store_id}'. Use listfiles to discover attached files.",
+                content=f"File '{file_path}' not found in any node under '{store_id}'. Use listnodefiles to discover attached files.",
                 content_type="text",
             )
             return [TextContent(type="text", text=error.model_dump_json())]
@@ -1786,7 +1657,123 @@ class PalFileReadTool(BaseTool):
             status="success",
             content=content,
             content_type="text",
-            metadata={"store_id": store_id, "file_path": file_path, "source": source, "node_path": node_path},
+            metadata={"tree_path": store_id, "file_path": file_path, "source": source, "node_path": node_path},
+        )
+        return [TextContent(type="text", text=tool_output.model_dump_json())]
+
+
+# ---------------------------------------------------------------------------
+# writenodefile
+# ---------------------------------------------------------------------------
+
+
+class PalFileWriteTool(BaseTool):
+    def get_name(self) -> str:
+        return "writenodefile"
+
+    def get_description(self) -> str:
+        return (
+            "Write a file to a PALNode's file list. Adds the file path reference to the node\n"
+            "so it appears in listnodefiles and can be retrieved via readnodefile.\n"
+            "The file must exist on disk. Use treelist to find node paths."
+        )
+
+    def get_input_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "tree_path": {
+                    "type": "string",
+                    "description": TREE_PATH_DESCRIPTION,
+                },
+                "file_path": {
+                    "type": "string",
+                    "description": "Absolute path of the file to attach to the node. Must exist on disk.",
+                },
+            },
+            "required": ["tree_path", "file_path"],
+            "additionalProperties": False,
+        }
+
+    def get_annotations(self) -> dict:
+        return {"readOnlyHint": False, "idempotentHint": True, "openWorldHint": False}
+
+    def get_system_prompt(self) -> str:
+        return ""
+
+    def get_request_model(self):
+        return ToolRequest
+
+    def requires_model(self) -> bool:
+        return False
+
+    def get_model_category(self):
+        from tools.models import ToolModelCategory
+
+        return ToolModelCategory.FAST_RESPONSE
+
+    async def prepare_prompt(self, _request: ToolRequest) -> str:
+        return ""
+
+    def format_response(self, response: str, _request: ToolRequest, _model_info: Optional[dict] = None) -> str:
+        return response
+
+    async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
+        from tools.models import ToolOutput
+        from utils.palstore import load_store, resolve_palnode, resolve_store_location, save_store
+
+        store_id = arguments.get("tree_path", "")
+        file_path = arguments.get("file_path", "")
+
+        if not file_path:
+            error = ToolOutput(status="error", content="file_path is required.", content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        if not os.path.isabs(file_path):
+            error = ToolOutput(status="error", content="file_path must be an absolute path.", content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        if not os.path.isfile(file_path):
+            error = ToolOutput(
+                status="error", content=f"File does not exist: {file_path}", content_type="text"
+            )
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        location = resolve_store_location(store_id)
+        if location is None:
+            error = ToolOutput(status="error", content=f'PALTree "{store_id}" not found.', content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        directory, root_id = location
+        store = load_store(directory, root_id)
+        if store is None:
+            error = ToolOutput(
+                status="error", content=f'PALTree file not found: "{root_id}".', content_type="text"
+            )
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        node = resolve_palnode(store, store_id)
+        if node is None:
+            error = ToolOutput(status="error", content=f"Node not found: {store_id}", content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        if file_path in node.files:
+            tool_output = ToolOutput(
+                status="success",
+                content=f"File already attached to node {store_id}: {file_path}",
+                content_type="text",
+                metadata={"tree_path": store_id, "file_path": file_path, "action": "already_present"},
+            )
+            return [TextContent(type="text", text=tool_output.model_dump_json())]
+
+        node.files.append(file_path)
+        save_store(store)
+
+        tool_output = ToolOutput(
+            status="success",
+            content=f"File attached to node {store_id}: {file_path}\n\nTotal files on node: {len(node.files)}",
+            content_type="text",
+            metadata={"tree_path": store_id, "file_path": file_path, "action": "added", "total_files": len(node.files)},
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]
 
@@ -1798,11 +1785,11 @@ class PalFileReadTool(BaseTool):
 
 class PalTraverseTool(BaseTool):
     def get_name(self) -> str:
-        return "traversenode"
+        return "traversetree"
 
     def get_description(self) -> str:
         return (
-            "Traverse a context store path from start_node to end_node and render the exact "
+            "Traverse a PALTree path from start_node to end_node and render the exact "
             "conversation history content that would be sent to the PAL model — full thread "
             "rehydration with all turns, file blobs, and cumulative L-node inclusion. "
             "The end_node must be a descendant (or cumulative L-successor) of start_node."
@@ -1812,9 +1799,9 @@ class PalTraverseTool(BaseTool):
         return {
             "type": "object",
             "properties": {
-                "store_id": {
+                "tree_path": {
                     "type": "string",
-                    "description": "Root store name (e.g. 'myproject'). Use listnode to discover store names.",
+                    "description": "Root tree name (e.g. 'myproject'). Use treelist to discover tree names.",
                 },
                 "start_node": {
                     "type": "string",
@@ -1831,7 +1818,7 @@ class PalTraverseTool(BaseTool):
                     ),
                 },
             },
-            "required": ["store_id", "start_node", "end_node"],
+            "required": ["tree_path", "start_node", "end_node"],
             "additionalProperties": False,
         }
 
@@ -1863,7 +1850,7 @@ class PalTraverseTool(BaseTool):
         from utils.palstore import load_store, resolve_store_location, walk_palnode_range
         from utils.palstore_builder import build_context_from_ancestry
 
-        store_id = arguments.get("store_id", "")
+        store_id = arguments.get("tree_path", "")
         start_node = arguments.get("start_node", "")
         end_node = arguments.get("end_node", "")
 
@@ -1902,7 +1889,7 @@ class PalTraverseTool(BaseTool):
             content=content,
             content_type="text",
             metadata={
-                "store_id": store_id,
+                "tree_path": store_id,
                 "start_node": start_node,
                 "end_node": end_node,
                 "traversed_path": f"{start_full} → {end_full}",
@@ -1922,8 +1909,8 @@ class PalMoveTool(BaseTool):
 
     def get_description(self) -> str:
         return (
-            "Move a context store node to a new location in the tree. Detaches from source and "
-            "reattaches at destination with rollback on failure. Use listnode to find node paths."
+            "Move a PALNode to a new location in the tree. Detaches from source and "
+            "reattaches at destination with rollback on failure. Use treelist to find node paths."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -2037,12 +2024,12 @@ class PalMoveTool(BaseTool):
 
 class PalCopyTool(BaseTool):
     def get_name(self) -> str:
-        return "copynode"
+        return "clonetree"
 
     def get_description(self) -> str:
         return (
-            "Deep copy a context store node to a new location, preserving the original. "
-            "Use listnode to find node paths."
+            "Deep copy a PALTree subtree to a new location, preserving the original. "
+            "Use treelist to find node paths."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -2156,12 +2143,12 @@ class PalCopyTool(BaseTool):
 
 class PalFoldTool(BaseTool):
     def get_name(self) -> str:
-        return "foldnode"
+        return "foldtree"
 
     def get_description(self) -> str:
         return (
-            "Fold an ancestry range of nodes into a single aggregated node and insert it into the tree. "
-            "Aggregates prompt/response content and unions file references. Use listnode to find node paths."
+            "Fold an ancestry range of nodes in a PALTree into a single aggregated node and insert it into the tree. "
+            "Aggregates input/output content and unions file references. Use treelist to find node paths."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -2178,7 +2165,7 @@ class PalFoldTool(BaseTool):
                 },
                 "dest_parent": {
                     "type": "string",
-                    "description": "Where to insert the folded node. Defaults to the root store_id (promotes to layer).",
+                    "description": "Where to insert the folded node. Defaults to the root tree_path (promotes to layer).",
                 },
                 "dest_key": {
                     "type": "string",
@@ -2312,8 +2299,8 @@ class PalDeleteTool(BaseTool):
 
     def get_description(self) -> str:
         return (
-            "Delete a context store node and shift subsequent same-prefix siblings down to fill the gap. "
-            "Use listnode to find node paths."
+            "Delete a PALNode and shift subsequent same-prefix siblings down to fill the gap. "
+            "Use treelist to find node paths."
         )
 
     def get_input_schema(self) -> dict[str, Any]:

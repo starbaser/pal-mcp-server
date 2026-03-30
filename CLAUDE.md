@@ -64,12 +64,12 @@ CLI Client (Claude/Gemini/Codex)
 - `handle_call_tool()` routes requests, resolves models, reconstructs conversation context
 - `configure_providers()` registers providers based on API keys
 - `parse_model_option()` splits `"model:option"` format (e.g. `"gemini-pro:for"` → model + option), preserving OpenRouter suffixes (`:free`, `:beta`, `:preview`)
-- Store continuation: `_resolve_store_continuation()` calls `build_store_context()` directly from context store paths (not just UUIDs). Two modes: CONTINUE (creates numeric child node per turn) and FORK (auto-create fork + tool child). Store paths skip `reconstruct_thread_context` — dispatch in `handle_call_tool` is bifurcated.
+- PALTree continuation: `_resolve_store_continuation()` calls `build_store_context()` directly from PALTree paths (not just UUIDs). Two modes: CONTINUE (creates numeric child node per turn) and FORK (auto-create fork + tool child). PALTree paths skip `reconstruct_thread_context` — dispatch in `handle_call_tool` is bifurcated.
 - Response post-processing pipeline: `_inject_store_path_continuation()` → `_save_response_content()` → `_inject_saved_content_path()` → `_extract_gen_files()` → `_apply_output_format()`
 - `_extract_gen_files()`: universal `#!/>` sigil extraction from model responses — saves complete files to `CODE_STORAGE_DIR/{encoded_cwd}/{call_id}/`, strips sigil blocks from response content, adds `gen_files` metadata
 
 **`tools/`** — MCP tool implementations. Two base classes:
-- `SimpleTool` (`tools/simple/base.py`) — single request/response (chat, clink, imagegen, perceive, context store tools)
+- `SimpleTool` (`tools/simple/base.py`) — single request/response (chat, clink, imagegen, perceive, PALTree tools)
 - `WorkflowTool` (`tools/workflow/base.py`) — multi-step workflows with expert analysis (analyze, codereview, debug, planner, etc.)
 
 Both inherit from `BaseTool` (`tools/shared/base_tool.py`). Required methods: `get_name()`, `get_description()`, `get_input_schema()`, `get_system_prompt()`, `execute()`.
@@ -87,7 +87,7 @@ Both inherit from `BaseTool` (`tools/shared/base_tool.py`). Required methods: `g
 - `build_conversation_history()`: Phase 1 collects turns in REVERSE chronological order (newest-first for token budgeting), Phase 2 reverses back to chronological for LLM presentation
 - `get_conversation_file_list()`: deduplicates files across turns, newest reference wins
 
-**`systemprompts/`** — Each tool has a corresponding `*_prompt.py` file (1:1 naming convention). Tools without prompts (clink, context store tools, listmodels, version, apilookup, challenge) return `""` from `get_system_prompt()`. `PALSHEBANG_PROMPT` (`systemprompts/palshebang_prompt.py`) is injected universally into every model-calling tool via `BaseTool.get_capability_system_prompts()` — it is not per-tool.
+**`systemprompts/`** — Each tool has a corresponding `*_prompt.py` file (1:1 naming convention). Tools without prompts (clink, PALTree tools, listmodels, version, apilookup, challenge) return `""` from `get_system_prompt()`. `PALSHEBANG_PROMPT` (`systemprompts/palshebang_prompt.py`) is injected universally into every model-calling tool via `BaseTool.get_capability_system_prompts()` — it is not per-tool.
 
 **`config.py`** — Central configuration: version, model defaults, token limits, storage paths, timeouts
 
@@ -103,11 +103,11 @@ Models are resolved early at the MCP boundary in `handle_call_tool()`:
 
 Tools declare their preferred model tier via `get_model_category()` → `ToolModelCategory`:
 - `EXTENDED_REASONING` — most tools (codereview, debug, analyze, thinkdeep, writenode, querynode, etc.)
-- `FAST_RESPONSE` — chat, listmodels, version, listnode, readnode, forknode, newtree, renamenode, exportnode, listfiles, readfile
+- `FAST_RESPONSE` — chat, listmodels, version, treelist, readnode, forknode, newtree, renametree, treedump, listnodefiles, readnodefile
 - `BALANCED` — perceive, clink
 - `IMAGE_GENERATION` — imagegen
 
-Tools that override `requires_model() → False` bypass model resolution entirely: clink, planner, consensus, docgen, tracer, challenge, apilookup, listmodels, version, and all context store tools except writenode and querynode.
+Tools that override `requires_model() → False` bypass model resolution entirely: clink, planner, consensus, docgen, tracer, challenge, apilookup, listmodels, version, and all PALTree tools except writenode and querynode.
 
 ### Tool System
 
@@ -125,7 +125,7 @@ Tools that override `requires_model() → False` bypass model resolution entirel
 - `should_call_expert_analysis()` decides whether to invoke the expert model
 - `is_continuation_workflow()` — when `continuation_id` is present, skips multi-step and runs as single request
 
-**Context Tools** (`tools/palstore.py`) have a split inheritance:
+**PALTree Tools** (`tools/palstore.py`) have a split inheritance:
 ```
 BaseTool (direct) ─── PalInitTool, PalForkTool, PalListTool, PalReadTool,
                       PalRenameTool, PalExportTool,
@@ -144,9 +144,9 @@ SimpleTool → PalStoreBaseTool ─── PalStoreTool, PalQueryTool
 - `output` = full tool response rendered via `render_markdown_output()`
 - `model_validator(mode="before")` transparently migrates legacy `prompt`/`response`/`content` fields
 - Each node stores only its own layer's data — the O(n²) content duplication bug is fixed
-- `format_layer_markdown` (used by `readnode`/`exportnode`) accepts `input_text`/`output_text` params
+- `format_layer_markdown` (used by `readnode`/`treedump`) accepts `input_text`/`output_text` params
 
-**Context Store Tree Rules** (`utils/palstore.py`):
+**PALTree Node Rules** (`utils/palstore.py`):
 
 `add_palnode()` enforces structural node rules via `VALID_CHILD_KEYS`. Each parent type allows only specific child key categories:
 
@@ -160,7 +160,7 @@ fork      │    ✓    │    ✓    │    ✓    │    ✗    │    ✓
 tool      │    ✗    │    ✗    │    ✓    │    ✓    │    ✗
 ```
 
-Key rule: **L-nodes cannot have L-children**. `PalStoreTool` uses `resolve_layer_insertion_point()` to find the correct sibling-level parent when called on an L-node path (e.g., `myproject.L7` → inserts `L8` at root, not `L7.L1`).
+Key rule: **L-nodes cannot have L-children**. `PalStoreTool` uses `resolve_layer_insertion_point()` to find the correct sibling-level parent when called on an L-node PALTree path (e.g., `myproject.L7` → inserts `L8` at root, not `L7.L1`).
 
 **`utils/palstore_builder.py`** — `build_store_context()` builds enhanced arguments directly from PalNode ancestry for a given store path. Replaces the former `hydrate_thread_context` approach. Uses token-budgeted history building via `_build_budgeted_history()`.
 
@@ -207,27 +207,27 @@ class MyTool(BaseTool):
 
 Register in `server.py` TOOLS dict. Tools that bypass model resolution override `requires_model() -> False`.
 
-## Context Store Tool Reference
+## PALTree Tool Reference
 
 MCP tool names use the verb-node convention. Source class names (e.g. `PalStoreTool`) are unchanged.
 
-| MCP tool name  | Source class     | Model required |
-|----------------|------------------|----------------|
-| `newtree`      | PalInitTool      | No             |
-| `writenode`    | PalStoreTool     | Yes            |
-| `querynode`    | PalQueryTool     | Yes            |
-| `listnode`     | PalListTool      | No             |
-| `readnode`     | PalReadTool      | No             |
-| `forknode`     | PalForkTool      | No             |
-| `renamenode`   | PalRenameTool    | No             |
-| `exportnode`   | PalExportTool    | No             |
-| `listfiles`    | PalFileListTool  | No             |
-| `readfile`     | PalFileReadTool  | No             |
-| `traversenode` | PalTraverseTool  | No             |
-| `movenode`     | PalMoveTool      | No             |
-| `copynode`     | PalCopyTool      | No             |
-| `foldnode`     | PalFoldTool      | No             |
-| `deletenode`   | PalDeleteTool    | No             |
+| MCP tool name   | Source class     | Model required |
+|-----------------|------------------|----------------|
+| `newtree`       | PalInitTool      | No             |
+| `writenode`     | PalStoreTool     | Yes            |
+| `querynode`     | PalQueryTool     | Yes            |
+| `treelist`      | PalListTool      | No             |
+| `readnode`      | PalReadTool      | No             |
+| `forknode`      | PalForkTool      | No             |
+| `renametree`    | PalRenameTool    | No             |
+| `treedump`      | PalExportTool    | No             |
+| `listnodefiles` | PalFileListTool  | No             |
+| `readnodefile`  | PalFileReadTool  | No             |
+| `traversetree`  | PalTraverseTool  | No             |
+| `movenode`      | PalMoveTool      | No             |
+| `clonetree`     | PalCopyTool      | No             |
+| `foldtree`      | PalFoldTool      | No             |
+| `deletenode`    | PalDeleteTool    | No             |
 
 ## Environment Variables
 

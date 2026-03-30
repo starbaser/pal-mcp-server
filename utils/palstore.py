@@ -1,9 +1,9 @@
 """
-Tree-structured storage layer for context stores.
+Tree-structured storage layer for PALTrees.
 
 Replaces context_registry.py with a file-per-store layout where each store is a
 self-contained JSON tree rooted at PalRoot. Per-directory folders isolate stores
-by project; a global index provides fast store_id lookup without scanning.
+by project; a global index provides fast tree_path lookup without scanning.
 
 Storage layout:
     {PAL_STORAGE_DIR}/context/
@@ -74,7 +74,7 @@ def _is_l_node_key(key: str) -> bool:
 
 
 class PalNode(BaseModel):
-    """A single node in the context store tree."""
+    """A single node in a PALTree."""
 
     entry_type: Literal["store", "query", "tool", "fork"]
     label: str | None = None
@@ -96,7 +96,7 @@ class PalNode(BaseModel):
                 content = data.get("content", "")
                 if content:
                     user_portion = content.split("\n\n---\n\n", 1)[0]
-                    for marker in ["=== CONTEXT LAYER SUBMISSION ===", "=== CONTEXT STORE QUERY ==="]:
+                    for marker in ["=== CONTEXT LAYER SUBMISSION ===", "=== PALTREE QUERY ==="]:
                         idx = user_portion.rfind(marker)
                         if idx >= 0:
                             data["input"] = user_portion[idx:]
@@ -113,7 +113,7 @@ class PalNode(BaseModel):
 
 
 class PalRoot(BaseModel):
-    """Root of a context store JSON file."""
+    """Root of a PALTree JSON file."""
 
     store_id: str
     directory: str
@@ -133,7 +133,7 @@ def encode_directory(abs_path: str) -> str:
 
 
 def get_store_dir(directory: str) -> str:
-    """Return the per-directory folder path inside the context store."""
+    """Return the per-directory folder path inside the PALTree storage root."""
     return os.path.join(_CTX_DIR, encode_directory(directory))
 
 
@@ -181,7 +181,7 @@ def save_store(store: PalRoot) -> None:
 
 
 def rename_store(directory: str, old_id: str, new_id: str) -> None:
-    """Rename a root store: update store_id, rename file on disk, update index and armed state."""
+    """Rename a root PALTree: update store_id, rename file on disk, update index and armed state."""
     store = load_store(directory, old_id)
     if store is None:
         raise KeyError(f"Store not found: {old_id}")
@@ -213,9 +213,9 @@ def rename_store(directory: str, old_id: str, new_id: str) -> None:
 
 
 def resolve_palnode(store: PalRoot, store_id: str) -> PalNode | None:
-    """Walk a dot-delimited path to a node.
+    """Walk a dot-delimited tree_path to a node.
 
-    The root store_id prefix is stripped before traversal. Returns None for
+    The root tree_path prefix is stripped before traversal. Returns None for
     a path that resolves to the root itself (no segments after root).
     """
     _, segments = parse_store_path(store_id)
@@ -343,9 +343,9 @@ def get_last_layer_path(store: PalRoot, parent_path: str | None = None) -> str |
 
 
 def resolve_root_alias(store: PalRoot, store_id: str) -> str:
-    """Resolve root store_id alias to the current top layer path.
+    """Resolve root tree_path alias to the current top layer path.
 
-    Root store_id is shorthand for the latest L-child. Returns store_id
+    Root tree_path is shorthand for the latest L-child. Returns store_id
     unchanged if it's not the root, or if the root has no layers yet.
     """
     if store_id != store.store_id:
@@ -694,10 +694,10 @@ def rebuild_index() -> dict:
 
 
 def resolve_store_location(store_id: str) -> tuple[str, str] | None:
-    """Look up a store_id in the index and return (directory, root_store_id).
+    """Look up a tree_path in the index and return (directory, root_store_id).
 
-    Parses the root segment from store_id, resolves via index, falls back to
-    scanning if not found. Returns None when the store does not exist.
+    Parses the root segment from tree_path, resolves via index, falls back to
+    scanning if not found. Returns None when the PALTree does not exist.
     """
     root, _ = parse_store_path(store_id)
     index = load_index()
@@ -735,7 +735,7 @@ def resolve_store_location(store_id: str) -> tuple[str, str] | None:
 
 
 def parse_store_path(store_id: str) -> tuple[str, list[str]]:
-    """Split a dotted store_id into (root, [segments]).
+    """Split a dotted tree_path into (root, [segments]).
 
     Looks up the root in the index first for an exact match. Fallback: first
     dot-split segment is taken as the root.
@@ -792,12 +792,12 @@ def disarm_store(directory: str) -> None:
 
 
 def get_armed_store(directory: str) -> str | None:
-    """Return the armed store_id for a directory, or None."""
+    """Return the armed tree_path for a directory, or None."""
     return load_armed().get(directory)
 
 
 def list_armed_stores() -> dict:
-    """Return the full directory-to-store_id mapping."""
+    """Return the full directory-to-tree_path mapping."""
     return load_armed()
 
 

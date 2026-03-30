@@ -81,7 +81,7 @@ class TestPalStoreTool:
         required = schema["required"]
 
         assert "prompt" in required
-        assert "store_id" in required
+        assert "tree_path" in required
         assert "directory" not in props
         assert "context_label" in props
 
@@ -95,7 +95,7 @@ class TestPalStoreTool:
 
     async def test_store_id_not_found(self):
         with patch("utils.palstore.resolve_store_location", return_value=None):
-            result = await self.tool.execute({"store_id": "nonexistent", "prompt": "test"})
+            result = await self.tool.execute({"tree_path": "nonexistent", "prompt": "test"})
 
         assert len(result) == 1
         payload = json.loads(result[0].text)
@@ -106,7 +106,7 @@ class TestPalStoreTool:
         assert self.tool.get_default_thinking_mode() == "max"
 
     async def test_prepare_prompt_includes_header(self):
-        request = PalStoreRequest(prompt="ignored", store_id="myproject")
+        request = PalStoreRequest(prompt="ignored", tree_path="myproject")
 
         with patch.object(self.tool, "handle_prompt_file_with_fallback", return_value="test content"):
             with patch.object(self.tool, "get_request_files", return_value=[]):
@@ -130,7 +130,7 @@ class TestPalQueryTool:
         required = schema["required"]
 
         assert "prompt" in required
-        assert "store_id" in required
+        assert "tree_path" in required
         assert "directory" not in props
         assert "absolute_file_paths" in props
         assert "media" in props
@@ -145,7 +145,7 @@ class TestPalQueryTool:
 
     async def test_query_store_id_not_found(self):
         with patch("utils.palstore.resolve_store_location", return_value=None):
-            result = await self.tool.execute({"store_id": "missing", "prompt": "test"})
+            result = await self.tool.execute({"tree_path": "missing", "prompt": "test"})
 
         assert len(result) == 1
         payload = json.loads(result[0].text)
@@ -157,7 +157,7 @@ class TestPalListTool:
         self.tool = PalListTool()
 
     def test_tool_metadata(self):
-        assert self.tool.get_name() == "listnode"
+        assert self.tool.get_name() == "treelist"
 
     def test_requires_model_false(self):
         assert self.tool.requires_model() is False
@@ -178,7 +178,7 @@ class TestPalListTool:
         assert len(result) == 1
         payload = json.loads(result[0].text)
         assert payload["status"] == "success"
-        assert "No context stores found" in payload["content"]
+        assert "No PALTrees found" in payload["content"]
 
     async def test_execute_with_stores(self):
         from utils.palstore import PalRoot
@@ -662,7 +662,7 @@ class TestInjectStorePathContinuation:
 
 
 class TestStrictHistoryEnforcement:
-    """Context stores must never silently truncate conversation history."""
+    """PALTrees must never silently truncate conversation history."""
 
     def test_strict_mode_raises_on_truncation(self):
         """When strict=True, build_conversation_history raises ValueError if turns would be dropped."""
@@ -704,7 +704,7 @@ class TestStrictHistoryEnforcement:
         )
         model_context.estimate_tokens = lambda text: len(text) // 4
 
-        with pytest.raises(ValueError, match="Context store history"):
+        with pytest.raises(ValueError, match="PALTree history"):
             build_conversation_history(context, model_context, strict=True)
 
     def test_non_strict_mode_truncates_silently(self):

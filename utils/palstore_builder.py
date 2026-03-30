@@ -1,5 +1,5 @@
 """
-Context reconstruction utilities for tree-based context stores.
+Context reconstruction utilities for tree-based PALTrees.
 
 Builds conversation history from store node ancestry chains for model consumption.
 The primary entry point is build_store_context(), which constructs enhanced tool

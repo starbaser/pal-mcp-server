@@ -14,7 +14,7 @@ from .docgen import DocgenTool
 from .imagegen import ImageGenTool
 from .listmodels import ListModelsTool
 from .narrate import NarrateTool
-from .palstore import PalArmTool, PalForkTool, PalInitTool, PalListTool, PalQueryTool, PalReadTool, PalStoreTool
+from .palstore import PalForkTool, PalInitTool, PalListTool, PalQueryTool, PalReadTool, PalStoreTool
 from .perceive import PerceiveTool
 from .planner import PlannerTool
 from .precommit import PrecommitTool
@@ -52,6 +52,5 @@ __all__ = [
     "PalListTool",
     "PalForkTool",
     "PalReadTool",
-    "PalArmTool",
     "NarrateTool",
 ]

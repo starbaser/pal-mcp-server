@@ -933,10 +933,10 @@ def build_conversation_history(
                 remaining_turns = turn_num + 1  # turns left to process (0-indexed, iterating backwards)
                 model_name = model_context.model_name if model_context else "unknown"
                 raise ValueError(
-                    f"Context store history ({total_needed:,} tokens across {len(all_turns)} turns) "
+                    f"PALTree history ({total_needed:,} tokens across {len(all_turns)} turns) "
                     f"exceeds model '{model_name}' history budget ({max_history_tokens:,} tokens). "
                     f"Would drop {remaining_turns} oldest turn(s). "
-                    f"Context stores require the complete conversation — use a model with a larger "
+                    f"PALTrees require the complete conversation — use a model with a larger "
                     f"context window or reduce store layers with a fresh store."
                 )
             # Stop adding turns - we've reached the limit

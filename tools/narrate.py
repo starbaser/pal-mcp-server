@@ -1,15 +1,15 @@
 """
-NarrateWorkflow tool - Collaborative document composition grounded in source files and context store content
+NarrateWorkflow tool - Collaborative document composition grounded in source files and PALTree content
 
 This tool provides a structured workflow for composing polished, human-readable documents from
-source code, context store pages, and structured investigation notes. Two models collaborate:
+source code, PALTree pages, and structured investigation notes. Two models collaborate:
 the investigating model reads source files, designs document structure, and builds up prose
 and observations across workflow steps. The expert model receives the full source files alongside
 the investigation notes and synthesizes everything into a polished final document.
 
 Key features:
 - Two-model collaborative authoring workflow
-- Context store integration (resolve store_id to thread turns, select specific pages)
+- PALTree integration (resolve tree_path to thread turns, select specific pages)
 - Context-aware file embedding (references during investigation, full content for expert)
 - Progressive document structure development across steps
 - Expert synthesis with external models
@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 NARRATE_WORKFLOW_FIELD_DESCRIPTIONS = {
     "step": (
         "The document composition plan. Step 1: State your strategy — which files and directories to read, "
-        "which context store pages to consult, and your proposed document outline (sections, narrative arc). "
+        "which PALTree pages to consult, and your proposed document outline (sections, narrative arc). "
         "Later steps: Report what you read, refine the outline, and contribute draft prose in the findings field. "
         "You and the expert model are collaborating — your investigation and prose inform the final document."
     ),
@@ -76,14 +76,14 @@ NARRATE_WORKFLOW_FIELD_DESCRIPTIONS = {
         "'rationale' for design-decision explanations, 'reference' for API/interface documentation, "
         "'general' for topic-driven free-form documents."
     ),
-    "store_id": (
-        "Context store identifier to use as additional source material. When provided, the expert writer will "
-        "receive selected pages from this store as authoritative background knowledge (prior analysis, "
+    "tree_path": (
+        "PALTree path to use as additional source material. When provided, the expert writer will "
+        "receive selected pages from this PALTree as authoritative background knowledge (prior analysis, "
         "architectural decisions, session context)."
     ),
     "store_pages": (
-        "1-indexed page numbers from the context store to include. Each page is a user+assistant turn pair. "
-        "Omit to include no store content even when store_id is set. The CLI may update this list across steps "
+        "1-indexed page numbers from the PALTree to include. Each page is a user+assistant turn pair. "
+        "Omit to include no store content even when tree_path is set. The CLI may update this list across steps "
         "as investigation clarifies which pages are relevant."
     ),
 }
@@ -114,7 +114,7 @@ class NarrateWorkflowRequest(WorkflowRequest):
     document_type: Optional[Literal["overview", "deep_dive", "rationale", "reference", "general"]] = Field(
         "general", description=NARRATE_WORKFLOW_FIELD_DESCRIPTIONS["document_type"]
     )
-    store_id: Optional[str] = Field(None, description=NARRATE_WORKFLOW_FIELD_DESCRIPTIONS["store_id"])
+    tree_path: Optional[str] = Field(None, description=NARRATE_WORKFLOW_FIELD_DESCRIPTIONS["tree_path"])
     store_pages: Optional[list[int]] = Field(None, description=NARRATE_WORKFLOW_FIELD_DESCRIPTIONS["store_pages"])
 
     @model_validator(mode="after")
@@ -128,13 +128,13 @@ class NarrateWorkflowRequest(WorkflowRequest):
 
 class NarrateTool(WorkflowTool):
     """
-    Narrate workflow tool for composing polished documents grounded in source files and context stores.
+    Narrate workflow tool for composing polished documents grounded in source files and PALTrees.
 
     Two models collaborate: the investigating model reads source files, designs document
     structure, and contributes prose across workflow steps. The expert model receives the full
     source files and investigation notes, then synthesizes everything into a polished final
     document. Supports multiple document types (overview, deep_dive, rationale, reference,
-    general) and context store pages as additional authoritative background material.
+    general) and PALTree pages as additional authoritative background material.
     """
 
     def __init__(self):
@@ -147,7 +147,7 @@ class NarrateTool(WorkflowTool):
 
     def get_description(self) -> str:
         return (
-            "Composes polished, human-readable documents grounded in source files and context store content. "
+            "Composes polished, human-readable documents grounded in source files and PALTree content. "
             "Use for overviews, deep dives, design rationale, and reference documentation. "
             "Two models collaborate: you investigate and contribute prose, the expert synthesizes the final document."
         )
@@ -215,9 +215,9 @@ class NarrateTool(WorkflowTool):
                 "default": "general",
                 "description": NARRATE_WORKFLOW_FIELD_DESCRIPTIONS["document_type"],
             },
-            "store_id": {
+            "tree_path": {
                 "type": "string",
-                "description": NARRATE_WORKFLOW_FIELD_DESCRIPTIONS["store_id"],
+                "description": NARRATE_WORKFLOW_FIELD_DESCRIPTIONS["tree_path"],
             },
             "store_pages": {
                 "type": "array",
@@ -239,9 +239,9 @@ class NarrateTool(WorkflowTool):
     ) -> list[str]:
         """Define required actions for each composition phase."""
         if step_number == 1:
-            store_id = getattr(request, "store_id", None) if request else None
+            store_id = getattr(request, "tree_path", None) if request else None
             store_note = (
-                f" If store_id '{store_id}' is provided, explore it via palread to identify relevant pages."
+                f" If tree_path '{store_id}' is provided, explore it via palread to identify relevant pages."
                 if store_id
                 else ""
             )
@@ -288,8 +288,8 @@ class NarrateTool(WorkflowTool):
         document_type = self.narrate_config.get("document_type", "general")
         context_parts.append(f"\n=== DOCUMENT PARAMETERS ===\nDocument type: {document_type}\n=== END PARAMETERS ===")
 
-        # Add context store pages if available
-        store_id = self.narrate_config.get("store_id")
+        # Add PALTree pages if available
+        store_id = self.narrate_config.get("tree_path")
         store_pages = self.narrate_config.get("store_pages")
         if store_id and store_pages:
             store_section = self._build_store_section(store_id, store_pages)
@@ -308,7 +308,7 @@ class NarrateTool(WorkflowTool):
         return "\n".join(context_parts)
 
     def _build_store_section(self, store_id: str, store_pages: list[int]) -> str:
-        """Read the requested pages from a context store and format them for the expert writer.
+        """Read the requested pages from a PALTree and format them for the expert writer.
 
         store_pages is a legacy parameter — in the new tree-based system, nodes are addressed
         by store_id path. This method reads the store's L-children by index as a compatibility bridge.
@@ -350,7 +350,7 @@ class NarrateTool(WorkflowTool):
                 return ""
 
             pages_text = "\n\n".join(page_parts)
-            return f"\n=== CONTEXT STORE: {store_id} ===\n{pages_text}\n=== END CONTEXT STORE ==="
+            return f"\n=== PALTREE: {store_id} ===\n{pages_text}\n=== END PALTREE ==="
 
         except Exception as e:
             logger.warning(f"[NARRATE] Failed to build store section for '{store_id}': {type(e).__name__}: {e}")
@@ -461,8 +461,8 @@ class NarrateTool(WorkflowTool):
     def get_completion_next_steps_message(self, expert_analysis_used: bool = False) -> str:
         """Narrate-specific completion next steps message."""
         store_note = ""
-        if self.narrate_config.get("store_id") and self.narrate_config.get("store_pages"):
-            store_note = " and context store content"
+        if self.narrate_config.get("tree_path") and self.narrate_config.get("store_pages"):
+            store_note = " and PALTree content"
 
         base_message = (
             f"NARRATION IS COMPLETE. The final document above was produced collaboratively, grounded "
@@ -496,9 +496,9 @@ class NarrateTool(WorkflowTool):
 
         if step_number == 1:
             store_clause = ""
-            if getattr(request, "store_id", None):
+            if getattr(request, "tree_path", None):
                 store_clause = (
-                    " If a store_id was provided, use palread to explore the store and identify which pages "
+                    " If a tree_path was provided, use palread to explore the PALTree and identify which pages "
                     "contain relevant background context."
                 )
             next_steps = (
@@ -537,7 +537,7 @@ class NarrateTool(WorkflowTool):
             self.initial_request = request.step
             self.narrate_config = {
                 "document_type": request.document_type,
-                "store_id": request.store_id,
+                "tree_path": request.tree_path,
                 "store_pages": request.store_pages,
             }
 

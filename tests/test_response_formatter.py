@@ -6,12 +6,12 @@ def test_render_basic_tool_output():
         "status": "success",
         "content": "## Heading\n\nSome analysis\n\nMore text",
         "content_type": "text",
-        "metadata": {"store_id": "my-store", "total_pages": 5},
+        "metadata": {"tree_path": "my-store", "total_pages": 5},
     }
     md = render_markdown_output(data)
 
     assert "status: success" in md
-    assert "store_id: my-store" in md
+    assert "tree_path: my-store" in md
     assert "total_pages: 5" in md
     assert "## Heading" in md
     assert "Some analysis" in md

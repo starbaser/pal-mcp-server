@@ -79,6 +79,7 @@ from tools.palstore import (
     PalExportTool,
     PalFileListTool,
     PalFileReadTool,
+    PalFileWriteTool,
     PalFoldTool,
     PalForkTool,
     PalInitTool,
@@ -305,17 +306,18 @@ TOOLS = {
     "newtree": PalInitTool(),
     "writenode": PalStoreTool(),
     "querynode": PalQueryTool(),
-    "listnode": PalListTool(),
+    "treelist": PalListTool(),
     "forknode": PalForkTool(),
     "readnode": PalReadTool(),
-    "traversenode": PalTraverseTool(),
-    "renamenode": PalRenameTool(),
-    "exportnode": PalExportTool(),
-    "listfiles": PalFileListTool(),
-    "readfile": PalFileReadTool(),
+    "traversetree": PalTraverseTool(),
+    "renametree": PalRenameTool(),
+    "treedump": PalExportTool(),
+    "listnodefiles": PalFileListTool(),
+    "readnodefile": PalFileReadTool(),
+    "writenodefile": PalFileWriteTool(),
     "movenode": PalMoveTool(),
-    "copynode": PalCopyTool(),
-    "foldnode": PalFoldTool(),
+    "clonetree": PalCopyTool(),
+    "foldtree": PalFoldTool(),
     "deletenode": PalDeleteTool(),
 }
 TOOLS = filter_disabled_tools(TOOLS)
@@ -419,33 +421,38 @@ PROMPT_TEMPLATES = {
     },
     "newtree": {
         "name": "newtree",
-        "description": "Create a named context store",
-        "template": "Initialize context store",
+        "description": "Create a named PALTree",
+        "template": "Initialize PALTree",
     },
     "writenode": {
         "name": "writenode",
-        "description": "Store context layers in a persistent store",
+        "description": "Store context nodes in a PALTree",
         "template": "Store context with {model}",
     },
     "querynode": {
         "name": "querynode",
-        "description": "Query a context store without changing its state",
-        "template": "Query context store with {model}",
+        "description": "Query a PALTree",
+        "template": "Query PALTree with {model}",
     },
-    "listnode": {
-        "name": "listnode",
-        "description": "List context stores for a directory",
-        "template": "List context stores",
+    "treelist": {
+        "name": "treelist",
+        "description": "List PALTrees for a directory",
+        "template": "List PALTrees",
     },
-    "listfiles": {
-        "name": "listfiles",
-        "description": "List files attached across a context store tree",
-        "template": "List files in context store",
+    "listnodefiles": {
+        "name": "listnodefiles",
+        "description": "List files attached across a PALTree",
+        "template": "List files in PALTree",
     },
-    "readfile": {
-        "name": "readfile",
-        "description": "Read stored file content from a context store node",
-        "template": "Read file from context store",
+    "readnodefile": {
+        "name": "readnodefile",
+        "description": "Read stored file content from a PALNode",
+        "template": "Read file from PALNode",
+    },
+    "writenodefile": {
+        "name": "writenodefile",
+        "description": "Write a file to a PALNode's file list",
+        "template": "Write file to PALNode",
     },
 }
 
@@ -796,7 +803,7 @@ async def handle_list_tools() -> list[Tool]:
 
 
 def _build_store_listing() -> str:
-    """Build a compact context store snapshot for MCP handshake instructions."""
+    """Build a compact PALTree snapshot for MCP handshake instructions."""
     import os
 
     from utils.palstore import get_armed_store, list_stores
@@ -809,14 +816,14 @@ def _build_store_listing() -> str:
 
     armed_store = get_armed_store(cwd)
 
-    lines = [f"\n\npalStores: Context stores for {cwd}:"]
+    lines = [f"\n\npalStores: PALTrees for {cwd}:"]
     for store in stores:
         sid = store.store_id
         armed_marker = " [armed]" if (armed_store and sid == armed_store) else ""
         layer_count = sum(1 for n in store.children.values() if n.entry_type == "store")
         query_count = sum(1 for n in store.children.values() if n.entry_type == "query")
 
-        line = f"- {sid} [store]{armed_marker}"
+        line = f"- {sid} [tree]{armed_marker}"
         if layer_count > 0:
             line += f" ({layer_count} layer{'s' if layer_count != 1 else ''})"
         if query_count > 0:
@@ -973,7 +980,7 @@ def _inject_store_path_continuation(result: list, store_path: str, arguments: di
                 else:
                     # Completed or single-step: inform agent of the store path for chaining
                     data["store_chain_note"] = (
-                        f"This {tool_hint} result is persisted to context store path "
+                        f"This {tool_hint} result is persisted to PALTree path "
                         f'"{store_path}". To chain another tool from this result, '
                         f"pass this path as the continuation_id."
                     )
@@ -1758,7 +1765,7 @@ async def reconstruct_thread_context(arguments: dict[str, Any]) -> dict[str, Any
     logger.debug(f"[CONVERSATION_DEBUG] Building conversation history for thread {continuation_id}")
     logger.debug(f"[CONVERSATION_DEBUG] Thread has {len(context.turns)} turns, tool: {context.tool_name}")
     logger.debug(f"[CONVERSATION_DEBUG] Using model: {model_context.model_name}")
-    # Context store forks require strict mode — no silent history truncation
+    # PALTree forks require strict mode — no silent history truncation
     _strict_history = "store_fork" in arguments
     conversation_history, conversation_tokens = build_conversation_history(
         context, model_context, strict=_strict_history

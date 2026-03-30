@@ -24,46 +24,46 @@ Output formats: `--format table` (default), `--format json`, `--format pretty`
 
 Debug server issues: add `--server-logs` to see server stderr.
 
-## Context Store Tools
+## PALTree Tools
 
 ### Discovery
 
 ```sh
-# List all stores
-mcp call pallist pal
+# List all PALTrees
+mcp call treelist pal
 
-# List stores for a specific project
-mcp call pallist pal -p '{"directory": "/abs/path/to/project"}'
+# List PALTrees for a specific project
+mcp call treelist pal -p '{"directory": "/abs/path/to/project"}'
 
-# Drill into a specific store
-mcp call pallist pal -p '{"store_id": "myproject"}'
+# Drill into a specific PALTree
+mcp call treelist pal -p '{"tree_path": "myproject"}'
 ```
 
 ### Read
 
 ```sh
 # Read a node (metadata, prompt, response)
-mcp call palread pal -p '{"store_id": "myproject.L1"}'
+mcp call readnode pal -p '{"tree_path": "myproject.L1"}'
 
-# List files attached to a store tree
-mcp call palfilelist pal -p '{"store_id": "myproject"}'
+# List files attached to a PALTree
+mcp call listnodefiles pal -p '{"tree_path": "myproject"}'
 
 # Read a specific stored file
-mcp call palfileread pal -p '{"store_id": "myproject.L1", "file_path": "/abs/path/to/file.py"}'
+mcp call readnodefile pal -p '{"tree_path": "myproject.L1", "file_path": "/abs/path/to/file.py"}'
 
-# Export store to markdown
-mcp call palexport pal -p '{"store_id": "myproject", "output_path": "/abs/path/export.md"}'
+# Export PALTree to markdown
+mcp call treedump pal -p '{"tree_path": "myproject", "output_path": "/abs/path/export.md"}'
 ```
 
 ### Create & Write
 
 ```sh
-# Initialize a new store
-mcp call palinit pal -p '{"store_name": "myproject", "directory": "/abs/path/to/project"}'
+# Initialize a new PALTree
+mcp call newtree pal -p '{"store_name": "myproject", "directory": "/abs/path/to/project"}'
 
 # Add a layer (AI-synthesized — sends prompt + files to external model)
-mcp call palstore pal -p '{
-  "store_id": "myproject",
+mcp call writenode pal -p '{
+  "tree_path": "myproject",
   "model": "gemini-2.5-pro",
   "prompt": "Project architecture overview",
   "context_label": "architecture",
@@ -71,8 +71,8 @@ mcp call palstore pal -p '{
 }'
 
 # Add a layer to an existing node
-mcp call palstore pal -p '{
-  "store_id": "myproject.L1",
+mcp call writenode pal -p '{
+  "tree_path": "myproject.L1",
   "model": "gemini-2.5-pro",
   "prompt": "Deep dive into the auth subsystem",
   "context_label": "auth deep-dive",
@@ -83,16 +83,16 @@ mcp call palstore pal -p '{
 ### Query
 
 ```sh
-# Query a store (AI answers from stored context)
-mcp call palquery pal -p '{
-  "store_id": "myproject",
+# Query a PALTree (AI answers from stored context)
+mcp call querynode pal -p '{
+  "tree_path": "myproject",
   "model": "gemini-2.5-pro",
   "prompt": "What are the main architectural decisions?"
 }'
 
 # Follow-up query on a previous query result
-mcp call palquery pal -p '{
-  "store_id": "myproject.L3.Q0",
+mcp call querynode pal -p '{
+  "tree_path": "myproject.L3.Q0",
   "model": "gemini-2.5-pro",
   "prompt": "Which files implement that decision?"
 }'
@@ -101,17 +101,11 @@ mcp call palquery pal -p '{
 ### Lifecycle
 
 ```sh
-# Fork a store (branch for experimentation)
-mcp call palfork pal -p '{"store_id": "myproject.L2", "label": "experiment"}'
+# Fork a PALTree node (branch for experimentation)
+mcp call forknode pal -p '{"tree_path": "myproject.L2", "label": "experiment"}'
 
-# Arm for auto-revival on next Claude session
-mcp call palarm pal -p '{"store_id": "myproject", "directory": "/abs/path/to/project"}'
-
-# Disarm
-mcp call palarm pal -p '{"store_id": "myproject", "directory": "/abs/path/to/project", "disarm": true}'
-
-# Rename a store
-mcp call palrename pal -p '{"store_id": "myproject", "new_name": "proj-v2", "directory": "/abs/path"}'
+# Rename a PALTree
+mcp call renametree pal -p '{"tree_path": "myproject", "new_name": "proj-v2", "directory": "/abs/path"}'
 ```
 
 ## Other PAL Tools
@@ -153,9 +147,9 @@ mcp shell pal
 Then type tool names with JSON params directly:
 
 ```
-mcp > pallist {"directory": "/home/eigenmage/dev/opt/pal-mcp-server"}
-mcp > palread {"store_id": "pal-mcp-server.L1"}
-mcp > palstore {"store_id": "pal-mcp-server", "model": "gemini-2.5-pro", "prompt": "...", "context_label": "..."}
+mcp > treelist {"directory": "/home/eigenmage/dev/opt/pal-mcp-server"}
+mcp > readnode {"tree_path": "pal-mcp-server.L1"}
+mcp > writenode {"tree_path": "pal-mcp-server", "model": "gemini-2.5-pro", "prompt": "...", "context_label": "..."}
 ```
 
 ## Troubleshooting

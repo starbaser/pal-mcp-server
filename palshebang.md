@@ -44,7 +44,7 @@ Post-processing step in `server.py` (after tool execution, before MCP response).
       └── helpers.py
 ```
 
-- **encoded-cwd**: same encoding as context store directories (e.g. `-home-eigenmage-dev-projects-foo`)
+- **encoded-cwd**: same encoding as PALTree directories (e.g. `-home-eigenmage-dev-projects-foo`)
 - **call-id**: `continuation_id` (store path or UUID) if available, else timestamp
 
 If filename contains path separators (`#!/gen utils/helpers.py`), subdirectories are created. The filename is taken verbatim from the shebang.

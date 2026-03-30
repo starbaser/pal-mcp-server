@@ -877,9 +877,9 @@ class PalListTool(BaseTool):
 
     def get_description(self) -> str:
         return (
-            "List the current directory's PALTrees and their full node trees, returning tree_paths needed for writenode, querynode,\n"
-            "readnode, forknode, and other tools. Filter by directory to scope to a project,\n"
-            "or pass tree_path to drill into a specific subtree."
+            "List PALTrees and their full node trees, returning tree_paths needed for writenode, querynode,\n"
+            "readnode, forknode, and other tools. Omit directory to list all trees across all projects.\n"
+            "Pass directory to scope to a project, or tree_path to drill into a specific subtree."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -889,8 +889,8 @@ class PalListTool(BaseTool):
                 "directory": {
                     "type": "string",
                     "description": (
-                        "Absolute path to filter stores by project directory. "
-                        "Omit to list all stores across all projects."
+                        "Absolute path to filter trees by project directory. "
+                        "Omit to list all trees across all projects."
                     ),
                 },
                 "tree_path": {

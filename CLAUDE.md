@@ -103,7 +103,7 @@ Models are resolved early at the MCP boundary in `handle_call_tool()`:
 
 Tools declare their preferred model tier via `get_model_category()` → `ToolModelCategory`:
 - `EXTENDED_REASONING` — most tools (codereview, debug, analyze, thinkdeep, writenode, querynode, etc.)
-- `FAST_RESPONSE` — chat, listmodels, version, treelist, readnode, forknode, newtree, renametree, treedump, listnodefiles, readnodefile
+- `FAST_RESPONSE` — chat, listmodels, version, treelist, readnode, forknode, newtree, renametree, treedump, listnodefiles, readnodefile, writenodefile
 - `BALANCED` — perceive, clink
 - `IMAGE_GENERATION` — imagegen
 
@@ -129,7 +129,7 @@ Tools that override `requires_model() → False` bypass model resolution entirel
 ```
 BaseTool (direct) ─── PalInitTool, PalForkTool, PalListTool, PalReadTool,
                       PalRenameTool, PalExportTool,
-                      PalFileListTool, PalFileReadTool,
+                      PalFileListTool, PalFileReadTool, PalFileWriteTool,
                       PalMoveTool, PalCopyTool, PalFoldTool, PalDeleteTool,
                       PalTraverseTool
                       (requires_model=False, pure filesystem)
@@ -209,25 +209,30 @@ Register in `server.py` TOOLS dict. Tools that bypass model resolution override 
 
 ## PALTree Tool Reference
 
-MCP tool names use the verb-node convention. Source class names (e.g. `PalStoreTool`) are unchanged.
+MCP tool names follow a scope convention: **node tools** (`*node`) operate on a single PALNode, **tree tools** (`tree*`/`*tree`) operate on a subtree or the whole tree. Source class names (e.g. `PalStoreTool`) are unchanged.
 
-| MCP tool name   | Source class     | Model required |
-|-----------------|------------------|----------------|
-| `newtree`       | PalInitTool      | No             |
-| `writenode`     | PalStoreTool     | Yes            |
-| `querynode`     | PalQueryTool     | Yes            |
-| `treelist`      | PalListTool      | No             |
-| `readnode`      | PalReadTool      | No             |
-| `forknode`      | PalForkTool      | No             |
-| `renametree`    | PalRenameTool    | No             |
-| `treedump`      | PalExportTool    | No             |
-| `listnodefiles` | PalFileListTool  | No             |
-| `readnodefile`  | PalFileReadTool  | No             |
-| `traversetree`  | PalTraverseTool  | No             |
-| `movenode`      | PalMoveTool      | No             |
-| `clonetree`     | PalCopyTool      | No             |
-| `foldtree`      | PalFoldTool      | No             |
-| `deletenode`    | PalDeleteTool    | No             |
+The MCP parameter `tree_path` identifies nodes using dot-path notation. Internally, `PalRoot.store_id` is the canonical field name (unchanged for JSON compatibility) — the `tree_path` rename is MCP-boundary only.
+
+**PALTree path** formal definition: `𝒫 = { r · s₁ · s₂ · ⋯ · sₖ  |  r ∈ 𝒩,  sᵢ = (tᵢ, nᵢ),  ρ → t₁,  ∀i: tᵢ → tᵢ₊₁ }`
+
+| MCP tool name    | Source class      | Model required | Scope |
+|------------------|-------------------|----------------|-------|
+| `newtree`        | PalInitTool       | No             | tree  |
+| `writenode`      | PalStoreTool      | Yes            | node  |
+| `querynode`      | PalQueryTool      | Yes            | node  |
+| `treelist`       | PalListTool       | No             | tree  |
+| `readnode`       | PalReadTool       | No             | node  |
+| `forknode`       | PalForkTool       | No             | node  |
+| `renametree`     | PalRenameTool     | No             | tree  |
+| `treedump`       | PalExportTool     | No             | tree  |
+| `listnodefiles`  | PalFileListTool   | No             | node  |
+| `readnodefile`   | PalFileReadTool   | No             | node  |
+| `writenodefile`  | PalFileWriteTool  | No             | node  |
+| `traversetree`   | PalTraverseTool   | No             | tree  |
+| `movenode`       | PalMoveTool       | No             | node  |
+| `clonetree`      | PalCopyTool       | No             | tree  |
+| `foldtree`       | PalFoldTool       | No             | tree  |
+| `deletenode`     | PalDeleteTool     | No             | node  |
 
 ## Environment Variables
 

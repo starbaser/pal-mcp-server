@@ -2,7 +2,7 @@
 name = "pal-mcp-server"
 version = "9.8.2"
 description = "AI-powered MCP server with multiple model providers"
-requires-python = ">=3.10"
+requires-python = ">=3.13"
 dependencies = [
     "mcp>=1.0.0",
     "google-genai>=1.19.0",
@@ -15,6 +15,7 @@ dependencies = [
     "tiktoken>=0.7.0",
     "pyyaml>=6.0",
     "ipython>=8.38.0",
+    "oboros",
 ]
 
 [tool.setuptools.packages.find]
@@ -131,6 +132,9 @@ patch_tags = ["fix", "perf"]
 
 [tool.semantic_release.remote.token]
 env = "GH_TOKEN"
+
+[tool.uv.sources]
+oboros = { git = "https://github.com/starbaser/oboros.git" }
 
 [build-system]
 requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]

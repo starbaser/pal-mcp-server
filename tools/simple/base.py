@@ -827,7 +827,10 @@ class SimpleTool(BaseTool):
                 metadata=metadata,
             )
         except Exception:
-            # Fallback to simple success if continuation offer fails
+            import logging
+            import traceback
+
+            logging.getLogger(__name__).error(f"_create_continuation_offer_response failed:\n{traceback.format_exc()}")
             return ToolOutput(status="success", content=content, content_type="text")
 
     def _record_assistant_turn(

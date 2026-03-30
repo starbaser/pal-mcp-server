@@ -494,7 +494,8 @@ class PalStoreTool(PalStoreBaseTool):
 
         raw = getattr(self, "_last_raw_response", response_text)
         model_name = model_info.get("model_name") if model_info else None
-        provider = model_info.get("provider") if model_info else None
+        provider_obj = model_info.get("provider") if model_info else None
+        provider = str(provider_obj) if provider_obj and not isinstance(provider_obj, str) else provider_obj
 
         input_dict = {
             "tool_name": self.get_name(),
@@ -724,7 +725,8 @@ class PalQueryTool(PalStoreBaseTool):
 
         raw = getattr(self, "_last_raw_response", response_text)
         model_name = model_info.get("model_name") if model_info else None
-        provider = model_info.get("provider") if model_info else None
+        provider_obj = model_info.get("provider") if model_info else None
+        provider = str(provider_obj) if provider_obj and not isinstance(provider_obj, str) else provider_obj
         prompt = self.get_request_prompt(request)
 
         input_dict = {

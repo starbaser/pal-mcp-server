@@ -59,7 +59,7 @@ CLI Client (Claude/Gemini/Codex)
 ### Key Components
 
 **`server.py`** — Entry point and MCP protocol handler
-- `TOOLS` dict maps tool names to instances (32 tools registered)
+- `TOOLS` dict maps tool names to instances (33 tools registered)
 - `ESSENTIAL_TOOLS = {"version", "listmodels"}` — cannot be disabled
 - `handle_call_tool()` routes requests, resolves models, reconstructs conversation context
 - `configure_providers()` registers providers based on API keys
@@ -131,7 +131,7 @@ BaseTool (direct) ─── PalInitTool, PalForkTool, PalListTool, PalReadTool,
                       PalRenameTool, PalExportTool,
                       PalFileListTool, PalFileReadTool, PalFileWriteTool,
                       PalMoveTool, PalCopyTool, PalFoldTool, PalDeleteTool,
-                      PalTraverseTool
+                      PalDeleteTreeTool, PalTraverseTool
                       (requires_model=False, pure filesystem)
 
 BaseTool (direct) ─── GerminateTool
@@ -241,6 +241,7 @@ The MCP parameter `tree_path` identifies nodes using dot-path notation. The `Pal
 | `clonetree`      | PalCopyTool       | No             | tree  |
 | `foldtree`       | PalFoldTool       | No             | tree  |
 | `deletenode`     | PalDeleteTool     | No             | node  |
+| `deletetree`     | PalDeleteTreeTool | No             | tree  |
 | `germinate`      | GerminateTool     | No (internal)  | tree  |
 
 **`tools/germinate.py`** — Automated PALTree builder. Scans a project directory, identifies architectural layers (inner core → outer bark), then analyzes each layer with accumulated CoT context. Key design:

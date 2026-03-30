@@ -77,6 +77,7 @@ from tools.models import ToolOutput  # noqa: E402
 from tools.palstore import (
     PalCopyTool,
     PalDeleteTool,
+    PalDeleteTreeTool,
     PalExportTool,
     PalFileListTool,
     PalFileReadTool,
@@ -320,6 +321,7 @@ TOOLS = {
     "clonetree": PalCopyTool(),
     "foldtree": PalFoldTool(),
     "deletenode": PalDeleteTool(),
+    "deletetree": PalDeleteTreeTool(),
     "germinate": GerminateTool(),
 }
 TOOLS = filter_disabled_tools(TOOLS)
@@ -455,6 +457,11 @@ PROMPT_TEMPLATES = {
         "name": "writenodefile",
         "description": "Write a file to a PALNode's file list",
         "template": "Write file to PALNode",
+    },
+    "deletetree": {
+        "name": "deletetree",
+        "description": "Delete an entire PALTree",
+        "template": "Delete PALTree",
     },
     "germinate": {
         "name": "germinate",

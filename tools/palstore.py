@@ -2400,3 +2400,85 @@ class PalDeleteTool(BaseTool):
             },
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]
+
+
+class PalDeleteTreeTool(BaseTool):
+    def get_name(self) -> str:
+        return "deletetree"
+
+    def get_description(self) -> str:
+        return "Delete an entire PALTree and its JSON file. Use treelist to find tree names."
+
+    def get_input_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "tree_path": {
+                    "type": "string",
+                    "description": "Root name of the PALTree to delete (e.g. 'myproject').",
+                },
+            },
+            "required": ["tree_path"],
+            "additionalProperties": False,
+        }
+
+    def get_annotations(self) -> dict:
+        return {"readOnlyHint": False, "destructiveHint": True, "openWorldHint": False}
+
+    def get_system_prompt(self) -> str:
+        return ""
+
+    def get_request_model(self):
+        return ToolRequest
+
+    def requires_model(self) -> bool:
+        return False
+
+    def get_model_category(self):
+        from tools.models import ToolModelCategory
+
+        return ToolModelCategory.FAST_RESPONSE
+
+    async def prepare_prompt(self, _request: ToolRequest) -> str:
+        return ""
+
+    def format_response(self, response: str, _request: ToolRequest, _model_info: Optional[dict] = None) -> str:
+        return response
+
+    async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
+        from tools.models import ToolOutput
+        from utils.palstore import (
+            get_store_path,
+            load_index,
+            resolve_store_location,
+            save_index,
+        )
+
+        tree_path = arguments.get("tree_path", "")
+        if not tree_path:
+            error = ToolOutput(status="error", content="tree_path is required.", content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        location = resolve_store_location(tree_path)
+        if location is None:
+            error = ToolOutput(status="error", content=f'PALTree "{tree_path}" not found.', content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        directory, root_id = location
+        store_file = get_store_path(directory, root_id)
+
+        if os.path.isfile(store_file):
+            os.remove(store_file)
+
+        # Remove from index
+        index = load_index()
+        index["stores"].pop(tree_path, None)
+        save_index(index)
+
+        tool_output = ToolOutput(
+            status="success",
+            content=f'PALTree "{tree_path}" deleted.',
+            content_type="text",
+            metadata={"tree_path": tree_path, "directory": directory, "file_removed": store_file},
+        )
+        return [TextContent(type="text", text=tool_output.model_dump_json())]

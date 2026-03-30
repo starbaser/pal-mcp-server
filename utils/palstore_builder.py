@@ -336,6 +336,6 @@ def hydrate_thread_context(store: PalRoot, node_path: str):
     if thread is None:
         raise RuntimeError(f"Failed to retrieve hydrated thread {thread_id} from storage")
 
-    logger.debug(f"[CTX] Hydrated thread {thread_id} from store '{store.store_id}' at path '{node_path}'")
+    logger.debug(f"[CTX] Hydrated thread {thread_id} from store '{store.tree_path}' at path '{node_path}'")
 
     return thread

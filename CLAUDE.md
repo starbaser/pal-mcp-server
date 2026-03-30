@@ -139,12 +139,17 @@ SimpleTool → PalStoreBaseTool ─── PalStoreTool, PalQueryTool
 ```
 
 **PalNode model** (`utils/palstore.py`):
-- Fields: `input: str`, `output: str`, `metadata: dict[str, Any] = {}`
+- Fields: `input: str`, `output: str`, `files: list[str] = []`, `metadata: dict[str, Any] = {}`
 - `input` = full tool call data rendered via `render_markdown_output()` (uses `oboros.tome.dumps` — TOME BFS-linearized markdown with `§` sigils)
 - `output` = full tool response rendered via `render_markdown_output()`
+- `files` = flat list of absolute path strings attached to this node (populated by `writenode`/`querynode` via `absolute_file_paths`, or by `writenodefile` post-hoc)
 - `model_validator(mode="before")` transparently migrates legacy `prompt`/`response`/`content` fields
 - Each node stores only its own layer's data — the O(n²) content duplication bug is fixed
 - `format_layer_markdown` (used by `readnode`/`treedump`) accepts `input_text`/`output_text` params
+
+**PalRoot model** (`utils/palstore.py`):
+- Fields: `tree_path: str`, `directory: str`, `children: dict[str, PalNode] = {}`
+- `model_validator(mode="before")` migrates legacy `store_id` → `tree_path` in JSON files
 
 **PALTree Node Rules** (`utils/palstore.py`):
 
@@ -211,7 +216,7 @@ Register in `server.py` TOOLS dict. Tools that bypass model resolution override 
 
 MCP tool names follow a scope convention: **node tools** (`*node`) operate on a single PALNode, **tree tools** (`tree*`/`*tree`) operate on a subtree or the whole tree. Source class names (e.g. `PalStoreTool`) are unchanged.
 
-The MCP parameter `tree_path` identifies nodes using dot-path notation. Internally, `PalRoot.store_id` is the canonical field name (unchanged for JSON compatibility) — the `tree_path` rename is MCP-boundary only.
+The MCP parameter `tree_path` identifies nodes using dot-path notation. The `PalRoot` model field is also `tree_path`. A `model_validator(mode="before")` on `PalRoot` transparently migrates legacy JSON files that still use the old `store_id` key.
 
 **PALTree path** formal definition: `𝒫 = { r · s₁ · s₂ · ⋯ · sₖ  |  r ∈ 𝒩,  sᵢ = (tᵢ, nᵢ),  ρ → t₁,  ∀i: tᵢ → tᵢ₊₁ }`
 

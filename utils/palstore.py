@@ -115,11 +115,18 @@ class PalNode(BaseModel):
 class PalRoot(BaseModel):
     """Root of a PALTree JSON file."""
 
-    store_id: str
+    tree_path: str
     directory: str
     label: str | None = None
     created_at: str
     children: dict[str, PalNode] = {}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_store_id(cls, data):
+        if isinstance(data, dict) and "store_id" in data and "tree_path" not in data:
+            data["tree_path"] = data.pop("store_id")
+        return data
 
 
 # ---------------------------------------------------------------------------
@@ -137,9 +144,9 @@ def get_store_dir(directory: str) -> str:
     return os.path.join(_CTX_DIR, encode_directory(directory))
 
 
-def get_store_path(directory: str, store_id: str) -> str:
+def get_store_path(directory: str, tree_path: str) -> str:
     """Return the full path to a store's JSON file."""
-    return os.path.join(get_store_dir(directory), f"{store_id}.json")
+    return os.path.join(get_store_dir(directory), f"{tree_path}.json")
 
 
 # ---------------------------------------------------------------------------
@@ -162,9 +169,9 @@ def _atomic_write(path: str, data: dict | BaseModel) -> None:
 # ---------------------------------------------------------------------------
 
 
-def load_store(directory: str, store_id: str) -> PalRoot | None:
+def load_store(directory: str, tree_path: str) -> PalRoot | None:
     """Load a store JSON file. Return None if the file does not exist or is corrupt."""
-    path = get_store_path(directory, store_id)
+    path = get_store_path(directory, tree_path)
     if not os.path.exists(path):
         return None
     try:
@@ -176,19 +183,19 @@ def load_store(directory: str, store_id: str) -> PalRoot | None:
 
 def save_store(store: PalRoot) -> None:
     """Atomically persist a PalRoot to disk."""
-    path = get_store_path(store.directory, store.store_id)
+    path = get_store_path(store.directory, store.tree_path)
     _atomic_write(path, store)
 
 
 def rename_store(directory: str, old_id: str, new_id: str) -> None:
-    """Rename a root PALTree: update store_id, rename file on disk, update index and armed state."""
+    """Rename a root PALTree: update tree_path, rename file on disk, update index and armed state."""
     store = load_store(directory, old_id)
     if store is None:
         raise KeyError(f"Store not found: {old_id}")
     if "." in new_id:
         raise ValueError("Store names cannot contain dots.")
 
-    store.store_id = new_id
+    store.tree_path = new_id
     save_store(store)
 
     old_path = get_store_path(directory, old_id)
@@ -212,13 +219,13 @@ def rename_store(directory: str, old_id: str, new_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def resolve_palnode(store: PalRoot, store_id: str) -> PalNode | None:
+def resolve_palnode(store: PalRoot, tree_path: str) -> PalNode | None:
     """Walk a dot-delimited tree_path to a node.
 
     The root tree_path prefix is stripped before traversal. Returns None for
     a path that resolves to the root itself (no segments after root).
     """
-    _, segments = parse_store_path(store_id)
+    _, segments = parse_store_path(tree_path)
     if not segments:
         return None
 
@@ -243,7 +250,7 @@ def add_palnode(store: PalRoot, parent_path: str, child_key: str, node: PalNode)
     rules defined in VALID_CHILD_KEYS.
     """
     child_cat = _categorize_key(child_key)
-    if parent_path == store.store_id:
+    if parent_path == store.tree_path:
         parent_type = "root"
     else:
         parent = resolve_palnode(store, parent_path)
@@ -258,14 +265,14 @@ def add_palnode(store: PalRoot, parent_path: str, child_key: str, node: PalNode)
             f"cannot be a child of {parent_type}-node at '{parent_path}'"
         )
 
-    if parent_path == store.store_id:
+    if parent_path == store.tree_path:
         store.children[child_key] = node
     else:
         resolve_palnode(store, parent_path).children[child_key] = node
     return f"{parent_path}.{child_key}"
 
 
-def walk_palnode_ancestry(store: PalRoot, store_id: str) -> list[PalNode]:
+def walk_palnode_ancestry(store: PalRoot, tree_path: str) -> list[PalNode]:
     """Return nodes from the root down to (and including) the target.
 
     Layers are cumulative: when the target segment at any level is an L-node,
@@ -273,9 +280,9 @@ def walk_palnode_ancestry(store: PalRoot, store_id: str) -> list[PalNode]:
     For example, walking to ``L14.F0`` returns ``[L0, L1, ..., L14, F0]``.
 
     Fork nodes are included — they carry empty prompt/response so callers treat
-    them as passthrough. Returns an empty list when store_id resolves to the root.
+    them as passthrough. Returns an empty list when tree_path resolves to the root.
     """
-    _, segments = parse_store_path(store_id)
+    _, segments = parse_store_path(tree_path)
     if not segments:
         return []
 
@@ -328,9 +335,9 @@ def walk_palnode_range(store: PalRoot, start_path: str, end_path: str) -> list[P
 def get_last_layer_path(store: PalRoot, parent_path: str | None = None) -> str | None:
     """Return dotted path to the highest-numbered L-child, or None if no layers exist."""
     if parent_path is None:
-        parent_path = store.store_id
+        parent_path = store.tree_path
 
-    if parent_path == store.store_id:
+    if parent_path == store.tree_path:
         container = store.children
     else:
         parent_node = resolve_palnode(store, parent_path)
@@ -342,17 +349,17 @@ def get_last_layer_path(store: PalRoot, parent_path: str | None = None) -> str |
     return f"{parent_path}.L{max(indices)}"
 
 
-def resolve_root_alias(store: PalRoot, store_id: str) -> str:
+def resolve_root_alias(store: PalRoot, tree_path: str) -> str:
     """Resolve root tree_path alias to the current top layer path.
 
-    Root tree_path is shorthand for the latest L-child. Returns store_id
+    Root tree_path is shorthand for the latest L-child. Returns tree_path
     unchanged if it's not the root, or if the root has no layers yet.
     """
-    if store_id != store.store_id:
-        return store_id
+    if tree_path != store.tree_path:
+        return tree_path
     last = get_last_layer_path(store)
     if last is None:
-        return store_id
+        return tree_path
     return last
 
 
@@ -365,7 +372,7 @@ def get_next_key(store: PalRoot, parent_path: str, prefix: str) -> str:
       "F"           → F-children, start at F0, increment max
       "" (empty)    → numeric follow-ups, start at 1
     """
-    if parent_path == store.store_id:
+    if parent_path == store.tree_path:
         siblings = store.children
     else:
         parent = resolve_palnode(store, parent_path)
@@ -385,23 +392,23 @@ def get_next_key(store: PalRoot, parent_path: str, prefix: str) -> str:
     raise ValueError(f"Unsupported prefix for get_next_key: {prefix!r}")
 
 
-def resolve_layer_insertion_point(store: PalRoot, store_id: str) -> str:
+def resolve_layer_insertion_point(store: PalRoot, tree_path: str) -> str:
     """Return the parent path where the next L-node should be inserted.
 
-    When store_id points directly to an L-node (e.g. 'myproject.L7'), the next
+    When tree_path points directly to an L-node (e.g. 'myproject.L7'), the next
     L-node is a sibling — return L7's parent path. For root, fork, query, or tool
-    nodes, the next L-node is a child — return store_id itself.
+    nodes, the next L-node is a child — return tree_path itself.
     """
-    _, segments = parse_store_path(store_id)
+    _, segments = parse_store_path(tree_path)
     if not segments:
-        return store_id
+        return tree_path
 
     last_seg = segments[-1]
     if _is_l_node_key(last_seg):
         if len(segments) == 1:
-            return store.store_id
-        return f"{store.store_id}.{'.'.join(segments[:-1])}"
-    return store_id
+            return store.tree_path
+        return f"{store.tree_path}.{'.'.join(segments[:-1])}"
+    return tree_path
 
 
 # ---------------------------------------------------------------------------
@@ -424,7 +431,7 @@ def detach_palnode(store: PalRoot, node_path: str) -> PalNode:
     if len(segments) == 1:
         parent_container = store.children
     else:
-        parent_path_str = f"{store.store_id}.{'.'.join(segments[:-1])}"
+        parent_path_str = f"{store.tree_path}.{'.'.join(segments[:-1])}"
         parent_node = resolve_palnode(store, parent_path_str)
         if parent_node is None:
             raise KeyError(f"Parent path not found: {parent_path_str}")
@@ -450,7 +457,7 @@ def move_palnode(store: PalRoot, source_path: str, dest_parent: str, dest_key: s
     if len(src_segments) == 1:
         original_parent_container = store.children
     else:
-        orig_parent_path = f"{store.store_id}.{'.'.join(src_segments[:-1])}"
+        orig_parent_path = f"{store.tree_path}.{'.'.join(src_segments[:-1])}"
         orig_parent_node = resolve_palnode(store, orig_parent_path)
         if orig_parent_node is None:
             raise KeyError(f"Source parent not found: {orig_parent_path}")
@@ -523,7 +530,7 @@ def find_palnode_ancestor(
         node = current.get(seg)
         if node is None:
             break
-        current_path = f"{store.store_id}.{'.'.join(segments[:i + 1])}"
+        current_path = f"{store.tree_path}.{'.'.join(segments[:i + 1])}"
         if predicate(seg, node):
             last_match = (current_path, node)
         current = node.children
@@ -595,9 +602,9 @@ def delete_palnode_with_shift(store: PalRoot, node_path: str) -> dict:
 
     if len(segments) == 1:
         parent_container = store.children
-        parent_path = store.store_id
+        parent_path = store.tree_path
     else:
-        parent_path_str = f"{store.store_id}.{'.'.join(segments[:-1])}"
+        parent_path_str = f"{store.tree_path}.{'.'.join(segments[:-1])}"
         parent_node = resolve_palnode(store, parent_path_str)
         if parent_node is None:
             raise KeyError(f"Parent path not found: {parent_path_str}")
@@ -656,12 +663,12 @@ def save_index(data: dict) -> None:
     _atomic_write(_INDEX_PATH, data)
 
 
-def update_index(directory: str, store_id: str) -> None:
+def update_index(directory: str, tree_path: str) -> None:
     """Add or update an entry in the store index."""
     index = load_index()
     encoded = encode_directory(directory)
     index["directories"][directory] = encoded
-    index["stores"][store_id] = encoded
+    index["stores"][tree_path] = encoded
     save_index(index)
 
 
@@ -678,7 +685,7 @@ def rebuild_index() -> dict:
         for file_entry in os.scandir(entry.path):
             if not file_entry.name.endswith(".json"):
                 continue
-            store_id = file_entry.name[:-5]
+            tree_path = file_entry.name[:-5]
             try:
                 with open(file_entry.path) as f:
                     data = json.load(f)
@@ -687,19 +694,19 @@ def rebuild_index() -> dict:
                 continue
             if directory:
                 index["directories"][directory] = encoded
-            index["stores"][store_id] = encoded
+            index["stores"][tree_path] = encoded
 
     save_index(index)
     return index
 
 
-def resolve_store_location(store_id: str) -> tuple[str, str] | None:
-    """Look up a tree_path in the index and return (directory, root_store_id).
+def resolve_store_location(tree_path: str) -> tuple[str, str] | None:
+    """Look up a tree_path in the index and return (directory, root_tree_path).
 
     Parses the root segment from tree_path, resolves via index, falls back to
     scanning if not found. Returns None when the PALTree does not exist.
     """
-    root, _ = parse_store_path(store_id)
+    root, _ = parse_store_path(tree_path)
     index = load_index()
     encoded = index["stores"].get(root)
 
@@ -734,17 +741,17 @@ def resolve_store_location(store_id: str) -> tuple[str, str] | None:
 # ---------------------------------------------------------------------------
 
 
-def parse_store_path(store_id: str) -> tuple[str, list[str]]:
+def parse_store_path(tree_path: str) -> tuple[str, list[str]]:
     """Split a dotted tree_path into (root, [segments]).
 
     Looks up the root in the index first for an exact match. Fallback: first
     dot-split segment is taken as the root.
     """
-    if "." not in store_id:
-        return store_id, []
+    if "." not in tree_path:
+        return tree_path, []
 
     index = load_index()
-    parts = store_id.split(".")
+    parts = tree_path.split(".")
     # Greedily find the longest root that exists in the index
     for i in range(len(parts), 0, -1):
         candidate = ".".join(parts[:i])
@@ -777,10 +784,10 @@ def save_armed(data: dict) -> None:
     _atomic_write(_ARMED_PATH, data)
 
 
-def arm_store(directory: str, store_id: str) -> None:
+def arm_store(directory: str, tree_path: str) -> None:
     """Arm a directory for automatic context revival on SessionStart."""
     armed = load_armed()
-    armed[directory] = store_id
+    armed[directory] = tree_path
     save_armed(armed)
 
 
@@ -815,8 +822,8 @@ def list_stores(directory: str | None = None) -> list[PalRoot]:
         roots: list[PalRoot] = []
         for entry in os.scandir(folder):
             if entry.name.endswith(".json"):
-                store_id = entry.name[:-5]
-                store = load_store(directory, store_id)
+                tree_path = entry.name[:-5]
+                store = load_store(directory, tree_path)
                 if store is not None:
                     roots.append(store)
         return roots

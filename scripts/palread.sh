@@ -28,7 +28,7 @@ if store is None:
 
 node = resolve_palnode(store, tree_path)
 if node is None:
-    if tree_path == store.store_id:
+    if tree_path == store.tree_path:
         print(f'# {tree_path}')
         print(f'Type: PALTree root')
         print(f'Directory: {store.directory}')

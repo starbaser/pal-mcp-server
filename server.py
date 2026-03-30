@@ -818,7 +818,7 @@ def _build_store_listing() -> str:
 
     lines = [f"\n\npalStores: PALTrees for {cwd}:"]
     for store in stores:
-        sid = store.store_id
+        sid = store.tree_path
         armed_marker = " [armed]" if (armed_store and sid == armed_store) else ""
         layer_count = sum(1 for n in store.children.values() if n.entry_type == "store")
         query_count = sum(1 for n in store.children.values() if n.entry_type == "query")
@@ -836,7 +836,7 @@ def _build_store_listing() -> str:
 def _resolve_store_continuation(tool_name: str, arguments: dict) -> str | None:
     """If continuation_id is a store path, build context directly from PalNode ancestry.
 
-    Returns the path-based store_id for response injection, or None if
+    Returns the path-based tree_path for response injection, or None if
     continuation_id is a regular UUID (not a store path).
 
     Two modes:
@@ -1282,7 +1282,7 @@ async def _call_tool_impl(name: str, arguments: dict[str, Any], tools: dict) -> 
     # Handle thread context reconstruction if continuation_id is present
     _store_path = None
     if "continuation_id" in arguments and arguments["continuation_id"]:
-        # Resolve store_id → build context directly from PalNode ancestry (or return None for UUID)
+        # Resolve tree_path → build context directly from PalNode ancestry (or return None for UUID)
         _store_path = _resolve_store_continuation(name, arguments)
 
         if not arguments.get("_store_context_built"):

@@ -85,7 +85,7 @@ class TestPalStoreTool:
         assert "directory" not in props
         assert "context_label" in props
 
-    async def test_store_requires_store_id(self):
+    async def test_store_requires_tree_path(self):
         result = await self.tool.execute({"prompt": "test"})
 
         assert len(result) == 1
@@ -93,7 +93,7 @@ class TestPalStoreTool:
         assert payload["status"] == "error"
         assert "newtree" in payload["content"].lower()
 
-    async def test_store_id_not_found(self):
+    async def test_tree_path_not_found(self):
         with patch("utils.palstore.resolve_store_location", return_value=None):
             result = await self.tool.execute({"tree_path": "nonexistent", "prompt": "test"})
 
@@ -136,14 +136,14 @@ class TestPalQueryTool:
         assert "media" in props
         assert "context_label" not in props
 
-    async def test_query_without_store_id_returns_error(self):
+    async def test_query_without_tree_path_returns_error(self):
         result = await self.tool.execute({"prompt": "test"})
 
         assert len(result) == 1
         payload = json.loads(result[0].text)
         assert payload["status"] == "error"
 
-    async def test_query_store_id_not_found(self):
+    async def test_query_tree_path_not_found(self):
         with patch("utils.palstore.resolve_store_location", return_value=None):
             result = await self.tool.execute({"tree_path": "missing", "prompt": "test"})
 
@@ -184,7 +184,7 @@ class TestPalListTool:
         from utils.palstore import PalRoot
 
         stores = [
-            PalRoot(store_id="myproject", directory="/tmp/proj", created_at="2026-01-01T00:00:00Z"),
+            PalRoot(tree_path="myproject", directory="/tmp/proj", created_at="2026-01-01T00:00:00Z"),
         ]
 
         with patch("utils.palstore.list_stores", return_value=stores):
@@ -328,7 +328,7 @@ class TestContextForkChain:
 class TestResolveStoreContinuation:
     """Tests for _resolve_store_continuation in server.py."""
 
-    def _make_store(self, tmp_path, monkeypatch, store_id: str, directory: str):
+    def _make_store(self, tmp_path, monkeypatch, tree_path: str, directory: str):
         """Create, save, and index a PalRoot under tmp_path."""
         import os
 
@@ -343,12 +343,12 @@ class TestResolveStoreContinuation:
         from datetime import datetime, timezone
 
         store = PalRoot(
-            store_id=store_id,
+            tree_path=tree_path,
             directory=directory,
             created_at=datetime.now(timezone.utc).isoformat(),
         )
         save_store(store)
-        update_index(directory, store_id)
+        update_index(directory, tree_path)
         return store
 
     def test_returns_none_for_uuid(self, tmp_path, monkeypatch):
@@ -385,7 +385,7 @@ class TestResolveStoreContinuation:
         assert bridge["tool_path"] == "myproject.F0.thinkdeep"
         assert bridge["tool_name"] == "thinkdeep"
         assert bridge["mode"] == "fork"
-        assert bridge["store"].store_id == "myproject"
+        assert bridge["store"].tree_path == "myproject"
 
     def test_continue_same_tool(self, tmp_path, monkeypatch):
         from datetime import datetime, timezone

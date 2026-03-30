@@ -1,5 +1,5 @@
 """
-Registry for tracking context stores, keyed by human-readable store_id path.
+Registry for tracking context stores, keyed by human-readable tree_path.
 
 Persists to {PAL_STORAGE_DIR}/context/stores.json.
 """
@@ -38,28 +38,28 @@ def save_registry(data: dict) -> None:
     os.rename(tmp_path, _REGISTRY_PATH)
 
 
-def get_store_entry(store_id: str) -> dict | None:
-    """Look up a registry entry by its store_id path."""
+def get_store_entry(tree_path: str) -> dict | None:
+    """Look up a registry entry by its tree_path."""
     registry = load_registry()
-    return registry.get(store_id)
+    return registry.get(tree_path)
 
 
-def resolve_thread_id(store_id: str) -> str | None:
-    """Return the internal thread UUID for a given store_id path."""
-    entry = get_store_entry(store_id)
+def resolve_thread_id(tree_path: str) -> str | None:
+    """Return the internal thread UUID for a given tree_path."""
+    entry = get_store_entry(tree_path)
     if entry is None:
         return None
     return entry.get("thread_id")
 
 
-def get_next_query_index(parent_store_id: str) -> int:
-    """Count direct Q-children of parent_store_id to determine the next query index."""
+def get_next_query_index(parent_tree_path: str) -> int:
+    """Count direct Q-children of parent_tree_path to determine the next query index."""
     registry = load_registry()
-    pattern = re.compile(r"^" + re.escape(parent_store_id) + r"\.Q\d+$")
+    pattern = re.compile(r"^" + re.escape(parent_tree_path) + r"\.Q\d+$")
     count = 0
     for sid, entry in registry.items():
         if (
-            entry.get("parent_store_id") == parent_store_id
+            entry.get("parent_tree_path") == parent_tree_path
             and entry.get("entry_type") == "query"
             and pattern.match(sid)
         ):
@@ -67,35 +67,35 @@ def get_next_query_index(parent_store_id: str) -> int:
     return count
 
 
-def get_next_tool_index(parent_store_id: str, tool_name: str) -> int:
+def get_next_tool_index(parent_tree_path: str, tool_name: str) -> int:
     """Count existing .<tool_name>\\d+ children to determine the next tool fork index."""
     registry = load_registry()
-    pattern = re.compile(rf"^{re.escape(parent_store_id)}\.{re.escape(tool_name)}(\d+)$")
+    pattern = re.compile(rf"^{re.escape(parent_tree_path)}\.{re.escape(tool_name)}(\d+)$")
     existing = [int(m.group(1)) for key in registry if (m := pattern.match(key))]
     return max(existing, default=-1) + 1
 
 
 def register_store(
-    store_id: str,
+    tree_path: str,
     thread_id: str,
     directory: str,
     label: str | None = None,
     model: str = "",
     entry_type: str = "store",
-    parent_store_id: str | None = None,
+    parent_tree_path: str | None = None,
     tool_name: str | None = None,
 ) -> None:
-    """Write a new entry keyed by store_id path."""
+    """Write a new entry keyed by tree_path."""
     registry = load_registry()
-    registry[store_id] = {
-        "store_id": store_id,
+    registry[tree_path] = {
+        "tree_path": tree_path,
         "thread_id": thread_id,
         "directory": directory,
         "label": label,
         "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "model": model,
         "entry_type": entry_type,
-        "parent_store_id": parent_store_id,
+        "parent_tree_path": parent_tree_path,
         "tool_name": tool_name,
         "layer_count": 0,
         "follow_up_count": 0,
@@ -103,61 +103,61 @@ def register_store(
     save_registry(registry)
 
 
-def increment_layer_count(store_id: str) -> str:
+def increment_layer_count(tree_path: str) -> str:
     """Increment layer_count on entry, register a new layered path, return it."""
     registry = load_registry()
-    entry = registry.get(store_id)
+    entry = registry.get(tree_path)
     if entry is None:
-        raise KeyError(f"store_id not found: {store_id}")
+        raise KeyError(f"tree_path not found: {tree_path}")
 
     entry["layer_count"] = entry.get("layer_count", 0) + 1
-    registry[store_id] = entry
+    registry[tree_path] = entry
     save_registry(registry)
 
     # Derive next layer number from the path suffix, not the entry's layer_count
-    match = re.search(r"\.L(\d+)$", store_id)
+    match = re.search(r"\.L(\d+)$", tree_path)
     if match:
-        base = store_id[: match.start()]
+        base = tree_path[: match.start()]
         current_layer = int(match.group(1))
     else:
-        base = store_id
+        base = tree_path
         current_layer = 0
     new_path = f"{base}.L{current_layer + 1}"
 
     register_store(
-        store_id=new_path,
+        tree_path=new_path,
         thread_id=entry["thread_id"],
         directory=entry["directory"],
         label=entry.get("label"),
         model=entry.get("model", ""),
         entry_type="store",
-        parent_store_id=store_id,
+        parent_tree_path=tree_path,
     )
     return new_path
 
 
-def increment_follow_up_count(store_id: str) -> str:
+def increment_follow_up_count(tree_path: str) -> str:
     """Increment follow_up_count on entry, register a new follow-up path, return it."""
     registry = load_registry()
-    entry = registry.get(store_id)
+    entry = registry.get(tree_path)
     if entry is None:
-        raise KeyError(f"store_id not found: {store_id}")
+        raise KeyError(f"tree_path not found: {tree_path}")
 
     entry["follow_up_count"] = entry.get("follow_up_count", 0) + 1
     new_count = entry["follow_up_count"]
-    registry[store_id] = entry
+    registry[tree_path] = entry
     save_registry(registry)
 
-    new_path = f"{store_id}.{new_count}"
+    new_path = f"{tree_path}.{new_count}"
 
     register_store(
-        store_id=new_path,
+        tree_path=new_path,
         thread_id=entry["thread_id"],
         directory=entry["directory"],
         label=entry.get("label"),
         model=entry.get("model", ""),
         entry_type="query",
-        parent_store_id=store_id,
+        parent_tree_path=tree_path,
     )
     return new_path
 
@@ -171,7 +171,7 @@ def list_stores(directory: str | None = None) -> list[dict]:
 
 
 def build_store_tree(entries: list[dict]) -> list[dict]:
-    """Build a tree from flat registry entries using parent_store_id relationships.
+    """Build a tree from flat registry entries using parent_tree_path relationships.
 
     Returns root nodes, each augmented with a sorted ``children`` list.
     Orphans (parent not in the entry set) are promoted to roots.
@@ -179,11 +179,11 @@ def build_store_tree(entries: list[dict]) -> list[dict]:
     by_id: dict[str, dict] = {}
     for entry in entries:
         node = {**entry, "children": []}
-        by_id[node["store_id"]] = node
+        by_id[node["tree_path"]] = node
 
     roots: list[dict] = []
     for node in by_id.values():
-        parent_sid = node.get("parent_store_id")
+        parent_sid = node.get("parent_tree_path")
         parent = by_id.get(parent_sid) if parent_sid else None
         if parent is not None:
             parent["children"].append(node)
@@ -191,7 +191,7 @@ def build_store_tree(entries: list[dict]) -> list[dict]:
             roots.append(node)
 
     def _sort(nodes: list[dict]) -> None:
-        nodes.sort(key=lambda n: n["store_id"])
+        nodes.sort(key=lambda n: n["tree_path"])
         for n in nodes:
             _sort(n["children"])
 
@@ -201,7 +201,7 @@ def build_store_tree(entries: list[dict]) -> list[dict]:
 
 # ---------------------------------------------------------------------------
 # Armed store management — {PAL_STORAGE_DIR}/context/armed.json
-# Maps directory paths to store_ids for automatic SessionStart revival.
+# Maps directory paths to tree_paths for automatic SessionStart revival.
 # ---------------------------------------------------------------------------
 
 
@@ -227,10 +227,10 @@ def save_armed(data: dict) -> None:
     os.rename(tmp_path, _ARMED_PATH)
 
 
-def arm_store(directory: str, store_id: str) -> None:
+def arm_store(directory: str, tree_path: str) -> None:
     """Arm a directory for automatic context revival on SessionStart."""
     armed = load_armed()
-    armed[directory] = store_id
+    armed[directory] = tree_path
     save_armed(armed)
 
 
@@ -242,10 +242,10 @@ def disarm_store(directory: str) -> None:
 
 
 def get_armed_store(directory: str) -> str | None:
-    """Return the armed store_id for a directory, or None."""
+    """Return the armed tree_path for a directory, or None."""
     return load_armed().get(directory)
 
 
 def list_armed_stores() -> dict:
-    """Return the full directory-to-store_id mapping."""
+    """Return the full directory-to-tree_path mapping."""
     return load_armed()

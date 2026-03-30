@@ -66,9 +66,9 @@ def _make_node(entry_type="store", input="", output="", files=None, label=None) 
     )
 
 
-def _make_root(store_id="mystore", directory="/home/user/project") -> PalRoot:
+def _make_root(tree_path="mystore", directory="/home/user/project") -> PalRoot:
     return PalRoot(
-        store_id=store_id,
+        tree_path=tree_path,
         directory=directory,
         created_at="2026-01-01T00:00:00Z",
     )
@@ -102,9 +102,9 @@ class TestStoreLifecycle:
     def test_save_and_load_roundtrip(self, ctx_env):
         store = _make_root()
         save_store(store)
-        loaded = load_store(store.directory, store.store_id)
+        loaded = load_store(store.directory, store.tree_path)
         assert loaded is not None
-        assert loaded.store_id == store.store_id
+        assert loaded.tree_path == store.tree_path
         assert loaded.directory == store.directory
         assert loaded.created_at == store.created_at
 
@@ -121,7 +121,7 @@ class TestStoreLifecycle:
         store.children["L1"] = child
         save_store(store)
 
-        loaded = load_store(store.directory, store.store_id)
+        loaded = load_store(store.directory, store.tree_path)
         assert loaded is not None
         assert "L1" in loaded.children
         assert loaded.children["L1"].input == "hello"
@@ -130,12 +130,12 @@ class TestStoreLifecycle:
         from utils import palstore
 
         store = _make_root()
-        path = palstore.get_store_path(store.directory, store.store_id)
+        path = palstore.get_store_path(store.directory, store.tree_path)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
             f.write("{not valid json")
 
-        result = load_store(store.directory, store.store_id)
+        result = load_store(store.directory, store.tree_path)
         assert result is None
 
 
@@ -167,7 +167,7 @@ class TestResolveNode:
         store.children["L1"] = l1
 
         # Index the store so parse_store_path can find the root
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
 
         result = resolve_palnode(store, "mystore.L1.Q0.F0.thinkdeep")
         assert result is not None
@@ -202,7 +202,7 @@ class TestAddChild:
         store = _make_root()
         l1 = _make_node(entry_type="query", input="p", output="r")
         store.children["L1"] = l1
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
 
         grandchild = _make_node(entry_type="tool", input="gp", output="gr")
         full_path = add_palnode(store, "mystore.L1", "Q0", grandchild)
@@ -244,7 +244,7 @@ class TestWalkAncestry:
         l1.children["Q0"] = q0
         store.children["L1"] = l1
 
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
 
         result = walk_palnode_ancestry(store, "mystore.L1.Q0.F0.thinkdeep")
         assert len(result) == 4
@@ -266,7 +266,7 @@ class TestWalkAncestry:
         fork.children["L1"] = child
         store.children["F0"] = fork
 
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
 
         result = walk_palnode_ancestry(store, "mystore.F0.L1")
         assert len(result) == 2
@@ -279,7 +279,7 @@ class TestWalkAncestry:
         store.children["L1"] = _make_node(entry_type="store", input="p1", output="r1")
         store.children["L2"] = _make_node(entry_type="store", input="p2", output="r2")
 
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
 
         result = walk_palnode_ancestry(store, "mystore.L2")
         assert len(result) == 3
@@ -296,7 +296,7 @@ class TestWalkAncestry:
         l2.children["F0"] = fork
         store.children["L2"] = l2
 
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
 
         result = walk_palnode_ancestry(store, "mystore.L2.F0")
         assert len(result) == 4
@@ -312,7 +312,7 @@ class TestWalkAncestry:
         fork.children["L1"] = _make_node(entry_type="store", input="fp1", output="fr1")
         store.children["F0"] = fork
 
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
 
         result = walk_palnode_ancestry(store, "mystore.F0.L1")
         assert len(result) == 3
@@ -423,7 +423,7 @@ class TestIndexOperations:
     def test_resolve_store_location_finds_indexed_store(self, ctx_env):
         store = _make_root()
         save_store(store)
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
 
         result = resolve_store_location("mystore")
         assert result is not None
@@ -436,8 +436,8 @@ class TestIndexOperations:
         assert result is None
 
     def test_rebuild_index_scans_directories(self, ctx_env):
-        store_a = _make_root(store_id="store-a", directory="/home/user/proj-a")
-        store_b = _make_root(store_id="store-b", directory="/home/user/proj-b")
+        store_a = _make_root(tree_path="store-a", directory="/home/user/proj-a")
+        store_b = _make_root(tree_path="store-b", directory="/home/user/proj-b")
         save_store(store_a)
         save_store(store_b)
 
@@ -501,23 +501,23 @@ class TestArmedOperations:
 
 class TestListStores:
     def test_list_stores_with_directory_filter(self, ctx_env):
-        store_a = _make_root(store_id="store-a", directory="/home/user/proj-a")
-        store_b = _make_root(store_id="store-b", directory="/home/user/proj-b")
+        store_a = _make_root(tree_path="store-a", directory="/home/user/proj-a")
+        store_b = _make_root(tree_path="store-b", directory="/home/user/proj-b")
         save_store(store_a)
         save_store(store_b)
 
         results = list_stores(directory="/home/user/proj-a")
         assert len(results) == 1
-        assert results[0].store_id == "store-a"
+        assert results[0].tree_path == "store-a"
 
     def test_list_stores_without_filter_returns_all(self, ctx_env):
-        store_a = _make_root(store_id="store-a", directory="/home/user/proj-a")
-        store_b = _make_root(store_id="store-b", directory="/home/user/proj-b")
+        store_a = _make_root(tree_path="store-a", directory="/home/user/proj-a")
+        store_b = _make_root(tree_path="store-b", directory="/home/user/proj-b")
         save_store(store_a)
         save_store(store_b)
 
         results = list_stores()
-        ids = {s.store_id for s in results}
+        ids = {s.tree_path for s in results}
         assert "store-a" in ids
         assert "store-b" in ids
 
@@ -539,7 +539,7 @@ class TestListStores:
 
         results = list_stores(directory=store.directory)
         assert len(results) == 1
-        assert results[0].store_id == "mystore"
+        assert results[0].tree_path == "mystore"
 
 
 # ---------------------------------------------------------------------------
@@ -763,7 +763,7 @@ class TestContextBuilder:
             return f"{full_prompt}\n\n---\n\n{response}"
 
         store = PalRoot(
-            store_id="regression",
+            tree_path="regression",
             directory="/tmp/test",
             created_at="2026-01-01T00:00:00Z",
             children={
@@ -905,28 +905,28 @@ class TestStoreLifecycleEdgeCases:
         from utils import palstore
 
         store = _make_root()
-        path = palstore.get_store_path(store.directory, store.store_id)
+        path = palstore.get_store_path(store.directory, store.tree_path)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
             import json
 
             json.dump([1, 2, 3], f)
 
-        result = load_store(store.directory, store.store_id)
+        result = load_store(store.directory, store.tree_path)
         assert result is None
 
     def test_load_store_with_missing_required_fields_returns_none(self, ctx_env):
         from utils import palstore
 
         store = _make_root()
-        path = palstore.get_store_path(store.directory, store.store_id)
+        path = palstore.get_store_path(store.directory, store.tree_path)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
             import json
 
             json.dump({"unrelated_field": "value"}, f)
 
-        result = load_store(store.directory, store.store_id)
+        result = load_store(store.directory, store.tree_path)
         assert result is None
 
     def test_save_store_creates_nested_directories(self, ctx_env):
@@ -935,7 +935,7 @@ class TestStoreLifecycleEdgeCases:
         store = _make_root(directory="/some/deeply/nested/path")
         save_store(store)
 
-        path = palstore.get_store_path(store.directory, store.store_id)
+        path = palstore.get_store_path(store.directory, store.tree_path)
         assert os.path.exists(path)
 
 
@@ -950,7 +950,7 @@ class TestRenameStore:
 
         store = _make_root()
         save_store(store)
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
 
         rename_store(store.directory, "mystore", "renamed-store")
 
@@ -959,7 +959,7 @@ class TestRenameStore:
 
         loaded = load_store(store.directory, "renamed-store")
         assert loaded is not None
-        assert loaded.store_id == "renamed-store"
+        assert loaded.tree_path == "renamed-store"
 
         index = load_index()
         assert "renamed-store" in index["stores"]
@@ -985,7 +985,7 @@ class TestRenameStore:
 
         store = _make_root()
         save_store(store)
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
         arm_store(store.directory, "mystore")
 
         rename_store(store.directory, "mystore", "renamed-store")
@@ -997,7 +997,7 @@ class TestRenameStore:
 
         store = _make_root()
         save_store(store)
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
         arm_store("/home/OTHER/project", "other-store")
 
         rename_store(store.directory, "mystore", "renamed-store")
@@ -1012,7 +1012,7 @@ class TestRenameStore:
         child = _make_node(entry_type="query", input="child-q", output="child-r")
         store.children["L1"] = child
         save_store(store)
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
 
         rename_store(store.directory, "mystore", "renamed-store")
 
@@ -1032,7 +1032,7 @@ class TestResolveNodeEdgeCases:
         store = _make_root()
         child = _make_node(entry_type="query", input="p", output="r")
         store.children["L1"] = child
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
 
         result = resolve_palnode(store, "mystore.L1.Q99")
         assert result is None
@@ -1041,7 +1041,7 @@ class TestResolveNodeEdgeCases:
         store = _make_root()
         child = _make_node(entry_type="query", input="p", output="r")
         store.children["L1"] = child
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
 
         result = resolve_palnode(store, "mystore.L1.Q0")
         assert result is None
@@ -1069,7 +1069,7 @@ class TestAddChildEdgeCases:
 
         n1 = _make_node(entry_type="store", input="l1", output="r1")
         add_palnode(store, "mystore", "L1", n1)
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
 
         n2 = _make_node(entry_type="fork", input="", output="")
         path2 = add_palnode(store, "mystore.L1", "F0", n2)
@@ -1092,7 +1092,7 @@ class TestWalkAncestryEdgeCases:
         store = _make_root()
         child = _make_node(entry_type="store", input="p1", output="r1")
         store.children["L1"] = child
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
 
         result = walk_palnode_ancestry(store, "mystore.L1.Q0")
         assert len(result) == 1
@@ -1109,7 +1109,7 @@ class TestWalkAncestryEdgeCases:
         n_fork.children["Q0"] = n_query
         n_store.children["F0"] = n_fork
         store.children["L1"] = n_store
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
 
         result = walk_palnode_ancestry(store, "mystore.L1.F0.Q0.thinkdeep")
         assert len(result) == 4
@@ -1183,7 +1183,7 @@ class TestResolveStoreLocationEdgeCases:
     def test_dotted_path_resolves_to_root(self, ctx_env):
         store = _make_root()
         save_store(store)
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
 
         result = resolve_store_location("mystore.L1.Q0")
         assert result is not None
@@ -1198,9 +1198,9 @@ class TestResolveStoreLocationEdgeCases:
 
         store = _make_root()
         save_store(store)
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
 
-        os.remove(get_store_path(store.directory, store.store_id))
+        os.remove(get_store_path(store.directory, store.tree_path))
 
         result = resolve_store_location("mystore")
         assert result is None
@@ -1235,13 +1235,13 @@ class TestArmedOperationsEdgeCases:
 
 class TestListStoresEdgeCases:
     def test_multiple_stores_in_same_directory(self, ctx_env):
-        store_a = _make_root(store_id="store-a")
-        store_b = _make_root(store_id="store-b")
+        store_a = _make_root(tree_path="store-a")
+        store_b = _make_root(tree_path="store-b")
         save_store(store_a)
         save_store(store_b)
 
         results = list_stores(directory="/home/user/project")
-        ids = {s.store_id for s in results}
+        ids = {s.tree_path for s in results}
         assert "store-a" in ids
         assert "store-b" in ids
         assert len(results) == 2
@@ -1267,9 +1267,9 @@ class TestListAllDirectories:
     def test_returns_indexed_directories(self, ctx_env):
         from utils.palstore import list_all_directories
 
-        store = _make_root(store_id="store-a", directory="/home/user/proj-a")
+        store = _make_root(tree_path="store-a", directory="/home/user/proj-a")
         save_store(store)
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
 
         result = list_all_directories()
         assert "/home/user/proj-a" in result
@@ -1277,7 +1277,7 @@ class TestListAllDirectories:
     def test_returns_unindexed_directories_via_scan(self, ctx_env):
         from utils.palstore import list_all_directories
 
-        store = _make_root(store_id="store-b", directory="/home/user/proj-b")
+        store = _make_root(tree_path="store-b", directory="/home/user/proj-b")
         save_store(store)
 
         result = list_all_directories()
@@ -1306,7 +1306,7 @@ class TestHydrateThreadContext:
             input="FULL CONTENT BLOB",
         )
         store.children["L1"] = node
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
 
         thread = hydrate_thread_context(store, "mystore.L1")
         assert len(thread.turns) == 1
@@ -1319,7 +1319,7 @@ class TestHydrateThreadContext:
         store = _make_root()
         node = _make_node(entry_type="query", input="the question", output="the answer")
         store.children["L1"] = node
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
 
         thread = hydrate_thread_context(store, "mystore.L1")
         assert len(thread.turns) == 2
@@ -1339,7 +1339,7 @@ class TestHydrateThreadContext:
         n_fork.children["Q0"] = n_query
         n_store.children["F0"] = n_fork
         store.children["L1"] = n_store
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
 
         thread = hydrate_thread_context(store, "mystore.L1.F0.Q0")
         roles = [t.role for t in thread.turns]
@@ -1350,7 +1350,7 @@ class TestHydrateThreadContext:
         from utils.palstore_builder import hydrate_thread_context
 
         store = _make_root()
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
 
         thread = hydrate_thread_context(store, "mystore")
         assert len(thread.turns) == 0
@@ -1362,7 +1362,7 @@ class TestHydrateThreadContext:
         monkeypatch.setattr(cm, "get_thread", lambda thread_id: None)
 
         store = _make_root()
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
 
         with pytest.raises(RuntimeError, match="Failed to retrieve hydrated thread"):
             hydrate_thread_context(store, "mystore")
@@ -1478,7 +1478,7 @@ class TestResolveRootAlias:
 def _build_parent_scaffold(store, parent_type):
     """Return the parent_path string for add_palnode tests given parent_type."""
     if parent_type == "root":
-        return store.store_id
+        return store.tree_path
     if parent_type == "store":
         store.children["L1"] = _make_node(entry_type="store")
         return "mystore.L1"
@@ -1556,7 +1556,7 @@ class TestNodeRulesMatrix:
 def ref_tree(ctx_env):
     """Build the reference tree using add_palnode for every node."""
     store = _make_root()
-    update_index(store.directory, store.store_id)
+    update_index(store.directory, store.tree_path)
 
     # Root level: L1, L2, L3, F0
     add_palnode(store, "mystore", "L1", _make_node(entry_type="store", input="p1"))
@@ -1715,13 +1715,13 @@ def _assert_insertion_order_queries(store):
 class TestInsertionOrder:
     def test_forward_order(self, ctx_env):
         store = _make_root()
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
         _build_minimal_ref_tree(store)
         _assert_insertion_order_queries(store)
 
     def test_reverse_order(self, ctx_env):
         store = _make_root()
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
 
         # Build bottom-up, right-to-left where possible using direct assignment
         # for nodes that must exist before their parents can be referenced.
@@ -1744,7 +1744,7 @@ class TestInsertionOrder:
 
     def test_interleaved_order(self, ctx_env):
         store = _make_root()
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
 
         add_palnode(store, "mystore", "L1", _make_node(entry_type="store", input="p1"))
         add_palnode(store, "mystore", "L2", _make_node(entry_type="store", input="p2"))
@@ -1768,7 +1768,7 @@ class TestInsertionOrder:
 
 class TestResolveLayerInsertionPoint:
     @pytest.mark.parametrize(
-        "store_id,expected_parent",
+        "tree_path,expected_parent",
         [
             ("mystore", "mystore"),
             ("mystore.L7", "mystore"),
@@ -1781,9 +1781,9 @@ class TestResolveLayerInsertionPoint:
             ("mystore.L2.F0.analyze", "mystore.L2.F0.analyze"),
         ],
     )
-    def test_insertion_point(self, ctx_env, store_id, expected_parent):
+    def test_insertion_point(self, ctx_env, tree_path, expected_parent):
         store = _make_root()
-        result = resolve_layer_insertion_point(store, store_id)
+        result = resolve_layer_insertion_point(store, tree_path)
         assert result == expected_parent
 
 
@@ -1795,7 +1795,7 @@ class TestResolveLayerInsertionPoint:
 class TestPalStoreSiblingBug:
     def test_l7_sibling_at_root(self, ctx_env):
         store = _make_root()
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
         for i in range(1, 8):
             add_palnode(store, "mystore", f"L{i}", _make_node(entry_type="store", input=f"p{i}"))
 
@@ -1807,7 +1807,7 @@ class TestPalStoreSiblingBug:
 
     def test_fork_l3_sibling_within_fork(self, ctx_env):
         store = _make_root()
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
         add_palnode(store, "mystore", "F0", _make_node(entry_type="fork"))
         for i in range(1, 4):
             add_palnode(store, "mystore.F0", f"L{i}", _make_node(entry_type="store", input=f"fp{i}"))
@@ -1827,7 +1827,7 @@ class TestPalStoreSiblingBug:
 class TestDetachNode:
     def test_detach_leaf(self, ctx_env):
         store = _make_root()
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
         add_palnode(store, "mystore", "L1", _make_node(entry_type="store", input="hello"))
 
         node = detach_palnode(store, "mystore.L1")
@@ -1837,7 +1837,7 @@ class TestDetachNode:
 
     def test_detach_with_subtree(self, ctx_env):
         store = _make_root()
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
         add_palnode(store, "mystore", "L1", _make_node(entry_type="store", input="parent"))
         add_palnode(store, "mystore.L1", "Q0", _make_node(entry_type="query", input="child"))
 
@@ -1849,21 +1849,21 @@ class TestDetachNode:
 
     def test_detach_nonexistent_raises(self, ctx_env):
         store = _make_root()
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
 
         with pytest.raises(KeyError):
             detach_palnode(store, "mystore.L99")
 
     def test_detach_root_raises(self, ctx_env):
         store = _make_root()
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
 
         with pytest.raises(ValueError):
             detach_palnode(store, "mystore")
 
     def test_siblings_not_renumbered(self, ctx_env):
         store = _make_root()
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
         add_palnode(store, "mystore", "L1", _make_node(entry_type="store", input="one"))
         add_palnode(store, "mystore", "L2", _make_node(entry_type="store", input="two"))
         add_palnode(store, "mystore", "L3", _make_node(entry_type="store", input="three"))
@@ -1885,7 +1885,7 @@ class TestDetachNode:
 class TestMoveNode:
     def test_move_between_parents(self, ctx_env):
         store = _make_root()
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
         add_palnode(store, "mystore", "F0", _make_node(entry_type="fork"))
         add_palnode(store, "mystore", "F1", _make_node(entry_type="fork"))
         add_palnode(store, "mystore.F0", "L1", _make_node(entry_type="store", input="moveme"))
@@ -1899,7 +1899,7 @@ class TestMoveNode:
 
     def test_move_preserves_subtree(self, ctx_env):
         store = _make_root()
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
         add_palnode(store, "mystore", "F0", _make_node(entry_type="fork"))
         add_palnode(store, "mystore", "F1", _make_node(entry_type="fork"))
         add_palnode(store, "mystore.F0", "L1", _make_node(entry_type="store", input="parent"))
@@ -1913,7 +1913,7 @@ class TestMoveNode:
 
     def test_move_invalid_dest_rollback(self, ctx_env):
         store = _make_root()
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
         add_palnode(store, "mystore", "L1", _make_node(entry_type="store", input="original"))
 
         with pytest.raises((ValueError, KeyError)):
@@ -1925,7 +1925,7 @@ class TestMoveNode:
 
     def test_move_returns_new_path(self, ctx_env):
         store = _make_root()
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
         add_palnode(store, "mystore", "F0", _make_node(entry_type="fork"))
         add_palnode(store, "mystore.F0", "L1", _make_node(entry_type="store", input="x"))
 
@@ -1942,7 +1942,7 @@ class TestMoveNode:
 class TestCopyNode:
     def test_copy_creates_independent_clone(self, ctx_env):
         store = _make_root()
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
         add_palnode(store, "mystore", "L1", _make_node(entry_type="store", input="orig"))
         add_palnode(store, "mystore.L1", "Q0", _make_node(entry_type="query", input="orig-child"))
         add_palnode(store, "mystore", "F0", _make_node(entry_type="fork"))
@@ -1955,7 +1955,7 @@ class TestCopyNode:
 
     def test_copy_preserves_content(self, ctx_env):
         store = _make_root()
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
         add_palnode(
             store,
             "mystore",
@@ -1973,7 +1973,7 @@ class TestCopyNode:
 
     def test_copy_to_invalid_dest_raises(self, ctx_env):
         store = _make_root()
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
         add_palnode(store, "mystore", "L1", _make_node(entry_type="store", input="x"))
 
         with pytest.raises(ValueError):
@@ -1994,7 +1994,7 @@ class TestFoldRange:
         from utils.palstore_builder import build_context_from_ancestry
 
         store = _make_root()
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
         n1 = _make_node(entry_type="store", input="q1", output="r1")
         n2 = _make_node(entry_type="query", input="q2", output="r2")
         n3 = _make_node(entry_type="tool", input="q3", output="r3")
@@ -2009,7 +2009,7 @@ class TestFoldRange:
 
     def test_fold_skips_forks(self, ctx_env):
         store = _make_root()
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
         n1 = _make_node(entry_type="store", input="q1", output="r1", files=["f1.py"])
         fork = _make_node(entry_type="fork")
         n3 = _make_node(entry_type="store", input="q3", output="r3", files=["f3.py"])
@@ -2025,7 +2025,7 @@ class TestFoldRange:
 
     def test_fold_unions_files(self, ctx_env):
         store = _make_root()
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
         n1 = _make_node(entry_type="store", input="p1", output="r1", files=["a.py", "b.py"])
         n2 = _make_node(entry_type="query", input="p2", output="r2", files=["b.py", "c.py"])
         store.children["L1"] = n1
@@ -2037,7 +2037,7 @@ class TestFoldRange:
 
     def test_fold_returns_store_node(self, ctx_env):
         store = _make_root()
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
         n1 = _make_node(entry_type="store", input="p1", output="r1")
         store.children["L1"] = n1
 
@@ -2056,7 +2056,7 @@ class TestFoldRange:
 class TestFindAncestor:
     def test_find_nearest_l_ancestor(self, ctx_env):
         store = _make_root()
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
         add_palnode(store, "mystore", "L1", _make_node(entry_type="store"))
         add_palnode(store, "mystore.L1", "Q0", _make_node(entry_type="query"))
         add_palnode(store, "mystore.L1.Q0", "F0", _make_node(entry_type="fork"))
@@ -2071,7 +2071,7 @@ class TestFindAncestor:
 
     def test_find_nearest_fork(self, ctx_env):
         store = _make_root()
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
         add_palnode(store, "mystore", "F0", _make_node(entry_type="fork"))
         add_palnode(store, "mystore.F0", "L1", _make_node(entry_type="store"))
         add_palnode(store, "mystore.F0.L1", "F0", _make_node(entry_type="fork"))
@@ -2087,7 +2087,7 @@ class TestFindAncestor:
 
     def test_no_match_returns_none(self, ctx_env):
         store = _make_root()
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
         add_palnode(store, "mystore", "L1", _make_node(entry_type="store"))
         add_palnode(store, "mystore.L1", "Q0", _make_node(entry_type="query"))
 
@@ -2097,7 +2097,7 @@ class TestFindAncestor:
 
     def test_returns_deepest_match(self, ctx_env):
         store = _make_root()
-        update_index(store.directory, store.store_id)
+        update_index(store.directory, store.tree_path)
         add_palnode(store, "mystore", "L1", _make_node(entry_type="store"))
         add_palnode(store, "mystore.L1", "F0", _make_node(entry_type="fork"))
         add_palnode(store, "mystore.L1.F0", "L1", _make_node(entry_type="store"))

@@ -239,10 +239,10 @@ class NarrateTool(WorkflowTool):
     ) -> list[str]:
         """Define required actions for each composition phase."""
         if step_number == 1:
-            store_id = getattr(request, "tree_path", None) if request else None
+            tree_path = getattr(request, "tree_path", None) if request else None
             store_note = (
-                f" If tree_path '{store_id}' is provided, explore it via palread to identify relevant pages."
-                if store_id
+                f" If tree_path '{tree_path}' is provided, explore it via palread to identify relevant pages."
+                if tree_path
                 else ""
             )
             return [
@@ -289,10 +289,10 @@ class NarrateTool(WorkflowTool):
         context_parts.append(f"\n=== DOCUMENT PARAMETERS ===\nDocument type: {document_type}\n=== END PARAMETERS ===")
 
         # Add PALTree pages if available
-        store_id = self.narrate_config.get("tree_path")
+        tree_path = self.narrate_config.get("tree_path")
         store_pages = self.narrate_config.get("store_pages")
-        if store_id and store_pages:
-            store_section = self._build_store_section(store_id, store_pages)
+        if tree_path and store_pages:
+            store_section = self._build_store_section(tree_path, store_pages)
             if store_section:
                 context_parts.append(store_section)
 
@@ -307,24 +307,24 @@ class NarrateTool(WorkflowTool):
 
         return "\n".join(context_parts)
 
-    def _build_store_section(self, store_id: str, store_pages: list[int]) -> str:
+    def _build_store_section(self, tree_path: str, store_pages: list[int]) -> str:
         """Read the requested pages from a PALTree and format them for the expert writer.
 
         store_pages is a legacy parameter — in the new tree-based system, nodes are addressed
-        by store_id path. This method reads the store's L-children by index as a compatibility bridge.
+        by tree_path. This method reads the store's L-children by index as a compatibility bridge.
         """
         try:
             from utils.palstore import load_store, resolve_store_location
 
-            location = resolve_store_location(store_id)
+            location = resolve_store_location(tree_path)
             if location is None:
-                logger.warning(f"[NARRATE] store_id '{store_id}' not found — skipping store section")
+                logger.warning(f"[NARRATE] tree_path '{tree_path}' not found — skipping store section")
                 return ""
 
             directory, root_id = location
             store = load_store(directory, root_id)
             if store is None:
-                logger.warning(f"[NARRATE] store file not found for '{store_id}' — skipping store section")
+                logger.warning(f"[NARRATE] store file not found for '{tree_path}' — skipping store section")
                 return ""
 
             page_parts = []
@@ -332,7 +332,7 @@ class NarrateTool(WorkflowTool):
                 key = f"L{page_num}"
                 node = store.children.get(key)
                 if node is None:
-                    logger.warning(f"[NARRATE] store '{store_id}' node {key} not found — skipping")
+                    logger.warning(f"[NARRATE] store '{tree_path}' node {key} not found — skipping")
                     continue
 
                 label = node.label or f"layer {page_num}"
@@ -350,10 +350,10 @@ class NarrateTool(WorkflowTool):
                 return ""
 
             pages_text = "\n\n".join(page_parts)
-            return f"\n=== PALTREE: {store_id} ===\n{pages_text}\n=== END PALTREE ==="
+            return f"\n=== PALTREE: {tree_path} ===\n{pages_text}\n=== END PALTREE ==="
 
         except Exception as e:
-            logger.warning(f"[NARRATE] Failed to build store section for '{store_id}': {type(e).__name__}: {e}")
+            logger.warning(f"[NARRATE] Failed to build store section for '{tree_path}': {type(e).__name__}: {e}")
             return ""
 
     def _build_narrate_summary(self, consolidated_findings) -> str:

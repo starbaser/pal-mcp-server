@@ -44,7 +44,7 @@ def _make_store(layers: list[dict]) -> PalRoot:
             content=content_blob,
         )
     return PalRoot(
-        store_id="test-store",
+        tree_path="test-store",
         directory="/tmp/test",
         created_at="2026-01-01T00:00:00Z",
         children=children,

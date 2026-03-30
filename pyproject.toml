@@ -134,7 +134,7 @@ patch_tags = ["fix", "perf"]
 env = "GH_TOKEN"
 
 [tool.uv.sources]
-oboros = { git = "https://github.com/starbaser/oboros.git" }
+oboros = { path = "/home/eigenmage/dev/projects/oboros", editable = true }
 
 [build-system]
 requires = ["setuptools>=45", "wheel", "setuptools_scm[toml]>=6.2"]

@@ -562,7 +562,7 @@ wheels = [
 [[package]]
 name = "oboros"
 version = "0.1.0"
-source = { git = "https://github.com/starbaser/oboros.git#0975f21a343e3d7d22ab613c7e0476b1a8666d34" }
+source = { editable = "/home/eigenmage/dev/projects/oboros" }
 dependencies = [
     { name = "attrs" },
     { name = "pyyaml" },
@@ -570,6 +570,17 @@ dependencies = [
     { name = "tiktoken" },
     { name = "tyro" },
 ]
+
+[package.metadata]
+requires-dist = [
+    { name = "attrs" },
+    { name = "pyprland", marker = "extra == 'pyprland'", specifier = ">=2.4.0" },
+    { name = "pyyaml" },
+    { name = "rich" },
+    { name = "tiktoken" },
+    { name = "tyro" },
+]
+provides-extras = ["pyprland"]
 
 [[package]]
 name = "openai"
@@ -615,7 +626,7 @@ requires-dist = [
     { name = "ipython", specifier = ">=8.38.0" },
     { name = "mcp", specifier = ">=1.0.0" },
     { name = "msgpack", specifier = ">=1.1.2" },
-    { name = "oboros", git = "https://github.com/starbaser/oboros.git" },
+    { name = "oboros", editable = "/home/eigenmage/dev/projects/oboros" },
     { name = "openai", specifier = ">=1.55.2" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pynng", specifier = ">=0.8.1" },

@@ -59,7 +59,7 @@ CLI Client (Claude/Gemini/Codex)
 ### Key Components
 
 **`server.py`** — Entry point and MCP protocol handler
-- `TOOLS` dict maps tool names to instances (31 tools registered)
+- `TOOLS` dict maps tool names to instances (32 tools registered)
 - `ESSENTIAL_TOOLS = {"version", "listmodels"}` — cannot be disabled
 - `handle_call_tool()` routes requests, resolves models, reconstructs conversation context
 - `configure_providers()` registers providers based on API keys
@@ -107,7 +107,7 @@ Tools declare their preferred model tier via `get_model_category()` → `ToolMod
 - `BALANCED` — perceive, clink
 - `IMAGE_GENERATION` — imagegen
 
-Tools that override `requires_model() → False` bypass model resolution entirely: clink, planner, consensus, docgen, tracer, challenge, apilookup, listmodels, version, and all PALTree tools except writenode and querynode.
+Tools that override `requires_model() → False` bypass model resolution entirely: clink, planner, consensus, docgen, tracer, challenge, apilookup, listmodels, version, germinate, and all PALTree tools except writenode and querynode.
 
 ### Tool System
 
@@ -133,6 +133,9 @@ BaseTool (direct) ─── PalInitTool, PalForkTool, PalListTool, PalReadTool,
                       PalMoveTool, PalCopyTool, PalFoldTool, PalDeleteTool,
                       PalTraverseTool
                       (requires_model=False, pure filesystem)
+
+BaseTool (direct) ─── GerminateTool
+                      (requires_model=False, manages own provider calls internally)
 
 SimpleTool → PalStoreBaseTool ─── PalStoreTool, PalQueryTool
                                   (requires_model=True, thinking_mode="max")
@@ -238,6 +241,24 @@ The MCP parameter `tree_path` identifies nodes using dot-path notation. The `Pal
 | `clonetree`      | PalCopyTool       | No             | tree  |
 | `foldtree`       | PalFoldTool       | No             | tree  |
 | `deletenode`     | PalDeleteTool     | No             | node  |
+| `germinate`      | GerminateTool     | No (internal)  | tree  |
+
+**`tools/germinate.py`** — Automated PALTree builder. Scans a project directory, identifies architectural layers (inner core → outer bark), then analyzes each layer with accumulated CoT context. Key design:
+- Inherits `BaseTool` directly with `requires_model=False` — manages its own `get_model_provider()` + `generate_content()` calls internally (same pattern as `ConsensusTool._consult_model()`)
+- Hybrid layer identification: heuristic directory/filename classification → merge thin layers (<3 files) into neighbors
+- Two model calls per layer: (a) analyze with file contents injected, (b) synthesize with accumulated ancestry context
+- **Nested Q-nodes** for context accumulation — each layer's Q-node is the child of the previous layer's Q-node, creating a linear ancestry chain. Sibling Q-nodes would NOT work because `walk_palnode_ancestry()` only traces direct ancestors.
+- File contents are injected into prompts but **not persisted** in nodes — only analysis/synthesis text is saved. File paths go in `PalNode.files`.
+- `save_store()` after each layer for crash recovery of partial gestations.
+
+Node structure produced:
+```
+myproject (root)
+└── L1: project manifest (entry_type="store")
+    └── Q0: innermost layer (entry_type="query", sees L1)
+        └── Q0: next layer (sees L1 + parent Q0)
+            └── Q0: outer layer (sees full ancestry chain)
+```
 
 ## Environment Variables
 

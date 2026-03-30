@@ -72,6 +72,7 @@ from tools import (  # noqa: E402
     TracerTool,
     VersionTool,
 )
+from tools.germinate import GerminateTool
 from tools.models import ToolOutput  # noqa: E402
 from tools.palstore import (
     PalCopyTool,
@@ -319,6 +320,7 @@ TOOLS = {
     "clonetree": PalCopyTool(),
     "foldtree": PalFoldTool(),
     "deletenode": PalDeleteTool(),
+    "germinate": GerminateTool(),
 }
 TOOLS = filter_disabled_tools(TOOLS)
 
@@ -453,6 +455,11 @@ PROMPT_TEMPLATES = {
         "name": "writenodefile",
         "description": "Write a file to a PALNode's file list",
         "template": "Write file to PALNode",
+    },
+    "germinate": {
+        "name": "germinate",
+        "description": "Build a PALTree from project analysis",
+        "template": "Germinate PALTree with {model}",
     },
 }
 
@@ -1170,6 +1177,7 @@ def _extract_gen_files(result: list, continuation_id: str | None, cwd: str) -> l
         logger.info("palshebang: extracted %s", file_path)
 
     if saved_paths:
+
         def _strip_shebang(m: re.Match) -> str:
             fence = m.group("fence")
             lang = m.group("lang")

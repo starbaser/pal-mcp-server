@@ -686,7 +686,9 @@ class PalQueryTool(PalStoreBaseTool):
 
     def format_response(self, response: str, _request: PalQueryRequest, _model_info: Optional[dict] = None) -> str:
         self._last_raw_response = response
-        return f"{response}\n\n---\n\nAGENT'S TURN: Evaluate this response from the PALTree alongside your own analysis."
+        return (
+            f"{response}\n\n---\n\nAGENT'S TURN: Evaluate this response from the PALTree alongside your own analysis."
+        )
 
     def _create_continuation_offer(self, _request, _model_info: Optional[dict] = None):
         from utils.palstore import get_next_key
@@ -1734,9 +1736,7 @@ class PalFileWriteTool(BaseTool):
             return [TextContent(type="text", text=error.model_dump_json())]
 
         if not os.path.isfile(file_path):
-            error = ToolOutput(
-                status="error", content=f"File does not exist: {file_path}", content_type="text"
-            )
+            error = ToolOutput(status="error", content=f"File does not exist: {file_path}", content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
         location = resolve_store_location(tree_path)
@@ -1747,9 +1747,7 @@ class PalFileWriteTool(BaseTool):
         directory, root_id = location
         store = load_store(directory, root_id)
         if store is None:
-            error = ToolOutput(
-                status="error", content=f'PALTree file not found: "{root_id}".', content_type="text"
-            )
+            error = ToolOutput(status="error", content=f'PALTree file not found: "{root_id}".', content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
         node = resolve_palnode(store, tree_path)
@@ -1773,7 +1771,12 @@ class PalFileWriteTool(BaseTool):
             status="success",
             content=f"File attached to node {tree_path}: {file_path}\n\nTotal files on node: {len(node.files)}",
             content_type="text",
-            metadata={"tree_path": tree_path, "file_path": file_path, "action": "added", "total_files": len(node.files)},
+            metadata={
+                "tree_path": tree_path,
+                "file_path": file_path,
+                "action": "added",
+                "total_files": len(node.files),
+            },
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]
 

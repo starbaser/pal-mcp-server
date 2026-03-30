@@ -8,11 +8,9 @@ from __future__ import annotations
 import json
 import re
 
-import pytest
 from mcp.types import TextContent
 
 from server import _GEN_BLOCK_RE, _extract_gen_files, _resolve_gen_call_id
-
 
 # ---------------------------------------------------------------------------
 # _GEN_BLOCK_RE
@@ -65,11 +63,7 @@ class TestGenBlockRe:
         assert m.group("filename") == "crlf.py"
 
     def test_matches_multiple_blocks_in_string(self):
-        text = (
-            "```python\n#!/> first.py\nfirst\n```\n"
-            "some prose\n"
-            "```js\n#!/> second.js\nconsole.log()\n```\n"
-        )
+        text = "```python\n#!/> first.py\nfirst\n```\n" "some prose\n" "```js\n#!/> second.js\nconsole.log()\n```\n"
         matches = list(_GEN_BLOCK_RE.finditer(text))
         assert len(matches) == 2
         assert matches[0].group("filename") == "first.py"

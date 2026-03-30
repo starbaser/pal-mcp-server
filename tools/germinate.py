@@ -321,7 +321,7 @@ class GerminateTool(BaseTool):
             "properties": {
                 "directory": {
                     "type": "string",
-                    "description": "Absolute path to the project directory to analyze.",
+                    "description": "Absolute path to the project directory to analyze. Defaults to current working directory.",
                 },
                 "tree_name": {
                     "type": "string",
@@ -332,7 +332,7 @@ class GerminateTool(BaseTool):
                     "description": "Model to use for analysis. Defaults to auto-selected.",
                 },
             },
-            "required": ["directory"],
+            "required": [],
             "additionalProperties": False,
         }
 
@@ -377,9 +377,9 @@ class GerminateTool(BaseTool):
         from utils.palstore_builder import build_context_from_ancestry
         from utils.response_formatter import render_markdown_output
 
-        directory = arguments.get("directory", "")
-        if not directory or not os.path.isdir(directory):
-            return self._error("directory must be an existing absolute path.")
+        directory = arguments.get("directory") or os.getcwd()
+        if not os.path.isdir(directory):
+            return self._error(f"directory does not exist: {directory}")
 
         tree_name = arguments.get("tree_name") or os.path.basename(directory.rstrip("/"))
         if "." in tree_name:

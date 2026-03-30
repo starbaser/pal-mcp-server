@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from tools.models import ToolModelCategory
-from tools.palstore import PalInitTool, PalListTool, PalQueryTool, PalStoreRequest, PalStoreTool
+from tools.palstore import PalAddTreeLayerRequest, PalAddTreeLayerTool, PalInitTool, PalListTool, PalQueryTool
 
 
 class TestPalInitTool:
@@ -66,12 +66,12 @@ class TestPalInitTool:
         assert "dot" in payload["content"].lower()
 
 
-class TestPalStoreTool:
+class TestPalAddTreeLayerTool:
     def setup_method(self):
-        self.tool = PalStoreTool()
+        self.tool = PalAddTreeLayerTool()
 
     def test_tool_metadata(self):
-        assert self.tool.get_name() == "writenode"
+        assert self.tool.get_name() == "addtreelayer"
         assert "layer" in self.tool.get_description().lower()
         assert self.tool.get_model_category() is ToolModelCategory.EXTENDED_REASONING
 
@@ -106,7 +106,7 @@ class TestPalStoreTool:
         assert self.tool.get_default_thinking_mode() == "max"
 
     async def test_prepare_prompt_includes_header(self):
-        request = PalStoreRequest(prompt="ignored", tree_path="myproject")
+        request = PalAddTreeLayerRequest(prompt="ignored", tree_path="myproject")
 
         with patch.object(self.tool, "handle_prompt_file_with_fallback", return_value="test content"):
             with patch.object(self.tool, "get_request_files", return_value=[]):
@@ -212,7 +212,7 @@ class TestContextEphemeralGuard:
         from server import reconstruct_thread_context
         from utils.conversation_memory import add_turn, create_thread, get_thread
 
-        thread_id = create_thread("writenode", {"prompt": "init"}, model_name="test-model")
+        thread_id = create_thread("addtreelayer", {"prompt": "init"}, model_name="test-model")
         add_turn(thread_id, "assistant", "Stored initial context", model_name="test-model", model_provider="custom")
 
         arguments = {
@@ -236,7 +236,7 @@ class TestContextEphemeralGuard:
         from server import reconstruct_thread_context
         from utils.conversation_memory import add_turn, create_thread, get_thread
 
-        thread_id = create_thread("writenode", {"prompt": "init"}, model_name="test-model")
+        thread_id = create_thread("addtreelayer", {"prompt": "init"}, model_name="test-model")
         add_turn(thread_id, "assistant", "Stored initial context", model_name="test-model", model_provider="custom")
 
         arguments = {
@@ -265,7 +265,7 @@ class TestContextEphemeralGuard:
     def test_palstore_registered_in_tools(self):
         from server import TOOLS
 
-        assert "writenode" in TOOLS
+        assert "addtreelayer" in TOOLS
 
 
 class TestContextForkChain:
@@ -274,7 +274,7 @@ class TestContextForkChain:
     async def test_fork_creates_parent_chain(self):
         from utils.conversation_memory import add_turn, create_thread, get_thread_chain
 
-        parent_id = create_thread("writenode", {"prompt": "parent init"}, model_name="gemini-test")
+        parent_id = create_thread("addtreelayer", {"prompt": "parent init"}, model_name="gemini-test")
         add_turn(parent_id, "user", "Store this context")
         add_turn(parent_id, "assistant", "Context stored", model_name="gemini-test", model_provider="google")
 
@@ -289,7 +289,7 @@ class TestContextForkChain:
     async def test_fork_does_not_modify_parent(self):
         from utils.conversation_memory import add_turn, create_thread, get_thread
 
-        parent_id = create_thread("writenode", {"prompt": "parent"}, model_name="gemini-test")
+        parent_id = create_thread("addtreelayer", {"prompt": "parent"}, model_name="gemini-test")
         add_turn(parent_id, "user", "Initial store")
         add_turn(parent_id, "assistant", "Acknowledged", model_name="gemini-test", model_provider="google")
 
@@ -309,7 +309,7 @@ class TestContextForkChain:
     async def test_multi_level_fork_chain(self):
         from utils.conversation_memory import add_turn, create_thread, get_thread_chain
 
-        id_a = create_thread("writenode", {"prompt": "root"}, model_name="test-model")
+        id_a = create_thread("addtreelayer", {"prompt": "root"}, model_name="test-model")
         add_turn(id_a, "assistant", "Root context", model_name="test-model", model_provider="custom")
 
         id_b = create_thread("querynode", {"prompt": "fork-b"}, parent_thread_id=id_a)
@@ -687,7 +687,7 @@ class TestStrictHistoryEnforcement:
             thread_id="test-strict",
             created_at="2026-01-01T00:00:00Z",
             last_updated_at="2026-01-01T00:00:00Z",
-            tool_name="writenode",
+            tool_name="addtreelayer",
             turns=turns,
             initial_context={},
         )
@@ -770,7 +770,7 @@ class TestStrictHistoryEnforcement:
             thread_id="test-fits",
             created_at="2026-01-01T00:00:00Z",
             last_updated_at="2026-01-01T00:00:01Z",
-            tool_name="writenode",
+            tool_name="addtreelayer",
             turns=turns,
             initial_context={},
         )
@@ -789,6 +789,224 @@ class TestStrictHistoryEnforcement:
         # Should not raise
         history, tokens = build_conversation_history(context, model_context, strict=True)
         assert "most recent turns" not in history
+
+
+class TestPalUpsertTool:
+    def setup_method(self):
+        from tools.palstore import PalUpsertTool
+
+        self.tool = PalUpsertTool()
+
+    def test_tool_metadata(self):
+        assert self.tool.get_name() == "upsertnode"
+        assert self.tool.requires_model() is False
+
+    def test_tool_schema_structure(self):
+        schema = self.tool.get_input_schema()
+        props = schema["properties"]
+        assert "tree_path" in props
+        assert "insert" in props
+        assert "label" in props
+        assert "input" in props
+        assert "output" in props
+        assert "files" in props
+        assert "metadata" in props
+        assert "entry_type" in props
+        assert "child_key" in props
+        assert "child_prefix" in props
+        assert schema["required"] == ["tree_path"]
+
+    @pytest.mark.asyncio
+    async def test_update_mode_sets_fields(self, tmp_path):
+        import os
+
+        from utils.palstore import PalNode, PalRoot, save_store, update_index
+
+        os.environ["PAL_STORAGE_DIR"] = str(tmp_path)
+
+        store = PalRoot(
+            tree_path="test-upsert",
+            directory=str(tmp_path),
+            created_at="2024-01-01T00:00:00Z",
+            children={"L1": PalNode(entry_type="store", label="original", input="old input", output="old output")},
+        )
+        save_store(store)
+        update_index(str(tmp_path), "test-upsert")
+
+        result = await self.tool.execute(
+            {
+                "tree_path": "test-upsert.L1",
+                "label": "updated",
+                "output": "new output",
+                "metadata": {"key": "value"},
+            }
+        )
+
+        import json
+
+        data = json.loads(result[0].text)
+        assert data["status"] == "success"
+        assert "label" in data["content"]
+        assert "output" in data["content"]
+        assert "metadata" in data["content"]
+
+    @pytest.mark.asyncio
+    async def test_update_mode_rejects_root(self, tmp_path):
+        import os
+
+        from utils.palstore import PalRoot, save_store, update_index
+
+        os.environ["PAL_STORAGE_DIR"] = str(tmp_path)
+
+        store = PalRoot(
+            tree_path="test-root",
+            directory=str(tmp_path),
+            created_at="2024-01-01T00:00:00Z",
+        )
+        save_store(store)
+        update_index(str(tmp_path), "test-root")
+
+        result = await self.tool.execute({"tree_path": "test-root"})
+        import json
+
+        data = json.loads(result[0].text)
+        assert data["status"] == "error"
+        assert "root" in data["content"].lower()
+
+    @pytest.mark.asyncio
+    async def test_insert_mode_requires_entry_type(self, tmp_path):
+        import os
+
+        from utils.palstore import PalNode, PalRoot, save_store, update_index
+
+        os.environ["PAL_STORAGE_DIR"] = str(tmp_path)
+
+        store = PalRoot(
+            tree_path="test-insert",
+            directory=str(tmp_path),
+            created_at="2024-01-01T00:00:00Z",
+            children={"L1": PalNode(entry_type="store", label="layer")},
+        )
+        save_store(store)
+        update_index(str(tmp_path), "test-insert")
+
+        result = await self.tool.execute(
+            {
+                "tree_path": "test-insert.L1",
+                "insert": True,
+            }
+        )
+        import json
+
+        data = json.loads(result[0].text)
+        assert data["status"] == "error"
+        assert "entry_type" in data["content"]
+
+    @pytest.mark.asyncio
+    async def test_insert_mode_creates_child(self, tmp_path):
+        import os
+
+        from utils.palstore import PalNode, PalRoot, save_store, update_index
+
+        os.environ["PAL_STORAGE_DIR"] = str(tmp_path)
+
+        store = PalRoot(
+            tree_path="test-child",
+            directory=str(tmp_path),
+            created_at="2024-01-01T00:00:00Z",
+            children={"L1": PalNode(entry_type="store", label="layer")},
+        )
+        save_store(store)
+        update_index(str(tmp_path), "test-child")
+
+        result = await self.tool.execute(
+            {
+                "tree_path": "test-child.L1",
+                "insert": True,
+                "entry_type": "query",
+                "label": "manual query",
+                "input": "test input",
+                "output": "test output",
+            }
+        )
+        import json
+
+        data = json.loads(result[0].text)
+        assert data["status"] == "success"
+        assert "test-child.L1.Q0" in data["content"]
+
+    @pytest.mark.asyncio
+    async def test_update_mode_metadata_merge(self, tmp_path):
+        import os
+
+        from utils.palstore import PalNode, PalRoot, load_store, save_store, update_index
+
+        os.environ["PAL_STORAGE_DIR"] = str(tmp_path)
+
+        store = PalRoot(
+            tree_path="test-merge",
+            directory=str(tmp_path),
+            created_at="2024-01-01T00:00:00Z",
+            children={"L1": PalNode(entry_type="store", label="layer", metadata={"existing": "keep"})},
+        )
+        save_store(store)
+        update_index(str(tmp_path), "test-merge")
+
+        result = await self.tool.execute(
+            {
+                "tree_path": "test-merge.L1",
+                "metadata": {"new_key": "new_value"},
+            }
+        )
+
+        import json
+
+        data = json.loads(result[0].text)
+        assert data["status"] == "success"
+
+        # Reload and verify merge
+        reloaded = load_store(str(tmp_path), "test-merge")
+        node = reloaded.children["L1"]
+        assert node.metadata["existing"] == "keep"
+        assert node.metadata["new_key"] == "new_value"
+
+    @pytest.mark.asyncio
+    async def test_insert_duplicate_key_rejected(self, tmp_path):
+        import os
+
+        from utils.palstore import PalNode, PalRoot, save_store, update_index
+
+        os.environ["PAL_STORAGE_DIR"] = str(tmp_path)
+
+        store = PalRoot(
+            tree_path="test-dup",
+            directory=str(tmp_path),
+            created_at="2024-01-01T00:00:00Z",
+            children={
+                "L1": PalNode(
+                    entry_type="store",
+                    label="layer",
+                    children={"Q0": PalNode(entry_type="query", label="existing")},
+                )
+            },
+        )
+        save_store(store)
+        update_index(str(tmp_path), "test-dup")
+
+        result = await self.tool.execute(
+            {
+                "tree_path": "test-dup.L1",
+                "insert": True,
+                "entry_type": "query",
+                "child_key": "Q0",
+                "label": "duplicate",
+            }
+        )
+        import json
+
+        data = json.loads(result[0].text)
+        assert data["status"] == "error"
+        assert "already exists" in data["content"]
 
 
 if __name__ == "__main__":

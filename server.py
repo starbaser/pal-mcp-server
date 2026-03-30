@@ -75,6 +75,7 @@ from tools import (  # noqa: E402
 from tools.germinate import GerminateTool
 from tools.models import ToolOutput  # noqa: E402
 from tools.palstore import (
+    PalAddTreeLayerTool,
     PalCopyTool,
     PalDeleteTool,
     PalDeleteTreeTool,
@@ -90,8 +91,8 @@ from tools.palstore import (
     PalQueryTool,
     PalReadTool,
     PalRenameTool,
-    PalStoreTool,
     PalTraverseTool,
+    PalUpsertTool,
 )
 from tools.shared.exceptions import ToolExecutionError  # noqa: E402
 from utils.env import env_override_enabled, get_env  # noqa: E402
@@ -306,7 +307,8 @@ TOOLS = {
     "imagegen": ImageGenTool(),  # Native AI image generation and editing
     "perceive": PerceiveTool(),  # Structured media intelligence extraction (image, video, audio)
     "newtree": PalInitTool(),
-    "writenode": PalStoreTool(),
+    "addtreelayer": PalAddTreeLayerTool(),
+    "upsertnode": PalUpsertTool(),
     "querynode": PalQueryTool(),
     "treelist": PalListTool(),
     "forknode": PalForkTool(),
@@ -428,10 +430,15 @@ PROMPT_TEMPLATES = {
         "description": "Create a named PALTree",
         "template": "Initialize PALTree",
     },
-    "writenode": {
-        "name": "writenode",
-        "description": "Store context nodes in a PALTree",
-        "template": "Store context with {model}",
+    "addtreelayer": {
+        "name": "addtreelayer",
+        "description": "Add context layer to a PALTree",
+        "template": "Add layer with {model}",
+    },
+    "upsertnode": {
+        "name": "upsertnode",
+        "description": "Update or insert PALNode fields directly",
+        "template": "Upsert PALNode",
     },
     "querynode": {
         "name": "querynode",

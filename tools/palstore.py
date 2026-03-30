@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 TREE_PATH_DESCRIPTION = (
     "Dot-path to a PALNode in a PALTree. Root trees use a plain name (e.g. 'myproject'). "
     "Child nodes extend with dot notation (e.g. 'myproject.L1', 'myproject.L1.Q1'). "
-    "Use treelist to discover tree paths. Returned by newtree, writenode, querynode, and forknode."
+    "Use treelist to discover tree paths. Returned by newtree, addtreelayer, querynode, and forknode."
 )
 
 
@@ -104,7 +104,7 @@ def _render_store_tree(store, root_path: str = "", indent: int = 0) -> list[str]
 # ---------------------------------------------------------------------------
 
 
-class PalStoreRequest(ToolRequest):
+class PalAddTreeLayerRequest(ToolRequest):
     prompt: str = Field(...)
     absolute_file_paths: Optional[list[str]] = Field(default_factory=list)
     media: Optional[list[str]] = Field(default_factory=list)
@@ -177,7 +177,7 @@ class PalInitTool(BaseTool):
         return (
             "Create a new named PALTree and register it to a project directory.\n"
             "Run treelist first to check for an existing tree before creating a new one;\n"
-            "use writenode to add nodes after creation."
+            "use addtreelayer to add nodes after creation."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -264,7 +264,7 @@ class PalInitTool(BaseTool):
                 f"PALTree created.\n\n"
                 f"tree_path: {store_name}\n"
                 f"directory: {directory}\n\n"
-                f'Use writenode(tree_path="{store_name}", ...) to add context layers.'
+                f'Use addtreelayer(tree_path="{store_name}", ...) to add context layers.'
             ),
             content_type="text",
             metadata={"tree_path": store_name, "directory": directory},
@@ -273,23 +273,23 @@ class PalInitTool(BaseTool):
 
 
 # ---------------------------------------------------------------------------
-# writenode
+# addtreelayer
 # ---------------------------------------------------------------------------
 
 
-class PalStoreTool(PalStoreBaseTool):
+class PalAddTreeLayerTool(PalStoreBaseTool):
     def get_name(self) -> str:
-        return "writenode"
+        return "addtreelayer"
 
     def get_description(self) -> str:
         return (
             "Add a context node to an existing PALTree, embedding files and prose for an external model to process.\n"
-            "Each call appends a new numbered layer (L1, L2, …); seed 4–6 key files per node for best results.\n"
+            "Each call appends a new numbered layer (L1, L2, ...); seed 4-6 key files per node for best results.\n"
             "Use newtree to create a tree first, then querynode to retrieve stored context."
         )
 
     def get_request_model(self):
-        return PalStoreRequest
+        return PalAddTreeLayerRequest
 
     def get_tool_fields(self) -> dict[str, dict[str, Any]]:
         return {
@@ -364,7 +364,7 @@ class PalStoreTool(PalStoreBaseTool):
         if not tree_path:
             error = ToolOutput(
                 status="error",
-                content="writenode requires a tree_path. Use newtree to create a tree first.",
+                content="addtreelayer requires a tree_path. Use newtree to create a tree first.",
                 content_type="text",
             )
             return [TextContent(type="text", text=error.model_dump_json())]
@@ -396,7 +396,7 @@ class PalStoreTool(PalStoreBaseTool):
 
         return await super().execute(arguments)
 
-    async def prepare_prompt(self, request: PalStoreRequest) -> str:
+    async def prepare_prompt(self, request: PalAddTreeLayerRequest) -> str:
         user_content = self.handle_prompt_file_with_fallback(request)
 
         files = self.get_request_files(request)
@@ -454,7 +454,9 @@ class PalStoreTool(PalStoreBaseTool):
             return ""
         return f"\n\n=== CONTEXT FILES ===\n{''.join(file_parts)}\n=== END CONTEXT FILES ==="
 
-    def format_response(self, response: str, _request: PalStoreRequest, _model_info: Optional[dict] = None) -> str:
+    def format_response(
+        self, response: str, _request: PalAddTreeLayerRequest, _model_info: Optional[dict] = None
+    ) -> str:
         self._last_raw_response = response
         return f"{response}\n\n---\n\nAGENT'S TURN: Context layer stored. Use the tree_path to add more layers or query this tree."
 
@@ -489,7 +491,7 @@ class PalStoreTool(PalStoreBaseTool):
         insertion_parent = getattr(self, "_insertion_parent", None)
         next_key = getattr(self, "_next_key", None)
         if store is None or insertion_parent is None or next_key is None:
-            logger.warning("writenode: missing store state in _record_assistant_turn, skipping write")
+            logger.warning("addtreelayer: missing store state in _record_assistant_turn, skipping write")
             return
 
         raw = getattr(self, "_last_raw_response", response_text)
@@ -522,6 +524,244 @@ class PalStoreTool(PalStoreBaseTool):
 
         add_palnode(store, insertion_parent, next_key, node)
         save_store(store)
+
+
+# ---------------------------------------------------------------------------
+# upsertnode
+# ---------------------------------------------------------------------------
+
+
+class PalUpsertTool(BaseTool):
+    """Update fields on an existing PALNode, or insert a new child node — without calling a model."""
+
+    def get_name(self) -> str:
+        return "upsertnode"
+
+    def get_description(self) -> str:
+        return (
+            "Update fields on an existing PALNode, or insert a new child node — without calling a model.\n"
+            "Two modes:\n"
+            "  Update mode (default): target an existing node by tree_path, update its fields.\n"
+            "  Insert mode (insert=true): target an existing node, add a NEW child node under it.\n"
+            "Fields: label, input, output, files, metadata, entry_type (for insert)."
+        )
+
+    def get_annotations(self) -> dict:
+        return {"readOnlyHint": False, "openWorldHint": False}
+
+    def get_system_prompt(self) -> str:
+        return ""
+
+    def get_request_model(self):
+        return ToolRequest
+
+    def requires_model(self) -> bool:
+        return False
+
+    def get_model_category(self):
+        from tools.models import ToolModelCategory
+
+        return ToolModelCategory.FAST_RESPONSE
+
+    def get_input_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "tree_path": {"type": "string", "description": TREE_PATH_DESCRIPTION},
+                "insert": {
+                    "type": "boolean",
+                    "description": (
+                        "False (default): update fields on the node at tree_path. "
+                        "True: insert a NEW child node under tree_path."
+                    ),
+                },
+                "label": {"type": "string", "description": "Human-readable label for the node."},
+                "input": {"type": "string", "description": "Input text to store on the node."},
+                "output": {"type": "string", "description": "Output text to store on the node."},
+                "files": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Absolute file paths to attach to the node. Replaces existing list.",
+                },
+                "metadata": {
+                    "type": "object",
+                    "description": "Key-value metadata to merge into the node (existing keys preserved unless overwritten).",
+                },
+                "entry_type": {
+                    "type": "string",
+                    "enum": ["store", "query", "tool", "fork"],
+                    "description": "Required when insert=true. The entry_type for the new child node.",
+                },
+                "child_key": {
+                    "type": "string",
+                    "description": (
+                        "Insert mode only. Explicit key for the new child (e.g. 'Q0', 'L3'). "
+                        "If omitted, auto-determined from child_prefix or entry_type."
+                    ),
+                },
+                "child_prefix": {
+                    "type": "string",
+                    "enum": ["Q", "L", "F"],
+                    "description": (
+                        "Insert mode only. Prefix for auto-key generation when child_key is absent. "
+                        "Defaults: store->L, query->Q, fork->F."
+                    ),
+                },
+            },
+            "required": ["tree_path"],
+            "additionalProperties": False,
+        }
+
+    async def prepare_prompt(self, _request) -> str:
+        return ""
+
+    def format_response(self, response, _request, _model_info=None):
+        return response
+
+    async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
+        from tools.models import ToolOutput
+        from utils.palstore import load_store, resolve_store_location
+
+        tree_path = arguments.get("tree_path", "")
+        if not tree_path:
+            error = ToolOutput(status="error", content="tree_path is required.", content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        location = resolve_store_location(tree_path)
+        if location is None:
+            error = ToolOutput(status="error", content=f'Store "{tree_path}" not found.', content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        directory, root_id = location
+        store = load_store(directory, root_id)
+        if store is None:
+            error = ToolOutput(status="error", content=f'Store file not found: "{root_id}".', content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        insert_mode = arguments.get("insert", False)
+
+        if insert_mode:
+            return await self._handle_insert(store, tree_path, arguments)
+        else:
+            return await self._handle_update(store, tree_path, arguments)
+
+    async def _handle_update(self, store, tree_path: str, arguments: dict[str, Any]) -> list[TextContent]:
+        from tools.models import ToolOutput
+        from utils.palstore import resolve_palnode, save_store
+
+        if tree_path == store.tree_path:
+            error = ToolOutput(
+                status="error", content="Cannot upsert the root node. Target a child node.", content_type="text"
+            )
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        node = resolve_palnode(store, tree_path)
+        if node is None:
+            error = ToolOutput(status="error", content=f'Node not found: "{tree_path}".', content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        updated_fields = []
+        if "label" in arguments:
+            node.label = arguments["label"]
+            updated_fields.append("label")
+        if "input" in arguments:
+            node.input = arguments["input"]
+            updated_fields.append("input")
+        if "output" in arguments:
+            node.output = arguments["output"]
+            updated_fields.append("output")
+        if "files" in arguments:
+            node.files = arguments["files"]
+            updated_fields.append("files")
+        if "metadata" in arguments:
+            node.metadata.update(arguments["metadata"])
+            updated_fields.append("metadata")
+
+        if not updated_fields:
+            error = ToolOutput(status="error", content="No fields provided to update.", content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        save_store(store)
+        result = ToolOutput(
+            status="success",
+            content=f"Updated {', '.join(updated_fields)} on {tree_path}.",
+            content_type="text",
+            metadata={"tree_path": tree_path, "updated_fields": updated_fields},
+        )
+        return [TextContent(type="text", text=result.model_dump_json())]
+
+    async def _handle_insert(self, store, tree_path: str, arguments: dict[str, Any]) -> list[TextContent]:
+        from tools.models import ToolOutput
+        from utils.palstore import PalNode, add_palnode, get_next_key, resolve_palnode, save_store
+
+        entry_type = arguments.get("entry_type")
+        if not entry_type:
+            error = ToolOutput(status="error", content="entry_type is required when insert=true.", content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        # Verify parent exists (root or node)
+        if tree_path != store.tree_path:
+            parent = resolve_palnode(store, tree_path)
+            if parent is None:
+                error = ToolOutput(
+                    status="error", content=f'Parent node not found: "{tree_path}".', content_type="text"
+                )
+                return [TextContent(type="text", text=error.model_dump_json())]
+
+        # Determine child key
+        child_key = arguments.get("child_key")
+        if not child_key:
+            child_prefix = arguments.get("child_prefix")
+            if not child_prefix:
+                prefix_map = {"store": "L", "query": "Q", "fork": "F"}
+                child_prefix = prefix_map.get(entry_type)
+                if child_prefix is None:
+                    error = ToolOutput(
+                        status="error",
+                        content=f'Cannot auto-determine key for entry_type="{entry_type}". Provide child_key explicitly.',
+                        content_type="text",
+                    )
+                    return [TextContent(type="text", text=error.model_dump_json())]
+            child_key = get_next_key(store, tree_path, child_prefix)
+
+        # Check for duplicate key
+        if tree_path == store.tree_path:
+            siblings = store.children
+        else:
+            parent_node = resolve_palnode(store, tree_path)
+            siblings = parent_node.children if parent_node else {}
+        if child_key in siblings:
+            error = ToolOutput(
+                status="error",
+                content=f'Key "{child_key}" already exists under "{tree_path}". Use update mode or choose a different key.',
+                content_type="text",
+            )
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        node = PalNode(
+            entry_type=entry_type,
+            label=arguments.get("label"),
+            timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            files=arguments.get("files", []),
+            input=arguments.get("input", ""),
+            output=arguments.get("output", ""),
+            metadata=arguments.get("metadata", {}),
+        )
+
+        try:
+            new_path = add_palnode(store, tree_path, child_key, node)
+        except ValueError as exc:
+            error = ToolOutput(status="error", content=str(exc), content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        save_store(store)
+        result = ToolOutput(
+            status="success",
+            content=f"Inserted {entry_type} node at {new_path}.",
+            content_type="text",
+            metadata={"tree_path": new_path, "entry_type": entry_type, "child_key": child_key},
+        )
+        return [TextContent(type="text", text=result.model_dump_json())]
 
 
 # ---------------------------------------------------------------------------
@@ -770,7 +1010,7 @@ class PalForkTool(BaseTool):
         return (
             "Insert a fork node as a child of the target node in a PALTree, branching to explore alternatives\n"
             "without disrupting the main lineage. Returns a new tree_path for the fork branch.\n"
-            "Use treelist to find the tree_path to fork from; use writenode or querynode with the returned fork tree_path."
+            "Use treelist to find the tree_path to fork from; use addtreelayer or querynode with the returned fork tree_path."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -879,7 +1119,7 @@ class PalListTool(BaseTool):
 
     def get_description(self) -> str:
         return (
-            "List PALTrees and their full node trees, returning tree_paths needed for writenode, querynode,\n"
+            "List PALTrees and their full node trees, returning tree_paths needed for addtreelayer, querynode,\n"
             "readnode, forknode, and other tools. Defaults to the current working directory.\n"
             "Pass directory to scope to a different project, or tree_path to drill into a specific subtree."
         )

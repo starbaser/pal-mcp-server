@@ -14,7 +14,6 @@ from tools.germinate import (
     scan_project_layers,
 )
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -442,7 +441,9 @@ class TestGerminateTool:
         mock_provider = _make_mock_provider("Synthesis output.")
 
         with patch.object(tool, "get_model_provider", return_value=mock_provider):
-            result = await tool.execute({"directory": str(project), "tree_name": "layercount", "model": "gemini-2.5-flash"})
+            result = await tool.execute(
+                {"directory": str(project), "tree_name": "layercount", "model": "gemini-2.5-flash"}
+            )
 
         data = json.loads(result[0].text)
         assert "layers_completed" in data["metadata"]
@@ -521,7 +522,9 @@ class TestGerminateTool:
         mock_provider = _make_mock_provider("Synthesis.")
 
         with patch.object(tool, "get_model_provider", return_value=mock_provider):
-            result = await tool.execute({"directory": str(project), "tree_name": "finpath", "model": "gemini-2.5-flash"})
+            result = await tool.execute(
+                {"directory": str(project), "tree_name": "finpath", "model": "gemini-2.5-flash"}
+            )
 
         data = json.loads(result[0].text)
         assert "final_node" in data["metadata"]

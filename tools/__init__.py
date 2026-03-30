@@ -15,7 +15,15 @@ from .germinate import GerminateTool
 from .imagegen import ImageGenTool
 from .listmodels import ListModelsTool
 from .narrate import NarrateTool
-from .palstore import PalForkTool, PalInitTool, PalListTool, PalQueryTool, PalReadTool, PalStoreTool
+from .palstore import (
+    PalAddTreeLayerTool,
+    PalForkTool,
+    PalInitTool,
+    PalListTool,
+    PalQueryTool,
+    PalReadTool,
+    PalUpsertTool,
+)
 from .perceive import PerceiveTool
 from .planner import PlannerTool
 from .precommit import PrecommitTool
@@ -47,7 +55,8 @@ __all__ = [
     "VersionTool",
     "ImageGenTool",
     "PerceiveTool",
-    "PalStoreTool",
+    "PalAddTreeLayerTool",
+    "PalUpsertTool",
     "PalQueryTool",
     "PalInitTool",
     "PalListTool",

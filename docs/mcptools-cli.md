@@ -62,7 +62,7 @@ mcp call treedump pal -p '{"tree_path": "myproject", "output_path": "/abs/path/e
 mcp call newtree pal -p '{"store_name": "myproject", "directory": "/abs/path/to/project"}'
 
 # Add a layer (AI-synthesized — sends prompt + files to external model)
-mcp call writenode pal -p '{
+mcp call addtreelayer pal -p '{
   "tree_path": "myproject",
   "model": "gemini-2.5-pro",
   "prompt": "Project architecture overview",
@@ -71,7 +71,7 @@ mcp call writenode pal -p '{
 }'
 
 # Add a layer to an existing node
-mcp call writenode pal -p '{
+mcp call addtreelayer pal -p '{
   "tree_path": "myproject.L1",
   "model": "gemini-2.5-pro",
   "prompt": "Deep dive into the auth subsystem",
@@ -149,7 +149,7 @@ Then type tool names with JSON params directly:
 ```
 mcp > treelist {"directory": "/home/eigenmage/dev/opt/pal-mcp-server"}
 mcp > readnode {"tree_path": "pal-mcp-server.L1"}
-mcp > writenode {"tree_path": "pal-mcp-server", "model": "gemini-2.5-pro", "prompt": "...", "context_label": "..."}
+mcp > addtreelayer {"tree_path": "pal-mcp-server", "model": "gemini-2.5-pro", "prompt": "...", "context_label": "..."}
 ```
 
 ## Troubleshooting

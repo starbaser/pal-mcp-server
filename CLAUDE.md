@@ -59,7 +59,7 @@ CLI Client (Claude/Gemini/Codex)
 ### Key Components
 
 **`server.py`** — Entry point and MCP protocol handler
-- `TOOLS` dict maps tool names to instances (33 tools registered)
+- `TOOLS` dict maps tool names to instances (34 tools registered)
 - `ESSENTIAL_TOOLS = {"version", "listmodels"}` — cannot be disabled
 - `handle_call_tool()` routes requests, resolves models, reconstructs conversation context
 - `configure_providers()` registers providers based on API keys
@@ -102,12 +102,12 @@ Models are resolved early at the MCP boundary in `handle_call_tool()`:
 4. Pass resolved context to tool
 
 Tools declare their preferred model tier via `get_model_category()` → `ToolModelCategory`:
-- `EXTENDED_REASONING` — most tools (codereview, debug, analyze, thinkdeep, writenode, querynode, etc.)
+- `EXTENDED_REASONING` — most tools (codereview, debug, analyze, thinkdeep, addtreelayer, querynode, etc.)
 - `FAST_RESPONSE` — chat, listmodels, version, treelist, readnode, forknode, newtree, renametree, treedump, listnodefiles, readnodefile, writenodefile
 - `BALANCED` — perceive, clink
 - `IMAGE_GENERATION` — imagegen
 
-Tools that override `requires_model() → False` bypass model resolution entirely: clink, planner, consensus, docgen, tracer, challenge, apilookup, listmodels, version, germinate, and all PALTree tools except writenode and querynode.
+Tools that override `requires_model() → False` bypass model resolution entirely: clink, planner, consensus, docgen, tracer, challenge, apilookup, listmodels, version, germinate, upsertnode, and all PALTree tools except addtreelayer and querynode.
 
 ### Tool System
 
@@ -131,13 +131,13 @@ BaseTool (direct) ─── PalInitTool, PalForkTool, PalListTool, PalReadTool,
                       PalRenameTool, PalExportTool,
                       PalFileListTool, PalFileReadTool, PalFileWriteTool,
                       PalMoveTool, PalCopyTool, PalFoldTool, PalDeleteTool,
-                      PalDeleteTreeTool, PalTraverseTool
+                      PalDeleteTreeTool, PalTraverseTool, PalUpsertTool
                       (requires_model=False, pure filesystem)
 
 BaseTool (direct) ─── GerminateTool
                       (requires_model=False, manages own provider calls internally)
 
-SimpleTool → PalStoreBaseTool ─── PalStoreTool, PalQueryTool
+SimpleTool → PalStoreBaseTool ─── PalAddTreeLayerTool, PalQueryTool
                                   (requires_model=True, thinking_mode="max")
 ```
 
@@ -145,7 +145,7 @@ SimpleTool → PalStoreBaseTool ─── PalStoreTool, PalQueryTool
 - Fields: `input: str`, `output: str`, `files: list[str] = []`, `metadata: dict[str, Any] = {}`
 - `input` = full tool call data rendered via `render_markdown_output()` (uses `oboros.tome.dumps` — TOME BFS-linearized markdown with `§` sigils)
 - `output` = full tool response rendered via `render_markdown_output()`
-- `files` = flat list of absolute path strings attached to this node (populated by `writenode`/`querynode` via `absolute_file_paths`, or by `writenodefile` post-hoc)
+- `files` = flat list of absolute path strings attached to this node (populated by `addtreelayer`/`querynode` via `absolute_file_paths`, or by `writenodefile` post-hoc)
 - `model_validator(mode="before")` transparently migrates legacy `prompt`/`response`/`content` fields
 - Each node stores only its own layer's data — the O(n²) content duplication bug is fixed
 - `format_layer_markdown` (used by `readnode`/`treedump`) accepts `input_text`/`output_text` params
@@ -168,7 +168,7 @@ fork      │    ✓    │    ✓    │    ✓    │    ✗    │    ✓
 tool      │    ✗    │    ✗    │    ✓    │    ✓    │    ✗
 ```
 
-Key rule: **L-nodes cannot have L-children**. `PalStoreTool` uses `resolve_layer_insertion_point()` to find the correct sibling-level parent when called on an L-node PALTree path (e.g., `myproject.L7` → inserts `L8` at root, not `L7.L1`).
+Key rule: **L-nodes cannot have L-children**. `PalAddTreeLayerTool` uses `resolve_layer_insertion_point()` to find the correct sibling-level parent when called on an L-node PALTree path (e.g., `myproject.L7` → inserts `L8` at root, not `L7.L1`).
 
 **`utils/palstore_builder.py`** — `build_store_context()` builds enhanced arguments directly from PalNode ancestry for a given store path. Replaces the former `hydrate_thread_context` approach. Uses token-budgeted history building via `_build_budgeted_history()`.
 
@@ -217,34 +217,35 @@ Register in `server.py` TOOLS dict. Tools that bypass model resolution override 
 
 ## PALTree Tool Reference
 
-MCP tool names follow a scope convention: **node tools** (`*node`) operate on a single PALNode, **tree tools** (`tree*`/`*tree`) operate on a subtree or the whole tree. Source class names (e.g. `PalStoreTool`) are unchanged.
+MCP tool names follow a scope convention: **node tools** (`*node`) operate on a single PALNode, **tree tools** (`tree*`/`*tree`) operate on a subtree or the whole tree. Source class names (e.g. `PalAddTreeLayerTool`) are unchanged.
 
 The MCP parameter `tree_path` identifies nodes using dot-path notation. The `PalRoot` model field is also `tree_path`. A `model_validator(mode="before")` on `PalRoot` transparently migrates legacy JSON files that still use the old `store_id` key.
 
 **PALTree path** formal definition: `𝒫 = { r · s₁ · s₂ · ⋯ · sₖ  |  r ∈ 𝒩,  sᵢ = (tᵢ, nᵢ),  ρ → t₁,  ∀i: tᵢ → tᵢ₊₁ }`
 
-| MCP tool name    | Source class      | Model required | Scope |
-|------------------|-------------------|----------------|-------|
-| `newtree`        | PalInitTool       | No             | tree  |
-| `writenode`      | PalStoreTool      | Yes            | node  |
-| `querynode`      | PalQueryTool      | Yes            | node  |
-| `treelist`       | PalListTool       | No             | tree  |
-| `readnode`       | PalReadTool       | No             | node  |
-| `forknode`       | PalForkTool       | No             | node  |
-| `renametree`     | PalRenameTool     | No             | tree  |
-| `treedump`       | PalExportTool     | No             | tree  |
-| `listnodefiles`  | PalFileListTool   | No             | node  |
-| `readnodefile`   | PalFileReadTool   | No             | node  |
-| `writenodefile`  | PalFileWriteTool  | No             | node  |
-| `traversetree`   | PalTraverseTool   | No             | tree  |
-| `movenode`       | PalMoveTool       | No             | node  |
-| `clonetree`      | PalCopyTool       | No             | tree  |
-| `foldtree`       | PalFoldTool       | No             | tree  |
-| `deletenode`     | PalDeleteTool     | No             | node  |
-| `deletetree`     | PalDeleteTreeTool | No             | tree  |
-| `germinate`      | GerminateTool     | No (internal)  | tree  |
+| MCP tool name    | Source class         | Model required | Scope |
+|------------------|----------------------|----------------|-------|
+| `newtree`        | PalInitTool          | No             | tree  |
+| `addtreelayer`   | PalAddTreeLayerTool  | Yes            | node  |
+| `upsertnode`     | PalUpsertTool        | No             | node  |
+| `querynode`      | PalQueryTool         | Yes            | node  |
+| `treelist`       | PalListTool          | No             | tree  |
+| `readnode`       | PalReadTool          | No             | node  |
+| `forknode`       | PalForkTool          | No             | node  |
+| `renametree`     | PalRenameTool        | No             | tree  |
+| `treedump`       | PalExportTool        | No             | tree  |
+| `listnodefiles`  | PalFileListTool      | No             | node  |
+| `readnodefile`   | PalFileReadTool      | No             | node  |
+| `writenodefile`  | PalFileWriteTool     | No             | node  |
+| `traversetree`   | PalTraverseTool      | No             | tree  |
+| `movenode`       | PalMoveTool          | No             | node  |
+| `clonetree`      | PalCopyTool          | No             | tree  |
+| `foldtree`       | PalFoldTool          | No             | tree  |
+| `deletenode`     | PalDeleteTool        | No             | node  |
+| `deletetree`     | PalDeleteTreeTool    | No             | tree  |
+| `germinate`      | GerminateTool        | No (internal)  | tree  |
 
-**`tools/germinate.py`** — Automated PALTree builder. Scans a project directory, identifies architectural layers (inner core → outer bark), then analyzes each layer with accumulated CoT context. Key design:
+**`tools/germinate.py`** — Automated PALTree builder. Scans a project directory (defaults to CWD when `directory` is omitted), identifies architectural layers (inner core → outer bark), then analyzes each layer with accumulated CoT context. Key design:
 - Inherits `BaseTool` directly with `requires_model=False` — manages its own `get_model_provider()` + `generate_content()` calls internally (same pattern as `ConsensusTool._consult_model()`)
 - Hybrid layer identification: heuristic directory/filename classification → merge thin layers (<3 files) into neighbors
 - Two model calls per layer: (a) analyze with file contents injected, (b) synthesize with accumulated ancestry context

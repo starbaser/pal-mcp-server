@@ -142,7 +142,7 @@ SimpleTool → PalStoreBaseTool ─── PalAddTreeLayerTool, PalQueryTool
 ```
 
 **PalNode model** (`utils/palstore.py`):
-- Fields: `input: str`, `output: str`, `files: list[str] = []`, `metadata: dict[str, Any] = {}`, `children: dict[str, PalNode] = {}`, `label: str`, `timestamp: str`, `model: str`, `tool_name: str`
+- Fields: `label: str | None = None`, `timestamp: str = ""`, `model: str | None = None`, `tool_name: str | None = None`, `files: list[str] = []`, `input: str = ""`, `output: str = ""`, `metadata: dict[str, Any] = {}`, `children: dict[str, PalNode] = {}`
 - `input` = full tool call data rendered via `render_markdown_output()` (uses `oboros.tome.dumps` — TOME BFS-linearized markdown with `§` sigils)
 - `output` = full tool response rendered via `render_markdown_output()`
 - `files` = flat list of absolute path strings attached to this node (populated by `addtreelayer`/`querynode` via `absolute_file_paths`, or by `writenodefile` post-hoc)
@@ -150,7 +150,7 @@ SimpleTool → PalStoreBaseTool ─── PalAddTreeLayerTool, PalQueryTool
 - `format_layer_markdown` (used by `readnode`/`treedump`) accepts `input_text`/`output_text` params
 
 **PalRoot model** (`utils/palstore.py`):
-- Fields: `tree_path: str`, `directory: str`, `children: dict[str, PalNode] = {}`
+- Fields: `tree_path: str`, `directory: str`, `label: str | None = None`, `created_at: str`, `children: dict[str, PalNode] = {}`
 - `model_validator(mode="before")` migrates legacy `store_id` → `tree_path` in JSON files
 
 **PALTree Node Rules** (`utils/palstore.py`):

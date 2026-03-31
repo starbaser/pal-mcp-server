@@ -107,7 +107,7 @@ Tools declare their preferred model tier via `get_model_category()` → `ToolMod
 - `BALANCED` — perceive, clink
 - `IMAGE_GENERATION` — imagegen
 
-Tools that override `requires_model() → False` bypass model resolution entirely: clink, planner, consensus, docgen, tracer, challenge, apilookup, listmodels, version, germinate, upsertnode, and all PALTree tools except addtreelayer and querynode.
+Tools that override `requires_model() → False` bypass model resolution entirely: clink, planner, consensus, docgen, tracer, challenge, apilookup, listmodels, version, upsertnode, and all PALTree tools except addtreelayer and querynode.
 
 ### Tool System
 
@@ -133,9 +133,6 @@ BaseTool (direct) ─── PalInitTool, PalForkTool, PalListTool, PalReadTool,
                       PalMoveTool, PalCopyTool, PalFoldTool, PalDeleteTool,
                       PalDeleteTreeTool, PalTraverseTool, PalUpsertTool
                       (requires_model=False, pure filesystem)
-
-BaseTool (direct) ─── GerminateTool
-                      (requires_model=False, manages own provider calls internally)
 
 SimpleTool → PalTreeBaseTool ─── PalAddTreeLayerTool, PalQueryTool
                                   (requires_model=True, thinking_mode="max")
@@ -230,24 +227,6 @@ The MCP parameter `tree_path` identifies nodes using dot-path notation. The `Pal
 | `foldtree`       | PalFoldTool          | No             | tree  |
 | `deletenode`     | PalDeleteTool        | No             | node  |
 | `deletetree`     | PalDeleteTreeTool    | No             | tree  |
-| `germinate`      | GerminateTool        | No (internal)  | tree  |
-
-**`tools/germinate.py`** — Automated PALTree builder. Scans a project directory (defaults to CWD when `directory` is omitted), identifies architectural layers (inner core → outer bark), then analyzes each layer with accumulated CoT context. Key design:
-- Inherits `BaseTool` directly with `requires_model=False` — manages its own `get_model_provider()` + `generate_content()` calls internally (same pattern as `ConsensusTool._consult_model()`)
-- Hybrid layer identification: heuristic directory/filename classification → merge thin layers (<3 files) into neighbors
-- Two model calls per layer: (a) analyze with file contents injected, (b) synthesize with accumulated ancestry context
-- Nested numeric nodes for context accumulation — each layer's node is the child of the previous layer's node, creating a linear ancestry chain. `walk_palnode_ancestry()` does pure parent-chain traversal.
-- File contents are injected into prompts but **not persisted** in nodes — only analysis/synthesis text is saved. File paths go in `PalNode.files`.
-- `save_tree()` after each layer for crash recovery of partial gestations.
-
-Node structure produced:
-```
-myproject (root)
-└── 0: project manifest
-    └── 0: innermost layer analysis
-        └── 0: next layer (sees full ancestry chain)
-            └── 0: outer layer
-```
 
 ## Environment Variables
 

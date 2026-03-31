@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 TREE_PATH_DESCRIPTION = (
     "Dot-path to a PALNode in a PALTree. Root trees use a plain name (e.g. 'myproject'). "
-    "Child nodes extend with dot notation (e.g. 'myproject.0', 'myproject.0.0'). "
+    "Child nodes extend with dot notation (e.g. 'myproject.L0', 'myproject.L0.Q0'). "
     "Use treelist to discover tree paths. Returned by newtree, addtreelayer, querynode, and forknode."
 )
 
@@ -448,7 +448,7 @@ class PalAddTreeLayerTool(PalTreeBaseTool):
             return None
 
         self._insertion_parent = tree_path
-        self._next_key = get_next_key(tree, tree_path, "")
+        self._next_key = get_next_key(tree, tree_path, "L")
         self._new_tree_path = f"{tree_path}.{self._next_key}"
 
         context_window, context_used = self._get_context_token_info()
@@ -823,7 +823,7 @@ class PalQueryTool(PalTreeBaseTool):
             return [TextContent(type="text", text=error.model_dump_json())]
 
         self._parent_path = tree_path
-        self._child_prefix = ""
+        self._child_prefix = "Q"
 
         ancestors = walk_palnode_ancestry(tree, tree_path)
 
@@ -1015,7 +1015,7 @@ class PalForkTool(BaseTool):
             error = ToolOutput(status="error", content=f'PALTree file not found: "{root_id}".', content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        next_key = get_next_key(tree, tree_path, "")
+        next_key = get_next_key(tree, tree_path, "F")
         fork_node = PalNode(
             label=label,
             timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),

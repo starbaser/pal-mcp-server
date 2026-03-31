@@ -72,7 +72,6 @@ from tools import (  # noqa: E402
     TracerTool,
     VersionTool,
 )
-from tools.germinate import GerminateTool
 from tools.models import ToolOutput  # noqa: E402
 from tools.palstore import (
     PalAddTreeLayerTool,
@@ -324,7 +323,6 @@ TOOLS = {
     "foldtree": PalFoldTool(),
     "deletenode": PalDeleteTool(),
     "deletetree": PalDeleteTreeTool(),
-    "germinate": GerminateTool(),
 }
 TOOLS = filter_disabled_tools(TOOLS)
 
@@ -469,11 +467,6 @@ PROMPT_TEMPLATES = {
         "name": "deletetree",
         "description": "Delete an entire PALTree",
         "template": "Delete PALTree",
-    },
-    "germinate": {
-        "name": "germinate",
-        "description": "Build a PALTree from project analysis",
-        "template": "Germinate PALTree with {model}",
     },
 }
 

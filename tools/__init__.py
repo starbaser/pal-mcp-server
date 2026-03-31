@@ -11,7 +11,6 @@ from .codereview import CodeReviewTool
 from .consensus import ConsensusTool
 from .debug import DebugIssueTool
 from .docgen import DocgenTool
-from .germinate import GerminateTool
 from .imagegen import ImageGenTool
 from .listmodels import ListModelsTool
 from .narrate import NarrateTool
@@ -63,5 +62,4 @@ __all__ = [
     "PalForkTool",
     "PalReadTool",
     "NarrateTool",
-    "GerminateTool",
 ]

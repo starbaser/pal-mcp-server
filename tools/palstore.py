@@ -440,6 +440,8 @@ class PalAddTreeLayerTool(PalTreeBaseTool):
         return f"{response}\n\n---\n\nAGENT'S TURN: Context layer stored. Use the tree_path to add more layers or query this tree."
 
     def _create_continuation_offer(self, _request, _model_info: Optional[dict] = None):
+        import re
+
         from utils.palstore import get_next_key
 
         tree = getattr(self, "_tree", None)
@@ -447,9 +449,15 @@ class PalAddTreeLayerTool(PalTreeBaseTool):
         if tree is None or tree_path is None:
             return None
 
-        self._insertion_parent = tree_path
-        self._next_key = get_next_key(tree, tree_path, "L")
-        self._new_tree_path = f"{tree_path}.{self._next_key}"
+        # Walk up past L-prefixed ancestors to prevent L→L nesting
+        parts = tree_path.split(".")
+        while len(parts) > 1 and re.match(r"^L\d+$", parts[-1]):
+            parts.pop()
+        insertion_parent = ".".join(parts)
+
+        self._insertion_parent = insertion_parent
+        self._next_key = get_next_key(tree, insertion_parent, "L")
+        self._new_tree_path = f"{insertion_parent}.{self._next_key}"
 
         context_window, context_used = self._get_context_token_info()
         return {

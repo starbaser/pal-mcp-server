@@ -36,7 +36,6 @@ def _make_store(layers: list[dict]) -> PalRoot:
             spec.get("response", f"layer {i} response"),
         )
         children[f"L{i}"] = PalNode(
-            entry_type="store",
             timestamp=f"2026-01-0{i}T00:00:00Z",
             files=list(files_dict.keys()),
             prompt=spec.get("prompt", f"layer {i} prompt"),

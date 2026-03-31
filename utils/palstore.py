@@ -21,9 +21,9 @@ import os
 import re
 import tempfile
 from datetime import datetime, timezone
-from typing import Any, Callable, Literal
+from typing import Any, Callable
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, ConfigDict, model_validator
 
 from config import PAL_STORAGE_DIR
 
@@ -37,38 +37,6 @@ _ARMED_PATH = os.path.join(_CTX_DIR, "armed.json")
 
 
 # ---------------------------------------------------------------------------
-# Key helpers
-# ---------------------------------------------------------------------------
-
-
-def _categorize_key(key: str) -> str:
-    """Categorize a node key: 'L', 'Q', 'F', 'numeric', or 'tool'."""
-    if key.startswith("L") and key[1:].isdigit():
-        return "L"
-    if key.startswith("Q") and key[1:].isdigit():
-        return "Q"
-    if key.startswith("F") and key[1:].isdigit():
-        return "F"
-    if key.isdigit():
-        return "numeric"
-    return "tool"
-
-
-VALID_CHILD_KEYS: dict[str, set[str]] = {
-    "root": {"L", "F"},
-    "store": {"Q", "F"},
-    "query": {"Q", "numeric", "F"},
-    "fork": {"L", "Q", "F", "tool"},
-    "tool": {"F", "numeric"},
-}
-
-
-def _is_l_node_key(key: str) -> bool:
-    """Return True if key is an L-node key (e.g. 'L1', 'L14')."""
-    return key.startswith("L") and key[1:].isdigit()
-
-
-# ---------------------------------------------------------------------------
 # Data models
 # ---------------------------------------------------------------------------
 
@@ -76,7 +44,8 @@ def _is_l_node_key(key: str) -> bool:
 class PalNode(BaseModel):
     """A single node in a PALTree."""
 
-    entry_type: Literal["store", "query", "tool", "fork"]
+    model_config = ConfigDict(extra="ignore")
+
     label: str | None = None
     timestamp: str = ""  # ISO 8601
     model: str | None = None
@@ -245,42 +214,22 @@ def add_palnode(store: PalRoot, parent_path: str, child_key: str, node: PalNode)
     When parent_path equals the store root id, the node is added directly to
     store.children. Otherwise the parent is resolved and the node is appended to
     its children dict.
-
-    Raises ValueError when the child key category violates the tree structure
-    rules defined in VALID_CHILD_KEYS.
     """
-    child_cat = _categorize_key(child_key)
     if parent_path == store.tree_path:
-        parent_type = "root"
+        store.children[child_key] = node
     else:
         parent = resolve_palnode(store, parent_path)
         if parent is None:
             raise KeyError(f"parent path not found in store: {parent_path}")
-        parent_type = parent.entry_type
-
-    allowed = VALID_CHILD_KEYS.get(parent_type, set())
-    if child_cat not in allowed:
-        raise ValueError(
-            f"Invalid tree structure: {child_cat}-node '{child_key}' "
-            f"cannot be a child of {parent_type}-node at '{parent_path}'"
-        )
-
-    if parent_path == store.tree_path:
-        store.children[child_key] = node
-    else:
-        resolve_palnode(store, parent_path).children[child_key] = node
+        parent.children[child_key] = node
     return f"{parent_path}.{child_key}"
 
 
 def walk_palnode_ancestry(store: PalRoot, tree_path: str) -> list[PalNode]:
     """Return nodes from the root down to (and including) the target.
 
-    Layers are cumulative: when the target segment at any level is an L-node,
-    all numerically preceding L-siblings at that level are included in order.
-    For example, walking to ``L14.F0`` returns ``[L0, L1, ..., L14, F0]``.
-
-    Fork nodes are included — they carry empty prompt/response so callers treat
-    them as passthrough. Returns an empty list when tree_path resolves to the root.
+    Pure parent-chain traversal: only direct ancestors are included.
+    Returns an empty list when tree_path resolves to the root.
     """
     _, segments = parse_store_path(tree_path)
     if not segments:
@@ -292,11 +241,6 @@ def walk_palnode_ancestry(store: PalRoot, tree_path: str) -> list[PalNode]:
         node = current.get(seg)
         if node is None:
             break
-        if _is_l_node_key(seg):
-            target_idx = int(seg[1:])
-            preceding = [(int(k[1:]), v) for k, v in current.items() if _is_l_node_key(k) and int(k[1:]) < target_idx]
-            preceding.sort(key=lambda kv: kv[0])
-            ancestry.extend(v for _, v in preceding)
         ancestry.append(node)
         current = node.children
     return ancestry
@@ -305,10 +249,8 @@ def walk_palnode_ancestry(store: PalRoot, tree_path: str) -> list[PalNode]:
 def walk_palnode_range(store: PalRoot, start_path: str, end_path: str) -> list[PalNode]:
     """Return the ancestor chain from start_path through end_path (inclusive).
 
-    Uses the same cumulative L-node logic as walk_palnode_ancestry. The start node must
-    appear in the ancestry of end_path — either as a direct tree ancestor or as
-    a preceding L-sibling at the same level. Raises ValueError when start is not
-    reachable from end's ancestry.
+    The start node must appear in the ancestry of end_path as a direct tree
+    ancestor. Raises ValueError when start is not reachable from end's ancestry.
     """
     start_node = resolve_palnode(store, start_path)
     if start_node is None:
@@ -332,45 +274,11 @@ def walk_palnode_range(store: PalRoot, start_path: str, end_path: str) -> list[P
     return ancestry[start_idx:]
 
 
-def get_last_layer_path(store: PalRoot, parent_path: str | None = None) -> str | None:
-    """Return dotted path to the highest-numbered L-child, or None if no layers exist."""
-    if parent_path is None:
-        parent_path = store.tree_path
-
-    if parent_path == store.tree_path:
-        container = store.children
-    else:
-        parent_node = resolve_palnode(store, parent_path)
-        container = parent_node.children if parent_node is not None else {}
-
-    indices = [int(k[1:]) for k in container if _is_l_node_key(k)]
-    if not indices:
-        return None
-    return f"{parent_path}.L{max(indices)}"
-
-
-def resolve_root_alias(store: PalRoot, tree_path: str) -> str:
-    """Resolve root tree_path alias to the current top layer path.
-
-    Root tree_path is shorthand for the latest L-child. Returns tree_path
-    unchanged if it's not the root, or if the root has no layers yet.
-    """
-    if tree_path != store.tree_path:
-        return tree_path
-    last = get_last_layer_path(store)
-    if last is None:
-        return tree_path
-    return last
-
-
-def get_next_key(store: PalRoot, parent_path: str, prefix: str) -> str:
+def get_next_key(store: PalRoot, parent_path: str, prefix: str = "") -> str:
     """Compute the next available child key for a given prefix at parent_path.
 
-    Prefix rules:
-      "L"           → L-children, start at L1, increment max
-      "Q"           → Q-children, start at Q0, increment max
-      "F"           → F-children, start at F0, increment max
-      "" (empty)    → numeric follow-ups, start at 1
+    Any string prefix is accepted. Keys are auto-incremented from 0.
+    Empty prefix produces pure numeric keys (0, 1, 2, ...).
     """
     if parent_path == store.tree_path:
         siblings = store.children
@@ -378,37 +286,13 @@ def get_next_key(store: PalRoot, parent_path: str, prefix: str) -> str:
         parent = resolve_palnode(store, parent_path)
         siblings = parent.children if parent is not None else {}
 
-    if prefix == "":
-        # Numeric follow-ups
-        nums = [int(k) for k in siblings if re.fullmatch(r"\d+", k)]
-        return str(max(nums) + 1) if nums else "1"
-
-    if prefix in ("L", "Q", "F"):
-        start = 1 if prefix == "L" else 0
+    if prefix:
         pattern = re.compile(rf"^{re.escape(prefix)}(\d+)$")
         indices = [int(m.group(1)) for k in siblings if (m := pattern.match(k))]
-        return f"{prefix}{max(indices) + 1}" if indices else f"{prefix}{start}"
+    else:
+        indices = [int(k) for k in siblings if re.fullmatch(r"\d+", k)]
 
-    raise ValueError(f"Unsupported prefix for get_next_key: {prefix!r}")
-
-
-def resolve_layer_insertion_point(store: PalRoot, tree_path: str) -> str:
-    """Return the parent path where the next L-node should be inserted.
-
-    When tree_path points directly to an L-node (e.g. 'myproject.L7'), the next
-    L-node is a sibling — return L7's parent path. For root, fork, query, or tool
-    nodes, the next L-node is a child — return tree_path itself.
-    """
-    _, segments = parse_store_path(tree_path)
-    if not segments:
-        return tree_path
-
-    last_seg = segments[-1]
-    if _is_l_node_key(last_seg):
-        if len(segments) == 1:
-            return store.tree_path
-        return f"{store.tree_path}.{'.'.join(segments[:-1])}"
-    return tree_path
+    return f"{prefix}{max(indices) + 1}" if indices else f"{prefix}0"
 
 
 # ---------------------------------------------------------------------------
@@ -488,8 +372,6 @@ def fold_palnode_range(store: PalRoot, start_path: str, end_path: str) -> PalNod
     """Aggregate a range of ancestor nodes into a single new PalNode.
 
     Does NOT insert the result — returns the folded node for the caller to place.
-    Fork nodes in the range are skipped when collecting files (they carry no
-    input/output content). The returned node has entry_type="store".
     """
     from utils.palstore_builder import build_context_from_ancestry
 
@@ -499,15 +381,13 @@ def fold_palnode_range(store: PalRoot, start_path: str, end_path: str) -> PalNod
     seen: set[str] = set()
     files: list[str] = []
     for node in nodes:
-        if node.entry_type == "fork":
-            continue
         for f in node.files:
             if f not in seen:
                 seen.add(f)
                 files.append(f)
 
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    return PalNode(entry_type="store", input=folded_history, files=files, timestamp=timestamp)
+    return PalNode(input=folded_history, files=files, timestamp=timestamp)
 
 
 def find_palnode_ancestor(
@@ -536,16 +416,6 @@ def find_palnode_ancestor(
         current = node.children
 
     return last_match
-
-
-def is_l_ancestor(key: str, node: PalNode) -> bool:  # noqa: ARG001
-    """Predicate: True when the ancestor key is an L-node key."""
-    return _is_l_node_key(key)
-
-
-def is_fork_ancestor(key: str, node: PalNode) -> bool:  # noqa: ARG001
-    """Predicate: True when the ancestor node is a fork."""
-    return node.entry_type == "fork"
 
 
 def collect_palnode_files(node: PalNode) -> list[str]:

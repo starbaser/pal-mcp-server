@@ -40,8 +40,8 @@ def build_store_context(
 
     ancestors = walk_palnode_ancestry(store, node_path)
 
-    # Filter to content nodes (skip forks and empty nodes)
-    content_nodes = [n for n in ancestors if getattr(n, "entry_type", None) != "fork" and (n.input or n.output)]
+    # Filter to content nodes (skip empty nodes)
+    content_nodes = [n for n in ancestors if n.input or n.output]
 
     # Resolve model context if not provided
     if model_context is None:
@@ -82,9 +82,9 @@ def build_store_context(
             arguments.setdefault("model", node.model)
             break
 
-    # Workflow metadata: extract from most recent tool node
+    # Workflow metadata: extract from most recent node with metadata
     for node in reversed(ancestors):
-        if getattr(node, "entry_type", None) == "tool" and node.metadata:
+        if node.metadata:
             arguments["_store_workflow_metadata"] = node.metadata
             break
 
@@ -269,11 +269,11 @@ def build_context_from_ancestry(ancestors: list[PalNode], include_files: bool = 
     """Build formatted conversation history from ancestor chain.
 
     Each ancestor node's input+output becomes a user/assistant turn pair in the history.
-    Fork nodes (entry_type="fork") are skipped since they have no input/output.
+    Nodes without both input and output are skipped.
 
     Returns empty string if no ancestors have input+output content.
     """
-    content_nodes = [n for n in ancestors if getattr(n, "entry_type", None) != "fork" and n.input and n.output]
+    content_nodes = [n for n in ancestors if n.input and n.output]
 
     if not content_nodes:
         return ""
@@ -323,9 +323,6 @@ def hydrate_thread_context(store: PalRoot, node_path: str):
     thread_id = create_thread(tool_name="ctx_hydrated", initial_request={}, model_name=None)
 
     for ancestor in ancestors:
-        if getattr(ancestor, "entry_type", None) == "fork":
-            continue
-
         files = getattr(ancestor, "files", None) or None
         if ancestor.input:
             add_turn(thread_id, "user", ancestor.input, files=files)

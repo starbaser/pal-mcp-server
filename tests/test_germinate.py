@@ -465,8 +465,7 @@ class TestGerminateTool:
 
         store = load_store(str(project), "l1test")
         assert store is not None
-        assert "L1" in store.children
-        assert store.children["L1"].entry_type == "store"
+        assert "0" in store.children
 
     @pytest.mark.asyncio
     async def test_query_nodes_nested_under_l1(self, tool, ctx_env, tmp_path):
@@ -483,9 +482,9 @@ class TestGerminateTool:
 
         store = load_store(str(project), "qnest")
         assert store is not None
-        l1 = store.children["L1"]
-        # At least one Q-node should be nested under L1
-        assert any(k.startswith("Q") for k in l1.children)
+        l1 = store.children["0"]
+        # At least one numeric child node should be nested under the manifest node
+        assert any(k.isdigit() for k in l1.children)
 
     @pytest.mark.asyncio
     async def test_query_nodes_nested_chain_not_siblings(self, tool, ctx_env, tmp_path):
@@ -508,10 +507,10 @@ class TestGerminateTool:
 
         if layers_completed >= 2:
             store = load_store(str(project), "nestchain")
-            l1 = store.children["L1"]
-            # Only one Q-node should be a direct child of L1; the rest nest deeper
-            q_keys_on_l1 = [k for k in l1.children if k.startswith("Q")]
-            assert len(q_keys_on_l1) == 1, "Layers must nest, not accumulate as siblings under L1"
+            manifest = store.children["0"]
+            # Only one numeric node should be a direct child of the manifest; the rest nest deeper
+            numeric_keys_on_manifest = [k for k in manifest.children if k.isdigit()]
+            assert len(numeric_keys_on_manifest) == 1, "Layers must nest, not accumulate as siblings under manifest"
 
     @pytest.mark.asyncio
     async def test_final_node_path_in_metadata(self, tool, ctx_env, tmp_path):

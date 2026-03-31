@@ -64,7 +64,7 @@ CLI Client (Claude/Gemini/Codex)
 - `handle_call_tool()` routes requests, resolves models, reconstructs conversation context
 - `configure_providers()` registers providers based on API keys
 - `parse_model_option()` splits `"model:option"` format (e.g. `"gemini-pro:for"` → model + option), preserving OpenRouter suffixes (`:free`, `:beta`, `:preview`)
-- PALTree continuation: `_resolve_store_continuation()` calls `build_store_context()` directly from PALTree paths (not just UUIDs). Two modes: CONTINUE (creates numeric child node per turn) and FORK (auto-create fork + tool child). PALTree paths skip `reconstruct_thread_context` — dispatch in `handle_call_tool` is bifurcated.
+- PALTree continuation: `_resolve_store_continuation()` calls `build_store_context()` directly from PALTree paths (not just UUIDs). Creates a numeric child node under the target for each continuation turn. PALTree paths skip `reconstruct_thread_context` — dispatch in `handle_call_tool` is bifurcated.
 - Response post-processing pipeline: `_inject_store_path_continuation()` → `_save_response_content()` → `_inject_saved_content_path()` → `_extract_gen_files()` → `_apply_output_format()`
 - `_extract_gen_files()`: universal `#!/>` sigil extraction from model responses — saves complete files to `CODE_STORAGE_DIR/{encoded_cwd}/{call_id}/`, strips sigil blocks from response content, adds `gen_files` metadata
 
@@ -142,11 +142,10 @@ SimpleTool → PalStoreBaseTool ─── PalAddTreeLayerTool, PalQueryTool
 ```
 
 **PalNode model** (`utils/palstore.py`):
-- Fields: `input: str`, `output: str`, `files: list[str] = []`, `metadata: dict[str, Any] = {}`
+- Fields: `input: str`, `output: str`, `files: list[str] = []`, `metadata: dict[str, Any] = {}`, `children: dict[str, PalNode] = {}`, `label: str`, `timestamp: str`, `model: str`, `tool_name: str`
 - `input` = full tool call data rendered via `render_markdown_output()` (uses `oboros.tome.dumps` — TOME BFS-linearized markdown with `§` sigils)
 - `output` = full tool response rendered via `render_markdown_output()`
 - `files` = flat list of absolute path strings attached to this node (populated by `addtreelayer`/`querynode` via `absolute_file_paths`, or by `writenodefile` post-hoc)
-- `model_validator(mode="before")` transparently migrates legacy `prompt`/`response`/`content` fields
 - Each node stores only its own layer's data — the O(n²) content duplication bug is fixed
 - `format_layer_markdown` (used by `readnode`/`treedump`) accepts `input_text`/`output_text` params
 
@@ -156,19 +155,7 @@ SimpleTool → PalStoreBaseTool ─── PalAddTreeLayerTool, PalQueryTool
 
 **PALTree Node Rules** (`utils/palstore.py`):
 
-`add_palnode()` enforces structural node rules via `VALID_CHILD_KEYS`. Each parent type allows only specific child key categories:
-
-```
-           │ L-child │ Q-child │ F-child │ numeric │ tool-child
-──────────┼─────────┼─────────┼─────────┼─────────┼───────────
-root      │    ✓    │    ✗    │    ✓    │    ✗    │    ✗
-store     │    ✗    │    ✓    │    ✓    │    ✗    │    ✗
-query     │    ✗    │    ✓    │    ✓    │    ✓    │    ✗
-fork      │    ✓    │    ✓    │    ✓    │    ✗    │    ✓
-tool      │    ✗    │    ✗    │    ✓    │    ✓    │    ✗
-```
-
-Key rule: **L-nodes cannot have L-children**. `PalAddTreeLayerTool` uses `resolve_layer_insertion_point()` to find the correct sibling-level parent when called on an L-node PALTree path (e.g., `myproject.L7` → inserts `L8` at root, not `L7.L1`).
+`add_palnode()` inserts a child node with no structural restrictions. Any node can have any child with any key.
 
 **`utils/palstore_builder.py`** — `build_store_context()` builds enhanced arguments directly from PalNode ancestry for a given store path. Replaces the former `hydrate_thread_context` approach. Uses token-budgeted history building via `_build_budgeted_history()`.
 
@@ -249,17 +236,17 @@ The MCP parameter `tree_path` identifies nodes using dot-path notation. The `Pal
 - Inherits `BaseTool` directly with `requires_model=False` — manages its own `get_model_provider()` + `generate_content()` calls internally (same pattern as `ConsensusTool._consult_model()`)
 - Hybrid layer identification: heuristic directory/filename classification → merge thin layers (<3 files) into neighbors
 - Two model calls per layer: (a) analyze with file contents injected, (b) synthesize with accumulated ancestry context
-- **Nested Q-nodes** for context accumulation — each layer's Q-node is the child of the previous layer's Q-node, creating a linear ancestry chain. Sibling Q-nodes would NOT work because `walk_palnode_ancestry()` only traces direct ancestors.
+- Nested numeric nodes for context accumulation — each layer's node is the child of the previous layer's node, creating a linear ancestry chain. `walk_palnode_ancestry()` does pure parent-chain traversal.
 - File contents are injected into prompts but **not persisted** in nodes — only analysis/synthesis text is saved. File paths go in `PalNode.files`.
 - `save_store()` after each layer for crash recovery of partial gestations.
 
 Node structure produced:
 ```
 myproject (root)
-└── L1: project manifest (entry_type="store")
-    └── Q0: innermost layer (entry_type="query", sees L1)
-        └── Q0: next layer (sees L1 + parent Q0)
-            └── Q0: outer layer (sees full ancestry chain)
+└── 0: project manifest
+    └── 0: innermost layer analysis
+        └── 0: next layer (sees full ancestry chain)
+            └── 0: outer layer
 ```
 
 ## Environment Variables

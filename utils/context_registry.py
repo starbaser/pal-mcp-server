@@ -58,11 +58,7 @@ def get_next_query_index(parent_tree_path: str) -> int:
     pattern = re.compile(r"^" + re.escape(parent_tree_path) + r"\.Q\d+$")
     count = 0
     for sid, entry in registry.items():
-        if (
-            entry.get("parent_tree_path") == parent_tree_path
-            and entry.get("entry_type") == "query"
-            and pattern.match(sid)
-        ):
+        if entry.get("parent_tree_path") == parent_tree_path and pattern.match(sid):
             count += 1
     return count
 
@@ -81,7 +77,6 @@ def register_store(
     directory: str,
     label: str | None = None,
     model: str = "",
-    entry_type: str = "store",
     parent_tree_path: str | None = None,
     tool_name: str | None = None,
 ) -> None:
@@ -94,7 +89,6 @@ def register_store(
         "label": label,
         "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "model": model,
-        "entry_type": entry_type,
         "parent_tree_path": parent_tree_path,
         "tool_name": tool_name,
         "layer_count": 0,
@@ -130,7 +124,6 @@ def increment_layer_count(tree_path: str) -> str:
         directory=entry["directory"],
         label=entry.get("label"),
         model=entry.get("model", ""),
-        entry_type="store",
         parent_tree_path=tree_path,
     )
     return new_path
@@ -156,7 +149,6 @@ def increment_follow_up_count(tree_path: str) -> str:
         directory=entry["directory"],
         label=entry.get("label"),
         model=entry.get("model", ""),
-        entry_type="query",
         parent_tree_path=tree_path,
     )
     return new_path

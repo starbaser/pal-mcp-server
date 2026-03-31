@@ -9,7 +9,6 @@ def format_layer_markdown(
     heading: str,
     *,
     label: str | None = None,
-    entry_type: str | None = None,
     tool_name: str | None = None,
     model: str | None = None,
     timestamp: str | None = None,
@@ -24,8 +23,6 @@ def format_layer_markdown(
     lines = [f"# {heading}", ""]
     if label:
         lines.append(f"**Label:** {label}")
-    if entry_type:
-        lines.append(f"**Type:** {entry_type}")
     if tool_name:
         lines.append(f"**Tool:** {tool_name}")
     if model:

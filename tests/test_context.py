@@ -368,7 +368,7 @@ class TestResolveStoreContinuation:
         assert result is None
         assert args["continuation_id"] == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
-    def test_fork_from_store(self, tmp_path, monkeypatch):
+    def test_continue_from_store_root(self, tmp_path, monkeypatch):
         from server import _resolve_store_continuation
 
         self._make_store(tmp_path, monkeypatch, "myproject", "/tmp/proj")
@@ -376,18 +376,17 @@ class TestResolveStoreContinuation:
         args = {"continuation_id": "myproject"}
         result = _resolve_store_continuation("thinkdeep", args)
 
-        # FORK mode: auto-fork F0 created under root, tool node under fork
-        assert result == "myproject.F0.thinkdeep"
-        # Store context built directly — no ThreadContext hydration
+        # Creates numeric child "0" under root
+        assert result == "myproject.0"
         assert args.get("_store_context_built") is True
 
         bridge = args["_store_bridge"]
-        assert bridge["tool_path"] == "myproject.F0.thinkdeep"
+        assert bridge["tool_path"] == "myproject.0"
         assert bridge["tool_name"] == "thinkdeep"
-        assert bridge["mode"] == "fork"
+        assert bridge["mode"] == "continue"
         assert bridge["store"].tree_path == "myproject"
 
-    def test_continue_same_tool(self, tmp_path, monkeypatch):
+    def test_continue_from_existing_node(self, tmp_path, monkeypatch):
         from datetime import datetime, timezone
 
         from server import _resolve_store_continuation
@@ -395,37 +394,28 @@ class TestResolveStoreContinuation:
 
         store = self._make_store(tmp_path, monkeypatch, "myproject", "/tmp/proj")
 
-        # Simulate the structure a prior FORK call would have created:
-        # myproject.F0 (fork) → myproject.F0.thinkdeep (tool)
-        fork_node = PalNode(
-            entry_type="fork",
-            label="thinkdeep",
-            timestamp=datetime.now(timezone.utc).isoformat(),
-        )
-        thinkdeep_node = PalNode(
-            entry_type="tool",
+        existing_node = PalNode(
             tool_name="thinkdeep",
             timestamp=datetime.now(timezone.utc).isoformat(),
-            prompt="initial prompt",
-            response="initial response",
+            input="initial prompt",
+            output="initial response",
         )
-        fork_node.children["thinkdeep"] = thinkdeep_node
-        store.children["F0"] = fork_node
+        store.children["0"] = existing_node
         save_store(store)
 
-        args = {"continuation_id": "myproject.F0.thinkdeep"}
+        args = {"continuation_id": "myproject.0"}
         result = _resolve_store_continuation("thinkdeep", args)
 
-        # CONTINUE: same tool — creates numeric child for the new turn
-        assert result == "myproject.F0.thinkdeep.1"
+        # Creates numeric child "0" under the existing node
+        assert result == "myproject.0.0"
         assert args.get("_store_context_built") is True
 
         bridge = args["_store_bridge"]
-        assert bridge["tool_path"] == "myproject.F0.thinkdeep.1"
+        assert bridge["tool_path"] == "myproject.0.0"
         assert bridge["tool_name"] == "thinkdeep"
         assert bridge["mode"] == "continue"
 
-    def test_refork_different_tool(self, tmp_path, monkeypatch):
+    def test_continue_different_tool(self, tmp_path, monkeypatch):
         from datetime import datetime, timezone
 
         from server import _resolve_store_continuation
@@ -433,37 +423,28 @@ class TestResolveStoreContinuation:
 
         store = self._make_store(tmp_path, monkeypatch, "myproject", "/tmp/proj")
 
-        # Simulate the structure from a prior FORK call:
-        # myproject.F0 (fork) → myproject.F0.thinkdeep (tool)
-        fork_node = PalNode(
-            entry_type="fork",
-            label="thinkdeep",
-            timestamp=datetime.now(timezone.utc).isoformat(),
-        )
-        thinkdeep_node = PalNode(
-            entry_type="tool",
+        existing_node = PalNode(
             tool_name="thinkdeep",
             timestamp=datetime.now(timezone.utc).isoformat(),
-            prompt="initial prompt",
-            response="initial response",
+            input="initial prompt",
+            output="initial response",
         )
-        fork_node.children["thinkdeep"] = thinkdeep_node
-        store.children["F0"] = fork_node
+        store.children["0"] = existing_node
         save_store(store)
 
-        args = {"continuation_id": "myproject.F0.thinkdeep"}
+        args = {"continuation_id": "myproject.0"}
         result = _resolve_store_continuation("analyze", args)
 
-        # FORK: analyze on a thinkdeep tool node creates F0 under thinkdeep, then analyze under that
-        assert result == "myproject.F0.thinkdeep.F0.analyze"
+        # Any tool targeting any node creates a numeric child — no FORK mode
+        assert result == "myproject.0.0"
         assert args.get("_store_context_built") is True
 
         bridge = args["_store_bridge"]
-        assert bridge["tool_path"] == "myproject.F0.thinkdeep.F0.analyze"
+        assert bridge["tool_path"] == "myproject.0.0"
         assert bridge["tool_name"] == "analyze"
-        assert bridge["mode"] == "fork"
+        assert bridge["mode"] == "continue"
 
-    def test_fork_from_query(self, tmp_path, monkeypatch):
+    def test_continue_from_query_node(self, tmp_path, monkeypatch):
         from datetime import datetime, timezone
 
         from server import _resolve_store_continuation
@@ -472,65 +453,36 @@ class TestResolveStoreContinuation:
         store = self._make_store(tmp_path, monkeypatch, "myproject", "/tmp/proj")
 
         query_node = PalNode(
-            entry_type="query",
             timestamp=datetime.now(timezone.utc).isoformat(),
-            prompt="query prompt",
-            response="query response",
+            input="query prompt",
+            output="query response",
         )
-        store.children["Q0"] = query_node
+        store.children["0"] = query_node
         save_store(store)
 
-        args = {"continuation_id": "myproject.Q0"}
+        args = {"continuation_id": "myproject.0"}
         result = _resolve_store_continuation("thinkdeep", args)
 
-        # FORK: auto-fork F0 under Q0, then thinkdeep tool node under the fork
-        assert result == "myproject.Q0.F0.thinkdeep"
+        assert result == "myproject.0.0"
 
         bridge = args["_store_bridge"]
-        assert bridge["tool_path"] == "myproject.Q0.F0.thinkdeep"
-        assert bridge["mode"] == "fork"
+        assert bridge["tool_path"] == "myproject.0.0"
+        assert bridge["mode"] == "continue"
 
-    def test_fork_from_layer(self, tmp_path, monkeypatch):
-        from datetime import datetime, timezone
-
-        from server import _resolve_store_continuation
-        from utils.palstore import PalNode, save_store
-
-        store = self._make_store(tmp_path, monkeypatch, "myproject", "/tmp/proj")
-
-        layer_node = PalNode(
-            entry_type="store",
-            timestamp=datetime.now(timezone.utc).isoformat(),
-            prompt="layer prompt",
-            response="layer response",
-        )
-        store.children["L1"] = layer_node
-        save_store(store)
-
-        args = {"continuation_id": "myproject.L1"}
-        result = _resolve_store_continuation("chat", args)
-
-        # FORK: auto-fork F0 under L1, then chat tool node under the fork
-        assert result == "myproject.L1.F0.chat"
-
-        bridge = args["_store_bridge"]
-        assert bridge["tool_path"] == "myproject.L1.F0.chat"
-        assert bridge["mode"] == "fork"
-
-    def test_fork_index_increments(self, tmp_path, monkeypatch):
+    def test_child_index_increments(self, tmp_path, monkeypatch):
         from server import _resolve_store_continuation
 
         self._make_store(tmp_path, monkeypatch, "myproject", "/tmp/proj")
 
-        # First fork — no children exist yet; _resolve_store_continuation saves to disk
+        # First call — no children; creates "0"
         args1 = {"continuation_id": "myproject"}
         result1 = _resolve_store_continuation("thinkdeep", args1)
-        assert result1 == "myproject.F0.thinkdeep"
+        assert result1 == "myproject.0"
 
-        # Second fork: reload from disk so F0 is visible, then call again
+        # Second call: reload from disk so "0" is visible, then creates "1"
         args2 = {"continuation_id": "myproject"}
         result2 = _resolve_store_continuation("thinkdeep", args2)
-        assert result2 == "myproject.F1.thinkdeep"
+        assert result2 == "myproject.1"
 
 
 class TestInjectStorePathContinuation:
@@ -590,7 +542,7 @@ class TestInjectStorePathContinuation:
 
         from server import _inject_store_path_continuation
 
-        bridge = {"tool_name": "analyze", "tool_path": "myproject.F0.analyze", "mode": "fork"}
+        bridge = {"tool_name": "analyze", "tool_path": "myproject.F0.analyze", "mode": "continue"}
         response_json = json.dumps(
             {
                 "status": "in_progress",
@@ -617,7 +569,7 @@ class TestInjectStorePathContinuation:
 
         from server import _inject_store_path_continuation
 
-        bridge = {"tool_name": "planner", "tool_path": "myproject.F0.planner", "mode": "fork"}
+        bridge = {"tool_name": "planner", "tool_path": "myproject.F0.planner", "mode": "continue"}
         response_json = json.dumps(
             {
                 "status": "complete",
@@ -811,7 +763,6 @@ class TestPalUpsertTool:
         assert "output" in props
         assert "files" in props
         assert "metadata" in props
-        assert "entry_type" in props
         assert "child_key" in props
         assert "child_prefix" in props
         assert schema["required"] == ["tree_path"]
@@ -828,14 +779,14 @@ class TestPalUpsertTool:
             tree_path="test-upsert",
             directory=str(tmp_path),
             created_at="2024-01-01T00:00:00Z",
-            children={"L1": PalNode(entry_type="store", label="original", input="old input", output="old output")},
+            children={"0": PalNode(label="original", input="old input", output="old output")},
         )
         save_store(store)
         update_index(str(tmp_path), "test-upsert")
 
         result = await self.tool.execute(
             {
-                "tree_path": "test-upsert.L1",
+                "tree_path": "test-upsert.0",
                 "label": "updated",
                 "output": "new output",
                 "metadata": {"key": "value"},
@@ -874,35 +825,6 @@ class TestPalUpsertTool:
         assert "root" in data["content"].lower()
 
     @pytest.mark.asyncio
-    async def test_insert_mode_requires_entry_type(self, tmp_path):
-        import os
-
-        from utils.palstore import PalNode, PalRoot, save_store, update_index
-
-        os.environ["PAL_STORAGE_DIR"] = str(tmp_path)
-
-        store = PalRoot(
-            tree_path="test-insert",
-            directory=str(tmp_path),
-            created_at="2024-01-01T00:00:00Z",
-            children={"L1": PalNode(entry_type="store", label="layer")},
-        )
-        save_store(store)
-        update_index(str(tmp_path), "test-insert")
-
-        result = await self.tool.execute(
-            {
-                "tree_path": "test-insert.L1",
-                "insert": True,
-            }
-        )
-        import json
-
-        data = json.loads(result[0].text)
-        assert data["status"] == "error"
-        assert "entry_type" in data["content"]
-
-    @pytest.mark.asyncio
     async def test_insert_mode_creates_child(self, tmp_path):
         import os
 
@@ -914,16 +836,15 @@ class TestPalUpsertTool:
             tree_path="test-child",
             directory=str(tmp_path),
             created_at="2024-01-01T00:00:00Z",
-            children={"L1": PalNode(entry_type="store", label="layer")},
+            children={"0": PalNode(label="layer")},
         )
         save_store(store)
         update_index(str(tmp_path), "test-child")
 
         result = await self.tool.execute(
             {
-                "tree_path": "test-child.L1",
+                "tree_path": "test-child.0",
                 "insert": True,
-                "entry_type": "query",
                 "label": "manual query",
                 "input": "test input",
                 "output": "test output",
@@ -933,7 +854,7 @@ class TestPalUpsertTool:
 
         data = json.loads(result[0].text)
         assert data["status"] == "success"
-        assert "test-child.L1.Q0" in data["content"]
+        assert "test-child.0.0" in data["content"]
 
     @pytest.mark.asyncio
     async def test_update_mode_metadata_merge(self, tmp_path):
@@ -947,14 +868,14 @@ class TestPalUpsertTool:
             tree_path="test-merge",
             directory=str(tmp_path),
             created_at="2024-01-01T00:00:00Z",
-            children={"L1": PalNode(entry_type="store", label="layer", metadata={"existing": "keep"})},
+            children={"0": PalNode(label="layer", metadata={"existing": "keep"})},
         )
         save_store(store)
         update_index(str(tmp_path), "test-merge")
 
         result = await self.tool.execute(
             {
-                "tree_path": "test-merge.L1",
+                "tree_path": "test-merge.0",
                 "metadata": {"new_key": "new_value"},
             }
         )
@@ -966,7 +887,7 @@ class TestPalUpsertTool:
 
         # Reload and verify merge
         reloaded = load_store(str(tmp_path), "test-merge")
-        node = reloaded.children["L1"]
+        node = reloaded.children["0"]
         assert node.metadata["existing"] == "keep"
         assert node.metadata["new_key"] == "new_value"
 
@@ -983,10 +904,9 @@ class TestPalUpsertTool:
             directory=str(tmp_path),
             created_at="2024-01-01T00:00:00Z",
             children={
-                "L1": PalNode(
-                    entry_type="store",
+                "0": PalNode(
                     label="layer",
-                    children={"Q0": PalNode(entry_type="query", label="existing")},
+                    children={"0": PalNode(label="existing")},
                 )
             },
         )
@@ -995,10 +915,9 @@ class TestPalUpsertTool:
 
         result = await self.tool.execute(
             {
-                "tree_path": "test-dup.L1",
+                "tree_path": "test-dup.0",
                 "insert": True,
-                "entry_type": "query",
-                "child_key": "Q0",
+                "child_key": "0",
                 "label": "duplicate",
             }
         )

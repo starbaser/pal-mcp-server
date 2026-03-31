@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 
 TREE_PATH_DESCRIPTION = (
     "Dot-path to a PALNode in a PALTree. Root trees use a plain name (e.g. 'myproject'). "
-    "Child nodes extend with dot notation (e.g. 'myproject.L1', 'myproject.L1.Q1'). "
+    "Child nodes extend with dot notation (e.g. 'myproject.0', 'myproject.0.0'). "
     "Use treelist to discover tree paths. Returned by newtree, addtreelayer, querynode, and forknode."
 )
 
@@ -35,7 +35,7 @@ def _truncate_label(text: str, max_len: int = 80) -> str:
 
 
 def _natural_sort_key(key: str) -> tuple:
-    """Sort key that handles mixed alpha-numeric keys naturally: L1, L2, ..., L10."""
+    """Sort key that handles mixed alpha-numeric keys naturally: 0, 1, ..., 10."""
     import re
 
     parts = re.split(r"(\d+)", key)
@@ -52,41 +52,21 @@ def _render_store_tree(store, root_path: str = "", indent: int = 0) -> list[str]
         p = "  " * depth
         for key, node in sorted(nodes.items(), key=lambda kv: _natural_sort_key(kv[0])):
             full_path = f"{parent_path}.{key}"
-            etype = node.entry_type
             ts = (node.timestamp or "")[:10]
 
-            if etype == "store":
-                if node.label and node.label.startswith(f"{key}:"):
+            if node.label:
+                if node.label.startswith(f"{key}:"):
                     label_part = node.label
-                elif node.label:
-                    label_part = f"{key}. {node.label}"
                 else:
-                    label_part = key
-                date_part = f" — {ts}" if ts else ""
-                files_part = ""
-                if node.files:
-                    basenames = ", ".join(os.path.basename(f) for f in node.files)
-                    files_part = f" — {basenames}"
-                lines.append(f"{p}- [{label_part}](#{full_path}){date_part}{files_part}")
-            elif etype == "query":
-                display_key = f".{key}" if key.isdigit() else key
-                prompt_part = f'  "{_truncate_label(node.label, 60)}"' if node.label else ""
-                date_part = f" — {ts}" if ts else ""
-                lines.append(f"{p}- [{display_key}](#{full_path}){prompt_part}{date_part}")
-            elif etype == "fork":
-                if node.label and node.label.startswith(f"{key}:"):
-                    label_part = node.label
-                elif node.label:
                     label_part = f"{key}. {node.label}"
-                else:
-                    label_part = key
-                date_part = f" — {ts}" if ts else ""
-                lines.append(f"{p}- [{label_part}](#{full_path}){date_part}")
-            elif etype == "tool":
-                tool_name = node.tool_name or key
-                lines.append(f"{p}- [.{tool_name}](#{full_path})")
             else:
-                lines.append(f"{p}- [.{key}](#{full_path})")
+                label_part = key
+            date_part = f" — {ts}" if ts else ""
+            files_part = ""
+            if node.files:
+                basenames = ", ".join(os.path.basename(f) for f in node.files)
+                files_part = f" — {basenames}"
+            lines.append(f"{p}- [{label_part}](#{full_path}){date_part}{files_part}")
 
             if node.children:
                 _render_nodes(node.children, full_path, depth + 1)
@@ -284,7 +264,7 @@ class PalAddTreeLayerTool(PalStoreBaseTool):
     def get_description(self) -> str:
         return (
             "Add a context node to an existing PALTree, embedding files and prose for an external model to process.\n"
-            "Each call appends a new numbered layer (L1, L2, ...); seed 4-6 key files per node for best results.\n"
+            "Each call appends a new numbered layer; seed 4-6 key files per layer for best results.\n"
             "Use newtree to create a tree first, then querynode to retrieve stored context."
         )
 
@@ -376,11 +356,10 @@ class PalAddTreeLayerTool(PalStoreBaseTool):
             return [TextContent(type="text", text=error.model_dump_json())]
 
         from utils.file_diff import build_file_state_from_ancestry
-        from utils.palstore import resolve_root_alias, walk_palnode_ancestry
+        from utils.palstore import walk_palnode_ancestry
         from utils.palstore_builder import build_context_from_ancestry
 
-        resolved_id = resolve_root_alias(store, tree_path)
-        ancestors = walk_palnode_ancestry(store, resolved_id)
+        ancestors = walk_palnode_ancestry(store, tree_path)
         self._ancestors = ancestors
         self._prior_file_state = build_file_state_from_ancestry(ancestors)
         self._injected_history = build_context_from_ancestry(ancestors)
@@ -461,17 +440,16 @@ class PalAddTreeLayerTool(PalStoreBaseTool):
         return f"{response}\n\n---\n\nAGENT'S TURN: Context layer stored. Use the tree_path to add more layers or query this tree."
 
     def _create_continuation_offer(self, _request, _model_info: Optional[dict] = None):
-        from utils.palstore import get_next_key, resolve_layer_insertion_point
+        from utils.palstore import get_next_key
 
         store = getattr(self, "_store", None)
         tree_path = getattr(self, "_tree_path", None)
         if store is None or tree_path is None:
             return None
 
-        insertion_parent = resolve_layer_insertion_point(store, tree_path)
-        self._insertion_parent = insertion_parent
-        self._next_key = get_next_key(store, insertion_parent, "L")
-        self._new_store_path = f"{insertion_parent}.{self._next_key}"
+        self._insertion_parent = tree_path
+        self._next_key = get_next_key(store, tree_path, "")
+        self._new_store_path = f"{tree_path}.{self._next_key}"
 
         context_window, context_used = self._get_context_token_info()
         return {
@@ -513,7 +491,6 @@ class PalAddTreeLayerTool(PalStoreBaseTool):
         }
 
         node = PalNode(
-            entry_type="store",
             label=getattr(request, "context_label", None),
             timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             model=model_name,
@@ -543,7 +520,7 @@ class PalUpsertTool(BaseTool):
             "Two modes:\n"
             "  Update mode (default): target an existing node by tree_path, update its fields.\n"
             "  Insert mode (insert=true): target an existing node, add a NEW child node under it.\n"
-            "Fields: label, input, output, files, metadata, entry_type (for insert)."
+            "Fields: label, input, output, files, metadata."
         )
 
     def get_annotations(self) -> dict:
@@ -587,24 +564,18 @@ class PalUpsertTool(BaseTool):
                     "type": "object",
                     "description": "Key-value metadata to merge into the node (existing keys preserved unless overwritten).",
                 },
-                "entry_type": {
-                    "type": "string",
-                    "enum": ["store", "query", "tool", "fork"],
-                    "description": "Required when insert=true. The entry_type for the new child node.",
-                },
                 "child_key": {
                     "type": "string",
                     "description": (
-                        "Insert mode only. Explicit key for the new child (e.g. 'Q0', 'L3'). "
-                        "If omitted, auto-determined from child_prefix or entry_type."
+                        "Insert mode only. Explicit key for the new child (e.g. '0', '3'). "
+                        "If omitted, auto-generated using child_prefix."
                     ),
                 },
                 "child_prefix": {
                     "type": "string",
-                    "enum": ["Q", "L", "F"],
                     "description": (
-                        "Insert mode only. Prefix for auto-key generation when child_key is absent. "
-                        "Defaults: store->L, query->Q, fork->F."
+                        "Insert mode only. Prefix string for auto-key generation when child_key is absent. "
+                        "Defaults to empty string (purely numeric keys)."
                     ),
                 },
             },
@@ -694,11 +665,6 @@ class PalUpsertTool(BaseTool):
         from tools.models import ToolOutput
         from utils.palstore import PalNode, add_palnode, get_next_key, resolve_palnode, save_store
 
-        entry_type = arguments.get("entry_type")
-        if not entry_type:
-            error = ToolOutput(status="error", content="entry_type is required when insert=true.", content_type="text")
-            return [TextContent(type="text", text=error.model_dump_json())]
-
         # Verify parent exists (root or node)
         if tree_path != store.tree_path:
             parent = resolve_palnode(store, tree_path)
@@ -711,17 +677,7 @@ class PalUpsertTool(BaseTool):
         # Determine child key
         child_key = arguments.get("child_key")
         if not child_key:
-            child_prefix = arguments.get("child_prefix")
-            if not child_prefix:
-                prefix_map = {"store": "L", "query": "Q", "fork": "F"}
-                child_prefix = prefix_map.get(entry_type)
-                if child_prefix is None:
-                    error = ToolOutput(
-                        status="error",
-                        content=f'Cannot auto-determine key for entry_type="{entry_type}". Provide child_key explicitly.',
-                        content_type="text",
-                    )
-                    return [TextContent(type="text", text=error.model_dump_json())]
+            child_prefix = arguments.get("child_prefix", "")
             child_key = get_next_key(store, tree_path, child_prefix)
 
         # Check for duplicate key
@@ -739,7 +695,6 @@ class PalUpsertTool(BaseTool):
             return [TextContent(type="text", text=error.model_dump_json())]
 
         node = PalNode(
-            entry_type=entry_type,
             label=arguments.get("label"),
             timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             files=arguments.get("files", []),
@@ -757,9 +712,9 @@ class PalUpsertTool(BaseTool):
         save_store(store)
         result = ToolOutput(
             status="success",
-            content=f"Inserted {entry_type} node at {new_path}.",
+            content=f"Inserted node at {new_path}.",
             content_type="text",
-            metadata={"tree_path": new_path, "entry_type": entry_type, "child_key": child_key},
+            metadata={"tree_path": new_path, "child_key": child_key},
         )
         return [TextContent(type="text", text=result.model_dump_json())]
 
@@ -854,39 +809,23 @@ class PalQueryTool(PalStoreBaseTool):
             error = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        from utils.palstore import resolve_palnode, resolve_root_alias
-
-        try:
-            tree_path = resolve_root_alias(store, tree_path)
-        except KeyError as exc:
-            error = ToolOutput(status="error", content=str(exc), content_type="text")
-            return [TextContent(type="text", text=error.model_dump_json())]
+        from utils.palstore import resolve_palnode, walk_palnode_ancestry
+        from utils.palstore_builder import build_context_from_ancestry
 
         node = resolve_palnode(store, tree_path)
 
-        if node is not None and node.entry_type in ("store", "fork", "query", "tool"):
-            self._parent_path = tree_path
-            self._child_prefix = "Q"
-            self._child_entry_type = "query"
-        else:
+        if node is None and tree_path != store.tree_path:
             error = ToolOutput(
                 status="error",
-                content=f"Cannot resolve store path: {tree_path}",
+                content=f"Node not found: {tree_path}",
                 content_type="text",
             )
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        from utils.palstore import walk_palnode_ancestry
-        from utils.palstore_builder import build_context_from_ancestry
+        self._parent_path = tree_path
+        self._child_prefix = ""
 
         ancestors = walk_palnode_ancestry(store, tree_path)
-
-        # Root-level query: walk_palnode_ancestry returns [] because there's no path to traverse.
-        # Collect all L-children (layers) as the context — this is "query the whole store".
-        if not ancestors and tree_path == store.tree_path:
-            layers = [(k, v) for k, v in store.children.items() if k.startswith("L") and k[1:].isdigit()]
-            layers.sort(key=lambda kv: int(kv[0][1:]))
-            ancestors = [node for _, node in layers]
 
         self._injected_history = build_context_from_ancestry(ancestors)
         self._store = store
@@ -959,7 +898,6 @@ class PalQueryTool(PalStoreBaseTool):
         store = getattr(self, "_store", None)
         parent_path = getattr(self, "_parent_path", None)
         next_key = getattr(self, "_next_key", None)
-        child_entry_type = getattr(self, "_child_entry_type", "query")
 
         if store is None or parent_path is None or next_key is None:
             logger.warning("querynode: missing store state in _record_assistant_turn, skipping write")
@@ -984,7 +922,6 @@ class PalQueryTool(PalStoreBaseTool):
         }
 
         node = PalNode(
-            entry_type=child_entry_type,
             label=_truncate_label(prompt) if prompt else None,
             timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             model=model_name,
@@ -1078,17 +1015,8 @@ class PalForkTool(BaseTool):
             error = ToolOutput(status="error", content=f'Store file not found: "{root_id}".', content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        from utils.palstore import resolve_root_alias
-
-        try:
-            tree_path = resolve_root_alias(store, tree_path)
-        except KeyError as exc:
-            error = ToolOutput(status="error", content=str(exc), content_type="text")
-            return [TextContent(type="text", text=error.model_dump_json())]
-
-        next_key = get_next_key(store, tree_path, "F")
+        next_key = get_next_key(store, tree_path, "")
         fork_node = PalNode(
-            entry_type="fork",
             label=label,
             timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         )
@@ -1170,9 +1098,6 @@ class PalListTool(BaseTool):
     def format_response(self, response: str, _request: ToolRequest, _model_info: Optional[dict] = None) -> str:
         return response
 
-    def _count_l_children(self, children: dict) -> int:
-        return sum(1 for k in children if k.startswith("L") and k[1:].isdigit())
-
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
         from utils.palstore import list_stores, load_store, resolve_palnode, resolve_store_location
@@ -1194,8 +1119,8 @@ class PalListTool(BaseTool):
 
             node = resolve_palnode(store, tree_path)
             if node is None and tree_path == store.tree_path:
-                n_layers = self._count_l_children(store.children)
-                lines = [f"{store.tree_path}  ({n_layers} layers)"]
+                n_nodes = len(store.children)
+                lines = [f"{store.tree_path}  ({n_nodes} nodes)"]
                 lines.extend(_render_store_tree(store, indent=1))
             elif node is not None:
                 lines = [f"{tree_path}"]
@@ -1209,8 +1134,8 @@ class PalListTool(BaseTool):
             if stores:
                 lines = []
                 for store in stores:
-                    n_layers = self._count_l_children(store.children)
-                    lines.append(f"{store.tree_path}  ({n_layers} layers)")
+                    n_nodes = len(store.children)
+                    lines.append(f"{store.tree_path}  ({n_nodes} nodes)")
                     lines.extend(_render_store_tree(store, indent=1))
                 content = "\n".join(lines)
             else:
@@ -1294,14 +1219,6 @@ class PalReadTool(BaseTool):
             error = ToolOutput(status="error", content=f'Store file not found: "{root_id}".', content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        from utils.palstore import resolve_root_alias
-
-        try:
-            tree_path = resolve_root_alias(store, tree_path)
-        except KeyError as exc:
-            error = ToolOutput(status="error", content=str(exc), content_type="text")
-            return [TextContent(type="text", text=error.model_dump_json())]
-
         node = resolve_palnode(store, tree_path)
 
         if node is None:
@@ -1317,7 +1234,6 @@ class PalReadTool(BaseTool):
             content = format_layer_markdown(
                 tree_path,
                 label=node.label,
-                entry_type=node.entry_type,
                 model=node.model,
                 timestamp=node.timestamp,
                 files=node.files,
@@ -1497,8 +1413,6 @@ class PalExportTool(BaseTool):
         meta_parts = []
         if node.label:
             meta_parts.append(f"**Label:** {node.label}")
-        if node.entry_type:
-            meta_parts.append(f"**Type:** {node.entry_type}")
         if node.model:
             meta_parts.append(f"**Model:** {node.model}")
         if node.timestamp:
@@ -1591,8 +1505,8 @@ class PalExportTool(BaseTool):
         doc.append(f"**Created:** {store.created_at}")
         if store.label:
             doc.append(f"**Label:** {store.label}")
-        n_layers = sum(1 for k in store.children if k.startswith("L") and k[1:].isdigit())
-        doc.append(f"**Layers:** {n_layers}")
+        n_nodes = len(store.children)
+        doc.append(f"**Nodes:** {n_nodes}")
         doc.append(f"**Exported:** {datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')}")
         doc.append("")
 
@@ -1621,9 +1535,9 @@ class PalExportTool(BaseTool):
 
         tool_output = ToolOutput(
             status="success",
-            content=f"Exported tree '{store.tree_path}' ({n_layers} layers) to:\n{output_path}",
+            content=f"Exported tree '{store.tree_path}' ({n_nodes} nodes) to:\n{output_path}",
             content_type="text",
-            metadata={"tree_path": tree_path, "output_path": output_path, "layers": n_layers},
+            metadata={"tree_path": tree_path, "output_path": output_path, "nodes": n_nodes},
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]
 
@@ -2034,8 +1948,8 @@ class PalTraverseTool(BaseTool):
         return (
             "Traverse a PALTree path from start_node to end_node and render the exact "
             "conversation history content that would be sent to the PAL model — full thread "
-            "rehydration with all turns, file blobs, and cumulative L-node inclusion. "
-            "The end_node must be a descendant (or cumulative L-successor) of start_node."
+            "rehydration with all turns and file blobs. "
+            "The end_node must be a descendant of start_node."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -2050,14 +1964,14 @@ class PalTraverseTool(BaseTool):
                     "type": "string",
                     "description": (
                         "Segment path relative to store root for the start of the range "
-                        "(e.g. 'L1', 'L3.F0'). Inclusive."
+                        "(e.g. '0', '2.1'). Inclusive."
                     ),
                 },
                 "end_node": {
                     "type": "string",
                     "description": (
                         "Segment path relative to store root for the end of the range "
-                        "(e.g. 'L5', 'L3.F0.L1.Q0'). Must be a descendant of start_node. Inclusive."
+                        "(e.g. '4', '2.1.0'). Must be a descendant of start_node. Inclusive."
                     ),
                 },
             },
@@ -2162,7 +2076,7 @@ class PalMoveTool(BaseTool):
             "properties": {
                 "source_path": {
                     "type": "string",
-                    "description": "Full dot-path of the node to move (e.g. 'myproject.L1.F0.L2').",
+                    "description": "Full dot-path of the node to move (e.g. 'myproject.0.1.2').",
                 },
                 "dest_parent": {
                     "type": "string",
@@ -2170,7 +2084,7 @@ class PalMoveTool(BaseTool):
                 },
                 "dest_key": {
                     "type": "string",
-                    "description": "Key name at destination (e.g. 'L3'). If omitted, auto-generates the next available key using the source node's key prefix.",
+                    "description": "Key name at destination (e.g. '3'). If omitted, auto-generates the next available key using the source node's key prefix.",
                 },
             },
             "required": ["source_path", "dest_parent"],
@@ -2208,7 +2122,6 @@ class PalMoveTool(BaseTool):
             load_store,
             move_palnode,
             parse_store_path,
-            resolve_root_alias,
             resolve_store_location,
             save_store,
         )
@@ -2230,17 +2143,10 @@ class PalMoveTool(BaseTool):
             error = ToolOutput(status="error", content=f'Store file not found: "{root_id}".', content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        try:
-            source_path = resolve_root_alias(store, source_path)
-            dest_parent = resolve_root_alias(store, dest_parent)
-        except KeyError as exc:
-            error = ToolOutput(status="error", content=str(exc), content_type="text")
-            return [TextContent(type="text", text=error.model_dump_json())]
-
         if dest_key is None:
             _, src_segments = parse_store_path(source_path)
             src_last_key = src_segments[-1] if src_segments else ""
-            prefix = _get_key_prefix(src_last_key) or "L"
+            prefix = _get_key_prefix(src_last_key) or ""
             dest_key = get_next_key(store, dest_parent, prefix)
 
         try:
@@ -2281,7 +2187,7 @@ class PalCopyTool(BaseTool):
             "properties": {
                 "source_path": {
                     "type": "string",
-                    "description": "Full dot-path of the node to copy (e.g. 'myproject.L1.F0.L2').",
+                    "description": "Full dot-path of the node to copy (e.g. 'myproject.0.1.2').",
                 },
                 "dest_parent": {
                     "type": "string",
@@ -2289,7 +2195,7 @@ class PalCopyTool(BaseTool):
                 },
                 "dest_key": {
                     "type": "string",
-                    "description": "Key name at destination (e.g. 'L3'). If omitted, auto-generates the next available key using the source node's key prefix.",
+                    "description": "Key name at destination (e.g. '3'). If omitted, auto-generates the next available key using the source node's key prefix.",
                 },
             },
             "required": ["source_path", "dest_parent"],
@@ -2327,7 +2233,6 @@ class PalCopyTool(BaseTool):
             get_next_key,
             load_store,
             parse_store_path,
-            resolve_root_alias,
             resolve_store_location,
             save_store,
         )
@@ -2349,17 +2254,10 @@ class PalCopyTool(BaseTool):
             error = ToolOutput(status="error", content=f'Store file not found: "{root_id}".', content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        try:
-            source_path = resolve_root_alias(store, source_path)
-            dest_parent = resolve_root_alias(store, dest_parent)
-        except KeyError as exc:
-            error = ToolOutput(status="error", content=str(exc), content_type="text")
-            return [TextContent(type="text", text=error.model_dump_json())]
-
         if dest_key is None:
             _, src_segments = parse_store_path(source_path)
             src_last_key = src_segments[-1] if src_segments else ""
-            prefix = _get_key_prefix(src_last_key) or "L"
+            prefix = _get_key_prefix(src_last_key) or ""
             dest_key = get_next_key(store, dest_parent, prefix)
 
         try:
@@ -2400,11 +2298,11 @@ class PalFoldTool(BaseTool):
             "properties": {
                 "start_path": {
                     "type": "string",
-                    "description": "Full dot-path of range start (e.g. 'myproject.L1.F0.analyze'). Inclusive.",
+                    "description": "Full dot-path of range start (e.g. 'myproject.0.1.analyze'). Inclusive.",
                 },
                 "end_path": {
                     "type": "string",
-                    "description": "Full dot-path of range end (e.g. 'myproject.L1.F0.analyze.F0.thinkdeep.F0.planner'). Must be a descendant of start. Inclusive.",
+                    "description": "Full dot-path of range end (e.g. 'myproject.0.1.analyze.1.thinkdeep.1.planner'). Must be a descendant of start. Inclusive.",
                 },
                 "dest_parent": {
                     "type": "string",
@@ -2412,7 +2310,7 @@ class PalFoldTool(BaseTool):
                 },
                 "dest_key": {
                     "type": "string",
-                    "description": "Key for the folded node at destination. Defaults to next available L-key.",
+                    "description": "Key for the folded node at destination. Defaults to next available key.",
                 },
                 "label": {
                     "type": "string",
@@ -2454,7 +2352,6 @@ class PalFoldTool(BaseTool):
             get_next_key,
             load_store,
             parse_store_path,
-            resolve_root_alias,
             resolve_store_location,
             save_store,
         )
@@ -2479,13 +2376,6 @@ class PalFoldTool(BaseTool):
             return [TextContent(type="text", text=error.model_dump_json())]
 
         try:
-            start_path = resolve_root_alias(store, start_path)
-            end_path = resolve_root_alias(store, end_path)
-        except KeyError as exc:
-            error = ToolOutput(status="error", content=str(exc), content_type="text")
-            return [TextContent(type="text", text=error.model_dump_json())]
-
-        try:
             folded = fold_palnode_range(store, start_path, end_path)
         except (KeyError, ValueError) as exc:
             error = ToolOutput(status="error", content=str(exc), content_type="text")
@@ -2496,15 +2386,9 @@ class PalFoldTool(BaseTool):
 
         if dest_parent is None:
             dest_parent = store.tree_path
-        else:
-            try:
-                dest_parent = resolve_root_alias(store, dest_parent)
-            except KeyError as exc:
-                error = ToolOutput(status="error", content=str(exc), content_type="text")
-                return [TextContent(type="text", text=error.model_dump_json())]
 
         if dest_key is None:
-            dest_key = get_next_key(store, dest_parent, "L")
+            dest_key = get_next_key(store, dest_parent, "")
 
         try:
             new_path = add_palnode(store, dest_parent, dest_key, folded)
@@ -2552,7 +2436,7 @@ class PalDeleteTool(BaseTool):
             "properties": {
                 "node_path": {
                     "type": "string",
-                    "description": "Full dot-path of the node to delete (e.g. 'myproject.L3').",
+                    "description": "Full dot-path of the node to delete (e.g. 'myproject.3').",
                 },
             },
             "required": ["node_path"],
@@ -2588,7 +2472,6 @@ class PalDeleteTool(BaseTool):
             delete_palnode_with_shift,
             load_store,
             parse_store_path,
-            resolve_root_alias,
             resolve_store_location,
             save_store,
         )
@@ -2606,12 +2489,6 @@ class PalDeleteTool(BaseTool):
         store = load_store(directory, root_id)
         if store is None:
             error = ToolOutput(status="error", content=f'Store file not found: "{root_id}".', content_type="text")
-            return [TextContent(type="text", text=error.model_dump_json())]
-
-        try:
-            node_path = resolve_root_alias(store, node_path)
-        except KeyError as exc:
-            error = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
         try:

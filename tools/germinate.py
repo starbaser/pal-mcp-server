@@ -414,7 +414,7 @@ class GerminateTool(BaseTool):
         total_files = sum(len(ly.files) for ly in layers)
         logger.info("germinate: found %d layers, %d total files", len(layers), total_files)
 
-        # Phase 1: create tree + L1 manifest
+        # Phase 1: create tree + manifest node
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         store = PalRoot(tree_path=tree_name, directory=directory, created_at=now)
         save_store(store)
@@ -422,7 +422,6 @@ class GerminateTool(BaseTool):
 
         manifest_summary = self._build_manifest(directory, layers)
         l1_node = PalNode(
-            entry_type="store",
             label="Project manifest and layer structure",
             timestamp=now,
             model="germinate",
@@ -438,12 +437,12 @@ class GerminateTool(BaseTool):
             ),
             output=manifest_summary,
         )
-        add_palnode(store, tree_name, "L1", l1_node)
+        add_palnode(store, tree_name, "0", l1_node)
         save_store(store)
-        logger.info("germinate: L1 manifest created")
+        logger.info("germinate: manifest node created")
 
         # Phase 2: per-layer analysis loop
-        parent_path = f"{tree_name}.L1"
+        parent_path = f"{tree_name}.0"
         layers_completed = 0
         layers_failed = []
 
@@ -466,10 +465,9 @@ class GerminateTool(BaseTool):
                     provider, model_name, model_context, layer, analysis, prior_context
                 )
 
-                # (c) Persist as nested Q-node
-                next_key = get_next_key(store, parent_path, "Q")
+                # (c) Persist as nested query node
+                next_key = get_next_key(store, parent_path, "")
                 q_node = PalNode(
-                    entry_type="query",
                     label=f"Layer {layer.ring}: {layer.name}",
                     timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                     model=model_name,
@@ -502,6 +500,7 @@ class GerminateTool(BaseTool):
         summary_lines = [
             "PALTree germinated.\n",
             f"tree_path: {tree_name}",
+            f"manifest: {tree_name}.0",
             f"directory: {directory}",
             f"model: {model_name}",
             f"layers analyzed: {layers_completed}/{len(layers)}",

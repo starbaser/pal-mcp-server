@@ -16,14 +16,12 @@ from utils.palstore import PalNode
 
 
 def _make_node(
-    entry_type: str = "store",
     files: list[str] | None = None,
     content: str = "",
     prompt: str = "p",
     response: str = "r",
 ) -> PalNode:
     return PalNode(
-        entry_type=entry_type,
         timestamp="2026-01-01T00:00:00Z",
         files=files or [],
         content=content,
@@ -235,7 +233,7 @@ class TestBuildFileStateFromAncestry:
         assert state["/a.py"] == "v2"
 
     def test_fork_nodes_skipped(self):
-        fork = _make_node(entry_type="fork", files=[], content="")
+        fork = _make_node(files=[], content="")
         state = build_file_state_from_ancestry([fork])
         assert state == {}
 

@@ -841,14 +841,11 @@ def _build_store_listing() -> str:
     for store in stores:
         sid = store.tree_path
         armed_marker = " [armed]" if (armed_store and sid == armed_store) else ""
-        layer_count = sum(1 for n in store.children.values() if n.entry_type == "store")
-        query_count = sum(1 for n in store.children.values() if n.entry_type == "query")
+        child_count = len(store.children)
 
         line = f"- {sid} [tree]{armed_marker}"
-        if layer_count > 0:
-            line += f" ({layer_count} layer{'s' if layer_count != 1 else ''})"
-        if query_count > 0:
-            line += f" ({query_count} quer{'ies' if query_count != 1 else 'y'})"
+        if child_count > 0:
+            line += f" ({child_count} node{'s' if child_count != 1 else ''})"
         lines.append(line)
 
     return "\n".join(lines)
@@ -860,13 +857,8 @@ def _resolve_store_continuation(tool_name: str, arguments: dict) -> str | None:
     Returns the path-based tree_path for response injection, or None if
     continuation_id is a regular UUID (not a store path).
 
-    Two modes:
-    - CONTINUE: target node is a tool node for the same tool. A numeric child
-      is created for the new turn, preserving each turn as a separate PalNode.
-    - FORK: target is any other node type. An auto-fork (F0, F1, ...) is created
-      under the target, and a tool node is placed under the fork.
-
-    Both modes build conversation context directly from PalNode ancestry via
+    Creates a numeric child node under the target path for each new turn,
+    building conversation context directly from PalNode ancestry via
     build_store_context() — no ThreadContext intermediate.
     """
     from datetime import datetime, timezone
@@ -876,7 +868,6 @@ def _resolve_store_continuation(tool_name: str, arguments: dict) -> str | None:
         add_palnode,
         get_next_key,
         load_store,
-        resolve_palnode,
         resolve_store_location,
         save_store,
     )
@@ -895,43 +886,13 @@ def _resolve_store_continuation(tool_name: str, arguments: dict) -> str | None:
     if not store:
         return None
 
-    from utils.palstore import resolve_root_alias
-
-    continuation_id = resolve_root_alias(store, continuation_id)
-
-    node = resolve_palnode(store, continuation_id)
-
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    if node and node.entry_type == "tool" and node.tool_name == tool_name:
-        # CONTINUE: same tool — create numeric child for the new turn
-        child_key = get_next_key(store, continuation_id, "")
-        turn_node = PalNode(
-            entry_type="tool",
-            tool_name=tool_name,
-            timestamp=now,
-        )
-        tool_path = add_palnode(store, continuation_id, child_key, turn_node)
-        save_store(store)
-        mode = "continue"
-    else:
-        # FORK: auto-create fork node, then tool child under it
-        fork_key = get_next_key(store, continuation_id, "F")
-        fork_node = PalNode(
-            entry_type="fork",
-            label=tool_name,
-            timestamp=now,
-        )
-        fork_path = add_palnode(store, continuation_id, fork_key, fork_node)
-
-        tool_node = PalNode(
-            entry_type="tool",
-            tool_name=tool_name,
-            timestamp=now,
-        )
-        tool_path = add_palnode(store, fork_path, tool_name, tool_node)
-        save_store(store)
-        mode = "fork"
+    child_key = get_next_key(store, continuation_id, "")
+    turn_node = PalNode(tool_name=tool_name, timestamp=now)
+    tool_path = add_palnode(store, continuation_id, child_key, turn_node)
+    save_store(store)
+    mode = "continue"
 
     # Build context directly from PalNode ancestry — no ThreadContext needed
     build_store_context(store, tool_path, arguments)

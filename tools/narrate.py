@@ -314,15 +314,15 @@ class NarrateTool(WorkflowTool):
         by tree_path. This method reads the store's L-children by index as a compatibility bridge.
         """
         try:
-            from utils.palstore import load_store, resolve_store_location
+            from utils.palstore import load_tree, resolve_tree_location
 
-            location = resolve_store_location(tree_path)
+            location = resolve_tree_location(tree_path)
             if location is None:
                 logger.warning(f"[NARRATE] tree_path '{tree_path}' not found — skipping store section")
                 return ""
 
             directory, root_id = location
-            store = load_store(directory, root_id)
+            store = load_tree(directory, root_id)
             if store is None:
                 logger.warning(f"[NARRATE] store file not found for '{tree_path}' — skipping store section")
                 return ""

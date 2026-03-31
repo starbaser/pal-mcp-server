@@ -10,25 +10,25 @@ from utils.palstore import (
     PalNode,
     PalRoot,
     add_palnode,
-    arm_store,
+    arm_tree,
     collect_palnode_files,
     copy_palnode,
     detach_palnode,
-    disarm_store,
+    disarm_tree,
     encode_directory,
     find_palnode_ancestor,
     fold_palnode_range,
-    get_armed_store,
+    get_armed_tree,
     get_next_key,
-    list_armed_stores,
-    list_stores,
-    load_store,
+    list_armed_trees,
+    list_trees,
+    load_tree,
     move_palnode,
-    parse_store_path,
+    parse_tree_path,
     rebuild_index,
     resolve_palnode,
-    resolve_store_location,
-    save_store,
+    resolve_tree_location,
+    save_tree,
     update_index,
     walk_palnode_ancestry,
     walk_palnode_range,
@@ -45,7 +45,7 @@ def ctx_env(tmp_path, monkeypatch):
 
     ctx_dir = str(tmp_path / "context")
     monkeypatch.setattr(palstore, "_CTX_DIR", ctx_dir)
-    monkeypatch.setattr(palstore, "_INDEX_PATH", os.path.join(ctx_dir, "store-index.json"))
+    monkeypatch.setattr(palstore, "_INDEX_PATH", os.path.join(ctx_dir, "tree-index.json"))
     monkeypatch.setattr(palstore, "_ARMED_PATH", os.path.join(ctx_dir, "armed.json"))
     return ctx_dir
 
@@ -109,27 +109,27 @@ class TestEncodeDirectory:
 class TestStoreLifecycle:
     def test_save_and_load_roundtrip(self, ctx_env):
         store = _make_root()
-        save_store(store)
-        loaded = load_store(store.directory, store.tree_path)
+        save_tree(store)
+        loaded = load_tree(store.directory, store.tree_path)
         assert loaded is not None
         assert loaded.tree_path == store.tree_path
         assert loaded.directory == store.directory
         assert loaded.created_at == store.created_at
 
     def test_load_nonexistent_returns_none(self, ctx_env):
-        result = load_store("/home/nobody/project", "ghost-store")
+        result = load_tree("/home/nobody/project", "ghost-store")
         assert result is None
 
     def test_atomic_write_does_not_corrupt_on_overwrite(self, ctx_env):
         store = _make_root()
-        save_store(store)
+        save_tree(store)
 
         # Add a child and overwrite
         child = _make_node(input="hello", output="world")
         store.children["L1"] = child
-        save_store(store)
+        save_tree(store)
 
-        loaded = load_store(store.directory, store.tree_path)
+        loaded = load_tree(store.directory, store.tree_path)
         assert loaded is not None
         assert "L1" in loaded.children
         assert loaded.children["L1"].input == "hello"
@@ -138,12 +138,12 @@ class TestStoreLifecycle:
         from utils import palstore
 
         store = _make_root()
-        path = palstore.get_store_path(store.directory, store.tree_path)
+        path = palstore.get_tree_file_path(store.directory, store.tree_path)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
             f.write("{not valid json")
 
-        result = load_store(store.directory, store.tree_path)
+        result = load_tree(store.directory, store.tree_path)
         assert result is None
 
 
@@ -174,7 +174,7 @@ class TestResolveNode:
         l1.children["Q0"] = q0
         store.children["L1"] = l1
 
-        # Index the store so parse_store_path can find the root
+        # Index the store so parse_tree_path can find the root
         update_index(store.directory, store.tree_path)
 
         result = resolve_palnode(store, "mystore.L1.Q0.F0.thinkdeep")
@@ -390,25 +390,25 @@ class TestGetNextKey:
 
 class TestParseStorePath:
     def test_simple_no_dot(self, ctx_env):
-        root, segments = parse_store_path("mystore")
+        root, segments = parse_tree_path("mystore")
         assert root == "mystore"
         assert segments == []
 
     def test_with_segments(self, ctx_env):
         update_index("/home/user/project", "mystore")
-        root, segments = parse_store_path("mystore.L1.Q0")
+        root, segments = parse_tree_path("mystore.L1.Q0")
         assert root == "mystore"
         assert segments == ["L1", "Q0"]
 
     def test_with_tool_child_under_fork(self, ctx_env):
         update_index("/home/user/project", "mystore")
-        root, segments = parse_store_path("mystore.Q0.F0.thinkdeep")
+        root, segments = parse_tree_path("mystore.Q0.F0.thinkdeep")
         assert root == "mystore"
         assert segments == ["Q0", "F0", "thinkdeep"]
 
     def test_fallback_to_first_segment_when_not_indexed(self, ctx_env):
         # No index entry for "unknown-store"
-        root, segments = parse_store_path("unknown-store.L1.Q0")
+        root, segments = parse_tree_path("unknown-store.L1.Q0")
         assert root == "unknown-store"
         assert segments == ["L1", "Q0"]
 
@@ -424,43 +424,43 @@ class TestIndexOperations:
         from utils.palstore import load_index
 
         index = load_index()
-        assert "mystore" in index["stores"]
+        assert "mystore" in index["trees"]
         assert "/home/user/project" in index["directories"]
 
     def test_resolve_store_location_finds_indexed_store(self, ctx_env):
         store = _make_root()
-        save_store(store)
+        save_tree(store)
         update_index(store.directory, store.tree_path)
 
-        result = resolve_store_location("mystore")
+        result = resolve_tree_location("mystore")
         assert result is not None
         directory, root_id = result
         assert root_id == "mystore"
         assert directory == store.directory
 
     def test_resolve_store_location_returns_none_for_unknown(self, ctx_env):
-        result = resolve_store_location("totally-unknown-store")
+        result = resolve_tree_location("totally-unknown-store")
         assert result is None
 
     def test_rebuild_index_scans_directories(self, ctx_env):
         store_a = _make_root(tree_path="store-a", directory="/home/user/proj-a")
         store_b = _make_root(tree_path="store-b", directory="/home/user/proj-b")
-        save_store(store_a)
-        save_store(store_b)
+        save_tree(store_a)
+        save_tree(store_b)
 
         index = rebuild_index()
 
-        assert "store-a" in index["stores"]
-        assert "store-b" in index["stores"]
+        assert "store-a" in index["trees"]
+        assert "store-b" in index["trees"]
         assert "/home/user/proj-a" in index["directories"]
         assert "/home/user/proj-b" in index["directories"]
 
     def test_resolve_store_location_falls_back_to_scan(self, ctx_env):
         # Save store but do NOT update index — force a scan fallback
         store = _make_root()
-        save_store(store)
+        save_tree(store)
 
-        result = resolve_store_location("mystore")
+        result = resolve_tree_location("mystore")
         assert result is not None
         _, root_id = result
         assert root_id == "mystore"
@@ -473,31 +473,31 @@ class TestIndexOperations:
 
 class TestArmedOperations:
     def test_arm_and_get_roundtrip(self, ctx_env):
-        arm_store("/home/user/project", "mystore")
-        result = get_armed_store("/home/user/project")
+        arm_tree("/home/user/project", "mystore")
+        result = get_armed_tree("/home/user/project")
         assert result == "mystore"
 
     def test_disarm_removes_armed_state(self, ctx_env):
-        arm_store("/home/user/project", "mystore")
-        disarm_store("/home/user/project")
-        result = get_armed_store("/home/user/project")
+        arm_tree("/home/user/project", "mystore")
+        disarm_tree("/home/user/project")
+        result = get_armed_tree("/home/user/project")
         assert result is None
 
     def test_list_armed_stores_returns_all(self, ctx_env):
-        arm_store("/home/user/proj-a", "store-a")
-        arm_store("/home/user/proj-b", "store-b")
+        arm_tree("/home/user/proj-a", "store-a")
+        arm_tree("/home/user/proj-b", "store-b")
 
-        all_armed = list_armed_stores()
+        all_armed = list_armed_trees()
         assert all_armed["/home/user/proj-a"] == "store-a"
         assert all_armed["/home/user/proj-b"] == "store-b"
 
     def test_disarm_nonexistent_is_noop(self, ctx_env):
         # Should not raise
-        disarm_store("/home/user/nonexistent")
-        assert get_armed_store("/home/user/nonexistent") is None
+        disarm_tree("/home/user/nonexistent")
+        assert get_armed_tree("/home/user/nonexistent") is None
 
     def test_get_armed_returns_none_when_empty(self, ctx_env):
-        result = get_armed_store("/home/user/project")
+        result = get_armed_tree("/home/user/project")
         assert result is None
 
 
@@ -510,41 +510,41 @@ class TestListStores:
     def test_list_stores_with_directory_filter(self, ctx_env):
         store_a = _make_root(tree_path="store-a", directory="/home/user/proj-a")
         store_b = _make_root(tree_path="store-b", directory="/home/user/proj-b")
-        save_store(store_a)
-        save_store(store_b)
+        save_tree(store_a)
+        save_tree(store_b)
 
-        results = list_stores(directory="/home/user/proj-a")
+        results = list_trees(directory="/home/user/proj-a")
         assert len(results) == 1
         assert results[0].tree_path == "store-a"
 
     def test_list_stores_without_filter_returns_all(self, ctx_env):
         store_a = _make_root(tree_path="store-a", directory="/home/user/proj-a")
         store_b = _make_root(tree_path="store-b", directory="/home/user/proj-b")
-        save_store(store_a)
-        save_store(store_b)
+        save_tree(store_a)
+        save_tree(store_b)
 
-        results = list_stores()
+        results = list_trees()
         ids = {s.tree_path for s in results}
         assert "store-a" in ids
         assert "store-b" in ids
 
     def test_list_stores_empty_for_nonexistent_directory(self, ctx_env):
-        results = list_stores(directory="/home/nobody/nowhere")
+        results = list_trees(directory="/home/nobody/nowhere")
         assert results == []
 
     def test_list_stores_filters_corrupt_files(self, ctx_env):
         from utils import palstore
 
         store = _make_root()
-        save_store(store)
+        save_tree(store)
 
         # Drop a corrupt JSON file in the same directory
-        folder = palstore.get_store_dir(store.directory)
+        folder = palstore.get_tree_dir(store.directory)
         corrupt_path = os.path.join(folder, "corrupt.json")
         with open(corrupt_path, "w") as f:
             f.write("{bad json")
 
-        results = list_stores(directory=store.directory)
+        results = list_trees(directory=store.directory)
         assert len(results) == 1
         assert results[0].tree_path == "mystore"
 
@@ -878,15 +878,15 @@ class TestEncodeDirectoryEdgeCases:
 
 class TestPathUtilities:
     def test_get_store_dir_returns_expected_path(self, ctx_env):
-        from utils.palstore import get_store_dir
+        from utils.palstore import get_tree_dir
 
-        result = get_store_dir("/home/user/project")
+        result = get_tree_dir("/home/user/project")
         assert result == os.path.join(ctx_env, "-home-user-project")
 
     def test_get_store_path_ends_with_json(self, ctx_env):
-        from utils.palstore import get_store_path
+        from utils.palstore import get_tree_file_path
 
-        result = get_store_path("/home/user/project", "mystore")
+        result = get_tree_file_path("/home/user/project", "mystore")
         assert result.endswith("mystore.json")
 
 
@@ -900,37 +900,37 @@ class TestStoreLifecycleEdgeCases:
         from utils import palstore
 
         store = _make_root()
-        path = palstore.get_store_path(store.directory, store.tree_path)
+        path = palstore.get_tree_file_path(store.directory, store.tree_path)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
             import json
 
             json.dump([1, 2, 3], f)
 
-        result = load_store(store.directory, store.tree_path)
+        result = load_tree(store.directory, store.tree_path)
         assert result is None
 
     def test_load_store_with_missing_required_fields_returns_none(self, ctx_env):
         from utils import palstore
 
         store = _make_root()
-        path = palstore.get_store_path(store.directory, store.tree_path)
+        path = palstore.get_tree_file_path(store.directory, store.tree_path)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w") as f:
             import json
 
             json.dump({"unrelated_field": "value"}, f)
 
-        result = load_store(store.directory, store.tree_path)
+        result = load_tree(store.directory, store.tree_path)
         assert result is None
 
     def test_save_store_creates_nested_directories(self, ctx_env):
         from utils import palstore
 
         store = _make_root(directory="/some/deeply/nested/path")
-        save_store(store)
+        save_tree(store)
 
-        path = palstore.get_store_path(store.directory, store.tree_path)
+        path = palstore.get_tree_file_path(store.directory, store.tree_path)
         assert os.path.exists(path)
 
 
@@ -941,77 +941,77 @@ class TestStoreLifecycleEdgeCases:
 
 class TestRenameStore:
     def test_rename_happy_path(self, ctx_env):
-        from utils.palstore import get_store_path, load_index, rename_store
+        from utils.palstore import get_tree_file_path, load_index, rename_tree
 
         store = _make_root()
-        save_store(store)
+        save_tree(store)
         update_index(store.directory, store.tree_path)
 
-        rename_store(store.directory, "mystore", "renamed-store")
+        rename_tree(store.directory, "mystore", "renamed-store")
 
-        assert os.path.exists(get_store_path(store.directory, "renamed-store"))
-        assert not os.path.exists(get_store_path(store.directory, "mystore"))
+        assert os.path.exists(get_tree_file_path(store.directory, "renamed-store"))
+        assert not os.path.exists(get_tree_file_path(store.directory, "mystore"))
 
-        loaded = load_store(store.directory, "renamed-store")
+        loaded = load_tree(store.directory, "renamed-store")
         assert loaded is not None
         assert loaded.tree_path == "renamed-store"
 
         index = load_index()
-        assert "renamed-store" in index["stores"]
-        assert "mystore" not in index["stores"]
+        assert "renamed-store" in index["trees"]
+        assert "mystore" not in index["trees"]
 
     def test_rename_nonexistent_raises_key_error(self, ctx_env):
-        from utils.palstore import rename_store
+        from utils.palstore import rename_tree
 
-        with pytest.raises(KeyError, match="Store not found"):
-            rename_store("/home/user/project", "ghost-store", "newname")
+        with pytest.raises(KeyError, match="PALTree not found"):
+            rename_tree("/home/user/project", "ghost-store", "newname")
 
     def test_rename_new_id_with_dots_raises_value_error(self, ctx_env):
-        from utils.palstore import rename_store
+        from utils.palstore import rename_tree
 
         store = _make_root()
-        save_store(store)
+        save_tree(store)
 
         with pytest.raises(ValueError, match="dots"):
-            rename_store(store.directory, "mystore", "new.name")
+            rename_tree(store.directory, "mystore", "new.name")
 
     def test_rename_updates_armed_state(self, ctx_env):
-        from utils.palstore import rename_store
+        from utils.palstore import rename_tree
 
         store = _make_root()
-        save_store(store)
+        save_tree(store)
         update_index(store.directory, store.tree_path)
-        arm_store(store.directory, "mystore")
+        arm_tree(store.directory, "mystore")
 
-        rename_store(store.directory, "mystore", "renamed-store")
+        rename_tree(store.directory, "mystore", "renamed-store")
 
-        assert get_armed_store(store.directory) == "renamed-store"
+        assert get_armed_tree(store.directory) == "renamed-store"
 
     def test_rename_when_store_not_armed_is_noop_for_armed_state(self, ctx_env):
-        from utils.palstore import rename_store
+        from utils.palstore import rename_tree
 
         store = _make_root()
-        save_store(store)
+        save_tree(store)
         update_index(store.directory, store.tree_path)
-        arm_store("/home/OTHER/project", "other-store")
+        arm_tree("/home/OTHER/project", "other-store")
 
-        rename_store(store.directory, "mystore", "renamed-store")
+        rename_tree(store.directory, "mystore", "renamed-store")
 
-        assert get_armed_store("/home/OTHER/project") == "other-store"
-        assert get_armed_store(store.directory) is None
+        assert get_armed_tree("/home/OTHER/project") == "other-store"
+        assert get_armed_tree(store.directory) is None
 
     def test_rename_preserves_children(self, ctx_env):
-        from utils.palstore import rename_store
+        from utils.palstore import rename_tree
 
         store = _make_root()
         child = _make_node(input="child-q", output="child-r")
         store.children["L1"] = child
-        save_store(store)
+        save_tree(store)
         update_index(store.directory, store.tree_path)
 
-        rename_store(store.directory, "mystore", "renamed-store")
+        rename_tree(store.directory, "mystore", "renamed-store")
 
-        loaded = load_store(store.directory, "renamed-store")
+        loaded = load_tree(store.directory, "renamed-store")
         assert loaded is not None
         assert "L1" in loaded.children
         assert loaded.children["L1"].input == "child-q"
@@ -1172,12 +1172,12 @@ class TestGetNextKeyEdgeCases:
 class TestParseStorePathEdgeCases:
     def test_store_id_with_hyphen(self, ctx_env):
         update_index("/home/user/project", "my-store")
-        root, segments = parse_store_path("my-store.L1.Q0")
+        root, segments = parse_tree_path("my-store.L1.Q0")
         assert root == "my-store"
         assert segments == ["L1", "Q0"]
 
     def test_empty_string(self, ctx_env):
-        root, segments = parse_store_path("")
+        root, segments = parse_tree_path("")
         assert root == ""
         assert segments == []
 
@@ -1190,10 +1190,10 @@ class TestParseStorePathEdgeCases:
 class TestResolveStoreLocationEdgeCases:
     def test_dotted_path_resolves_to_root(self, ctx_env):
         store = _make_root()
-        save_store(store)
+        save_tree(store)
         update_index(store.directory, store.tree_path)
 
-        result = resolve_store_location("mystore.L1.Q0")
+        result = resolve_tree_location("mystore.L1.Q0")
         assert result is not None
         directory, root_id = result
         assert root_id == "mystore"
@@ -1202,19 +1202,19 @@ class TestResolveStoreLocationEdgeCases:
     def test_stale_index_entry_falls_back_to_scan(self, ctx_env):
         import os
 
-        from utils.palstore import get_store_path
+        from utils.palstore import get_tree_file_path
 
         store = _make_root()
-        save_store(store)
+        save_tree(store)
         update_index(store.directory, store.tree_path)
 
-        os.remove(get_store_path(store.directory, store.tree_path))
+        os.remove(get_tree_file_path(store.directory, store.tree_path))
 
-        result = resolve_store_location("mystore")
+        result = resolve_tree_location("mystore")
         assert result is None
 
     def test_unknown_store_with_empty_context_dir_returns_none(self, ctx_env):
-        result = resolve_store_location("completely-unknown-store-xyz")
+        result = resolve_tree_location("completely-unknown-store-xyz")
         assert result is None
 
 
@@ -1225,14 +1225,14 @@ class TestResolveStoreLocationEdgeCases:
 
 class TestArmedOperationsEdgeCases:
     def test_arm_same_directory_twice_second_wins(self, ctx_env):
-        arm_store("/home/user/project", "store-a")
-        arm_store("/home/user/project", "store-b")
+        arm_tree("/home/user/project", "store-a")
+        arm_tree("/home/user/project", "store-b")
 
-        result = get_armed_store("/home/user/project")
+        result = get_armed_tree("/home/user/project")
         assert result == "store-b"
 
     def test_list_armed_stores_when_empty_returns_empty_dict(self, ctx_env):
-        result = list_armed_stores()
+        result = list_armed_trees()
         assert result == {}
 
 
@@ -1245,24 +1245,24 @@ class TestListStoresEdgeCases:
     def test_multiple_stores_in_same_directory(self, ctx_env):
         store_a = _make_root(tree_path="store-a")
         store_b = _make_root(tree_path="store-b")
-        save_store(store_a)
-        save_store(store_b)
+        save_tree(store_a)
+        save_tree(store_b)
 
-        results = list_stores(directory="/home/user/project")
+        results = list_trees(directory="/home/user/project")
         ids = {s.tree_path for s in results}
         assert "store-a" in ids
         assert "store-b" in ids
         assert len(results) == 2
 
     def test_directory_with_no_json_files_returns_empty(self, ctx_env):
-        from utils.palstore import get_store_dir
+        from utils.palstore import get_tree_dir
 
-        folder = get_store_dir("/home/user/project")
+        folder = get_tree_dir("/home/user/project")
         os.makedirs(folder, exist_ok=True)
         with open(os.path.join(folder, "not-a-store.txt"), "w") as f:
             f.write("irrelevant content")
 
-        results = list_stores(directory="/home/user/project")
+        results = list_trees(directory="/home/user/project")
         assert results == []
 
 
@@ -1276,7 +1276,7 @@ class TestListAllDirectories:
         from utils.palstore import list_all_directories
 
         store = _make_root(tree_path="store-a", directory="/home/user/proj-a")
-        save_store(store)
+        save_tree(store)
         update_index(store.directory, store.tree_path)
 
         result = list_all_directories()
@@ -1286,7 +1286,7 @@ class TestListAllDirectories:
         from utils.palstore import list_all_directories
 
         store = _make_root(tree_path="store-b", directory="/home/user/proj-b")
-        save_store(store)
+        save_tree(store)
 
         result = list_all_directories()
         assert "/home/user/proj-b" in result

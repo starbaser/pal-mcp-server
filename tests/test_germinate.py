@@ -396,7 +396,7 @@ class TestGerminateTool:
 
     @pytest.mark.asyncio
     async def test_tree_already_exists_returns_error(self, tool, ctx_env, tmp_path):
-        from utils.palstore import PalRoot, save_store, update_index
+        from utils.palstore import PalRoot, save_tree, update_index
 
         project = tmp_path / "existing_proj"
         project.mkdir()
@@ -404,7 +404,7 @@ class TestGerminateTool:
 
         # Pre-create a store with the same name
         store = PalRoot(tree_path="existing_proj", directory=str(project), created_at="2026-01-01T00:00:00Z")
-        save_store(store)
+        save_tree(store)
         update_index(str(project), "existing_proj")
 
         result = await tool.execute({"directory": str(project), "tree_name": "existing_proj"})
@@ -452,7 +452,7 @@ class TestGerminateTool:
 
     @pytest.mark.asyncio
     async def test_l1_node_created_in_store(self, tool, ctx_env, tmp_path):
-        from utils.palstore import load_store
+        from utils.palstore import load_tree
 
         project = tmp_path / "l1test"
         project.mkdir()
@@ -463,13 +463,13 @@ class TestGerminateTool:
         with patch.object(tool, "get_model_provider", return_value=mock_provider):
             await tool.execute({"directory": str(project), "tree_name": "l1test", "model": "gemini-2.5-flash"})
 
-        store = load_store(str(project), "l1test")
-        assert store is not None
-        assert "0" in store.children
+        tree = load_tree(str(project), "l1test")
+        assert tree is not None
+        assert "0" in tree.children
 
     @pytest.mark.asyncio
     async def test_query_nodes_nested_under_l1(self, tool, ctx_env, tmp_path):
-        from utils.palstore import load_store
+        from utils.palstore import load_tree
 
         project = tmp_path / "qnest"
         project.mkdir()
@@ -480,16 +480,16 @@ class TestGerminateTool:
         with patch.object(tool, "get_model_provider", return_value=mock_provider):
             await tool.execute({"directory": str(project), "tree_name": "qnest", "model": "gemini-2.5-flash"})
 
-        store = load_store(str(project), "qnest")
-        assert store is not None
-        l1 = store.children["0"]
+        tree = load_tree(str(project), "qnest")
+        assert tree is not None
+        l1 = tree.children["0"]
         # At least one numeric child node should be nested under the manifest node
         assert any(k.isdigit() for k in l1.children)
 
     @pytest.mark.asyncio
     async def test_query_nodes_nested_chain_not_siblings(self, tool, ctx_env, tmp_path):
         """Layers accumulate as nested Q-nodes, not siblings under L1."""
-        from utils.palstore import load_store
+        from utils.palstore import load_tree
 
         project = tmp_path / "nestchain"
         project.mkdir()
@@ -506,8 +506,8 @@ class TestGerminateTool:
         layers_completed = data["metadata"]["layers_completed"]
 
         if layers_completed >= 2:
-            store = load_store(str(project), "nestchain")
-            manifest = store.children["0"]
+            tree = load_tree(str(project), "nestchain")
+            manifest = tree.children["0"]
             # Only one numeric node should be a direct child of the manifest; the rest nest deeper
             numeric_keys_on_manifest = [k for k in manifest.children if k.isdigit()]
             assert len(numeric_keys_on_manifest) == 1, "Layers must nest, not accumulate as siblings under manifest"
@@ -554,7 +554,7 @@ class TestGerminateTool:
 
     @pytest.mark.asyncio
     async def test_tree_name_defaults_to_directory_basename(self, tool, ctx_env, tmp_path):
-        from utils.palstore import load_store
+        from utils.palstore import load_tree
 
         project = tmp_path / "auto_named"
         project.mkdir()
@@ -567,5 +567,5 @@ class TestGerminateTool:
 
         data = json.loads(result[0].text)
         assert data["metadata"]["tree_path"] == "auto_named"
-        store = load_store(str(project), "auto_named")
-        assert store is not None
+        tree = load_tree(str(project), "auto_named")
+        assert tree is not None

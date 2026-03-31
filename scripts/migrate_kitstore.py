@@ -12,7 +12,7 @@ import sys
 
 sys.path.insert(0, "/home/eigenmage/dev/opt/pal-mcp-server")
 
-from utils.palstore import load_store, resolve_store_location, save_store
+from utils.palstore import load_tree, resolve_tree_location, save_tree
 
 
 def max_l_index(children: dict) -> int:
@@ -21,7 +21,7 @@ def max_l_index(children: dict) -> int:
 
 
 def main() -> None:
-    location = resolve_store_location("kitstore")
+    location = resolve_tree_location("kitstore")
     if location is None:
         print("ERROR: could not locate 'kitstore' in context store index")
         sys.exit(1)
@@ -29,15 +29,15 @@ def main() -> None:
     directory, store_id = location
     print(f"Store located: directory={directory!r}, store_id={store_id!r}")
 
-    store = load_store(directory, store_id)
+    store = load_tree(directory, store_id)
     if store is None:
         print("ERROR: failed to load store")
         sys.exit(1)
 
     # Back up store file before any modification
-    from utils.palstore import get_store_path
+    from utils.palstore import get_tree_file_path
 
-    store_path = get_store_path(directory, store_id)
+    store_path = get_tree_file_path(directory, store_id)
     bak_path = store_path + ".bak"
     shutil.copy2(store_path, bak_path)
     print(f"Backup written: {bak_path}")
@@ -110,7 +110,7 @@ def main() -> None:
     # -------------------------------------------------------------------------
     # Save
     # -------------------------------------------------------------------------
-    save_store(store)
+    save_tree(store)
     print(f"\nStore saved: {store_path}")
 
     # Summary

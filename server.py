@@ -823,25 +823,25 @@ async def handle_list_tools() -> list[Tool]:
     return await _list_tools_impl(TOOLS)
 
 
-def _build_store_listing() -> str:
+def _build_tree_listing() -> str:
     """Build a compact PALTree snapshot for MCP handshake instructions."""
     import os
 
-    from utils.palstore import get_armed_store, list_stores
+    from utils.palstore import get_armed_tree, list_trees
 
     cwd = os.getcwd()
-    stores = list_stores(directory=cwd)
+    trees = list_trees(directory=cwd)
 
-    if not stores:
+    if not trees:
         return ""
 
-    armed_store = get_armed_store(cwd)
+    armed_tree = get_armed_tree(cwd)
 
-    lines = [f"\n\npalStores: PALTrees for {cwd}:"]
-    for store in stores:
-        sid = store.tree_path
-        armed_marker = " [armed]" if (armed_store and sid == armed_store) else ""
-        child_count = len(store.children)
+    lines = [f"\n\npalTrees: PALTrees for {cwd}:"]
+    for tree in trees:
+        sid = tree.tree_path
+        armed_marker = " [armed]" if (armed_tree and sid == armed_tree) else ""
+        child_count = len(tree.children)
 
         line = f"- {sid} [tree]{armed_marker}"
         if child_count > 0:
@@ -851,15 +851,15 @@ def _build_store_listing() -> str:
     return "\n".join(lines)
 
 
-def _resolve_store_continuation(tool_name: str, arguments: dict) -> str | None:
-    """If continuation_id is a store path, build context directly from PalNode ancestry.
+def _resolve_tree_continuation(tool_name: str, arguments: dict) -> str | None:
+    """If continuation_id is a tree path, build context directly from PalNode ancestry.
 
     Returns the path-based tree_path for response injection, or None if
-    continuation_id is a regular UUID (not a store path).
+    continuation_id is a regular UUID (not a tree path).
 
     Creates a numeric child node under the target path for each new turn,
     building conversation context directly from PalNode ancestry via
-    build_store_context() — no ThreadContext intermediate.
+    build_tree_context() — no ThreadContext intermediate.
     """
     from datetime import datetime, timezone
 
@@ -867,64 +867,64 @@ def _resolve_store_continuation(tool_name: str, arguments: dict) -> str | None:
         PalNode,
         add_palnode,
         get_next_key,
-        load_store,
-        resolve_store_location,
-        save_store,
+        load_tree,
+        resolve_tree_location,
+        save_tree,
     )
-    from utils.palstore_builder import build_store_context
+    from utils.palstore_builder import build_tree_context
 
     continuation_id = arguments.get("continuation_id", "")
     if not continuation_id:
         return None
 
-    location = resolve_store_location(continuation_id)
+    location = resolve_tree_location(continuation_id)
     if not location:
         return None
 
     directory, root_id = location
-    store = load_store(directory, root_id)
-    if not store:
+    tree = load_tree(directory, root_id)
+    if not tree:
         return None
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    child_key = get_next_key(store, continuation_id, "")
+    child_key = get_next_key(tree, continuation_id, "")
     turn_node = PalNode(tool_name=tool_name, timestamp=now)
-    tool_path = add_palnode(store, continuation_id, child_key, turn_node)
-    save_store(store)
+    tool_path = add_palnode(tree, continuation_id, child_key, turn_node)
+    save_tree(tree)
     mode = "continue"
 
     # Build context directly from PalNode ancestry — no ThreadContext needed
-    build_store_context(store, tool_path, arguments)
+    build_tree_context(tree, tool_path, arguments)
 
-    arguments["_store_bridge"] = {
-        "store": store,
+    arguments["_tree_bridge"] = {
+        "tree": tree,
         "tool_path": tool_path,
         "tool_name": tool_name,
         "mode": mode,
     }
 
-    logger.info(f"Store continuation {mode.upper()}: {continuation_id} → {tool_path}")
+    logger.info(f"Tree continuation {mode.upper()}: {continuation_id} → {tool_path}")
     return tool_path
 
 
-def _inject_store_path_continuation(result: list, store_path: str, arguments: dict | None = None) -> list:
-    """Replace UUID continuation_id with store path in tool response.
+def _inject_tree_path_continuation(result: list, tree_path: str, arguments: dict | None = None) -> list:
+    """Replace UUID continuation_id with tree path in tool response.
 
     Handles two response formats:
     - Simple tools: continuation_id inside a ``continuation_offer`` wrapper
     - Workflow tools: bare top-level ``continuation_id``
 
     When the tool is mid-workflow (``next_step_required=True``), injects
-    ``store_continuation_guidance`` telling the agent to finish the chain.
+    ``tree_continuation_guidance`` telling the agent to finish the chain.
 
-    If _store_bridge metadata is present, persists the tool response back to
-    the store tree (update for CONTINUE, already created for FORK).
+    If _tree_bridge metadata is present, persists the tool response back to
+    the PALTree (update for CONTINUE, already created for FORK).
     """
     import json
     from datetime import datetime, timezone
 
-    bridge = arguments.get("_store_bridge") if arguments else None
+    bridge = arguments.get("_tree_bridge") if arguments else None
 
     processed = []
     response_text = None
@@ -935,17 +935,17 @@ def _inject_store_path_continuation(result: list, store_path: str, arguments: di
 
             # Path 1: simple tools — continuation_id inside continuation_offer
             if "continuation_offer" in data and data["continuation_offer"]:
-                data["continuation_offer"]["continuation_id"] = store_path
+                data["continuation_offer"]["continuation_id"] = tree_path
                 response_text = data.get("content", "")
                 patched = True
 
             # Path 2: workflow tools — bare top-level continuation_id
             elif "continuation_id" in data and data["continuation_id"]:
-                data["continuation_id"] = store_path
+                data["continuation_id"] = tree_path
                 response_text = data.get("content", data.get("next_steps", ""))
                 patched = True
 
-            # Inject store-aware guidance for agents
+            # Inject tree-aware guidance for agents
             if patched and bridge:
                 tool_hint = bridge["tool_name"]
                 if data.get("next_step_required") is True:
@@ -953,17 +953,17 @@ def _inject_store_path_continuation(result: list, store_path: str, arguments: di
                     step = data.get("step_number", 0)
                     total = data.get("total_steps", "?")
                     next_step = step + 1
-                    data["store_continuation_guidance"] = (
+                    data["tree_continuation_guidance"] = (
                         f"You are on step {step} of {total}. "
                         f"Finish this tool chain before calling a different tool. "
-                        f'Call {tool_hint} again with continuation_id="{store_path}" '
+                        f'Call {tool_hint} again with continuation_id="{tree_path}" '
                         f"and step_number={next_step}."
                     )
                 else:
-                    # Completed or single-step: inform agent of the store path for chaining
-                    data["store_chain_note"] = (
+                    # Completed or single-step: inform agent of the tree path for chaining
+                    data["tree_chain_note"] = (
                         f"This {tool_hint} result is persisted to PALTree path "
-                        f'"{store_path}". To chain another tool from this result, '
+                        f'"{tree_path}". To chain another tool from this result, '
                         f"pass this path as the continuation_id."
                     )
 
@@ -971,13 +971,13 @@ def _inject_store_path_continuation(result: list, store_path: str, arguments: di
         except (json.JSONDecodeError, AttributeError):
             processed.append(item)
 
-    # Persist tool response back to store tree
+    # Persist tool response back to PALTree
     if bridge and response_text is not None:
-        from utils.palstore import resolve_palnode, save_store
+        from utils.palstore import resolve_palnode, save_tree
         from utils.response_formatter import render_markdown_output
 
         try:
-            tool_node = resolve_palnode(bridge["store"], bridge["tool_path"])
+            tool_node = resolve_palnode(bridge["tree"], bridge["tool_path"])
             if tool_node is not None:
                 prompt = arguments.get("_original_user_prompt", arguments.get("prompt", "")) if arguments else ""
                 input_dict = {
@@ -989,14 +989,14 @@ def _inject_store_path_continuation(result: list, store_path: str, arguments: di
                 tool_node.input = render_markdown_output(input_dict)
                 tool_node.output = render_markdown_output(output_dict)
                 tool_node.timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-                save_store(bridge["store"])
+                save_tree(bridge["tree"])
                 logger.info(
-                    f"Persisted tool response to store tree at {bridge['tool_path']} (mode={bridge.get('mode', 'unknown')})"
+                    f"Persisted tool response to PALTree at {bridge['tool_path']} (mode={bridge.get('mode', 'unknown')})"
                 )
             else:
                 logger.warning(f"Could not resolve tool node at {bridge['tool_path']} for persistence")
         except Exception as exc:
-            logger.warning(f"Failed to persist tool response to store tree: {exc}")
+            logger.warning(f"Failed to persist tool response to PALTree: {exc}")
 
     return processed
 
@@ -1263,12 +1263,12 @@ async def _call_tool_impl(name: str, arguments: dict[str, Any], tools: dict) -> 
         pass
 
     # Handle thread context reconstruction if continuation_id is present
-    _store_path = None
+    _tree_path = None
     if "continuation_id" in arguments and arguments["continuation_id"]:
         # Resolve tree_path → build context directly from PalNode ancestry (or return None for UUID)
-        _store_path = _resolve_store_continuation(name, arguments)
+        _tree_path = _resolve_tree_continuation(name, arguments)
 
-        if not arguments.get("_store_context_built"):
+        if not arguments.get("_tree_context_built"):
             # Legacy UUID path — use existing ThreadContext reconstruction
             _tool = tools.get(name)
             if _tool and getattr(_tool, "ephemeral", False):
@@ -1284,7 +1284,7 @@ async def _call_tool_impl(name: str, arguments: dict[str, Any], tools: dict) -> 
 
             arguments = await reconstruct_thread_context(arguments)
         else:
-            logger.debug(f"Store context built for {name} at {_store_path}")
+            logger.debug(f"Tree context built for {name} at {_tree_path}")
 
         if "_remaining_tokens" in arguments:
             logger.debug(f"[CONVERSATION_DEBUG] Remaining token budget: {arguments['_remaining_tokens']:,}")
@@ -1319,8 +1319,8 @@ async def _call_tool_impl(name: str, arguments: dict[str, Any], tools: dict) -> 
         if not tool.requires_model():
             logger.debug(f"Tool {name} doesn't require model resolution - skipping model validation")
             result = await tool.execute(arguments)
-            if _store_path and result:
-                result = _inject_store_path_continuation(result, _store_path, arguments)
+            if _tree_path and result:
+                result = _inject_tree_path_continuation(result, _tree_path, arguments)
 
             saved_path = _save_response_content(
                 name,
@@ -1393,9 +1393,9 @@ async def _call_tool_impl(name: str, arguments: dict[str, Any], tools: dict) -> 
         result = await tool.execute(arguments)
         logger.info(f"Tool '{name}' execution completed")
 
-        # Replace UUID with store path in response if this was a store continuation
-        if _store_path and result:
-            result = _inject_store_path_continuation(result, _store_path, arguments)
+        # Replace UUID with tree path in response if this was a tree-path continuation
+        if _tree_path and result:
+            result = _inject_tree_path_continuation(result, _tree_path, arguments)
 
         saved_path = _save_response_content(
             name,
@@ -1748,10 +1748,8 @@ async def reconstruct_thread_context(arguments: dict[str, Any]) -> dict[str, Any
     logger.debug(f"[CONVERSATION_DEBUG] Building conversation history for thread {continuation_id}")
     logger.debug(f"[CONVERSATION_DEBUG] Thread has {len(context.turns)} turns, tool: {context.tool_name}")
     logger.debug(f"[CONVERSATION_DEBUG] Using model: {model_context.model_name}")
-    # PALTree forks require strict mode — no silent history truncation
-    _strict_history = "store_fork" in arguments
     conversation_history, conversation_tokens = build_conversation_history(
-        context, model_context, strict=_strict_history
+        context, model_context, strict=False
     )
     logger.debug(f"[CONVERSATION_DEBUG] Conversation history built: {conversation_tokens:,} tokens")
     logger.debug(
@@ -2008,7 +2006,7 @@ def _build_handshake_instructions() -> str:
             "When the user names a specific model (e.g. 'use chat with gpt5'), send that exact model in the tool call. "
             f"When no model is mentioned, default to '{DEFAULT_MODEL}'."
         )
-    instructions += _build_store_listing()
+    instructions += _build_tree_listing()
     return instructions
 
 

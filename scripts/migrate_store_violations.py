@@ -12,7 +12,7 @@ import sys
 
 sys.path.insert(0, ".")
 
-from utils.palstore import PalNode, get_store_path, load_store, resolve_store_location, save_store
+from utils.palstore import PalNode, get_tree_file_path, load_tree, resolve_tree_location, save_tree
 
 # ---------------------------------------------------------------------------
 # Key helpers
@@ -48,7 +48,7 @@ def _tool_name_from_key(key: str) -> str:
 
 
 def backup_store(directory: str, store_id: str) -> str:
-    src = get_store_path(directory, store_id)
+    src = get_tree_file_path(directory, store_id)
     dst = src + ".bak"
     shutil.copy2(src, dst)
     return dst
@@ -60,13 +60,13 @@ def backup_store(directory: str, store_id: str) -> str:
 
 
 def fix_l_under_l(store_name: str, parent_l_key: str) -> None:
-    loc = resolve_store_location(store_name)
+    loc = resolve_tree_location(store_name)
     if loc is None:
         print(f"  ERROR: store '{store_name}' not found")
         return
 
     directory, root_id = loc
-    store = load_store(directory, root_id)
+    store = load_tree(directory, root_id)
 
     parent_node = store.children.get(parent_l_key)
     if parent_node is None:
@@ -87,7 +87,7 @@ def fix_l_under_l(store_name: str, parent_l_key: str) -> None:
     del parent_node.children["L1"]
     store.children[new_key] = l1_node
 
-    save_store(store)
+    save_tree(store)
     print(f"  {store_name}.{parent_l_key}.L1  →  {store_name}.{new_key}  (label: {l1_node.label!r})")
 
 
@@ -97,13 +97,13 @@ def fix_l_under_l(store_name: str, parent_l_key: str) -> None:
 
 
 def fix_tool_under_q(store_name: str, l_key: str, q_key: str, tool_key: str) -> None:
-    loc = resolve_store_location(store_name)
+    loc = resolve_tree_location(store_name)
     if loc is None:
         print(f"  ERROR: store '{store_name}' not found")
         return
 
     directory, root_id = loc
-    store = load_store(directory, root_id)
+    store = load_tree(directory, root_id)
 
     l_node = store.children.get(l_key)
     if l_node is None:
@@ -134,7 +134,7 @@ def fix_tool_under_q(store_name: str, l_key: str, q_key: str, tool_key: str) -> 
     del q_node.children[tool_key]
     q_node.children[f_key] = fork_node
 
-    save_store(store)
+    save_tree(store)
     print(
         f"  {store_name}.{l_key}.{q_key}.{tool_key}" f"  →  {store_name}.{l_key}.{q_key}.{f_key}.{canonical_tool_name}"
     )
@@ -192,16 +192,16 @@ def main() -> None:
     errors = []
 
     for store_name, parent_key in [("lspdna", "L19"), ("lspdna", "L21"), ("clark", "L19")]:
-        loc = resolve_store_location(store_name)
-        store = load_store(loc[0], loc[1])
+        loc = resolve_tree_location(store_name)
+        store = load_tree(loc[0], loc[1])
         parent = store.children.get(parent_key)
         if parent and "L1" in parent.children:
             errors.append(f"  FAIL: {store_name}.{parent_key}.L1 still present")
         else:
             print(f"  OK: {store_name}.{parent_key} has no L1 child")
 
-    cl_loc = resolve_store_location("clearcode-legacy")
-    cl_store = load_store(cl_loc[0], cl_loc[1])
+    cl_loc = resolve_tree_location("clearcode-legacy")
+    cl_store = load_tree(cl_loc[0], cl_loc[1])
 
     for path_keys, old_tool_key in [
         (("L24", "Q7"), "thinkdeep1"),

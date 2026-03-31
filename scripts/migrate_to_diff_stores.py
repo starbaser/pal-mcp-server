@@ -39,7 +39,7 @@ from utils.palstore import (  # noqa: E402
     PalNode,
     PalRoot,
     load_index,
-    save_store,
+    save_tree,
 )
 from utils.token_utils import count_tokens  # noqa: E402
 
@@ -215,7 +215,7 @@ def main() -> None:
                     backup_path = store_path.replace(".json", ".pre-dedup.json")
                     shutil.copy2(store_path, backup_path)
                     print(f"    backup: {backup_path}")
-                save_store(store)
+                save_tree(store)
         else:
             print(f"  OK {store_id}: no duplicate files found")
 

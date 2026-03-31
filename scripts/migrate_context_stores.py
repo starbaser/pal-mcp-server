@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import CONVERSATION_STORAGE_DIR, PAL_STORAGE_DIR
-from utils.palstore import PalNode, PalRoot, save_store, update_index
+from utils.palstore import PalNode, PalRoot, save_tree, update_index
 
 _OLD_REGISTRY_PATH = os.path.join(PAL_STORAGE_DIR, "context", "stores.json")
 _THREADS_DIR = CONVERSATION_STORAGE_DIR
@@ -461,13 +461,13 @@ def migrate(dry_run: bool = False) -> None:
                 print(f" [dry-run] {child_count} node(s) would be written")
             else:
                 try:
-                    save_store(store)
+                    save_tree(store)
                     update_index(store.directory, store.store_id)
                     child_count = _count_nodes(store)
                     print(f" ok ({child_count} node(s))")
                 except Exception as exc:
                     print(f" FAILED: {exc}")
-                    _err(f"save_store({sid}): {exc}")
+                    _err(f"save_tree({sid}): {exc}")
 
     print()
     print("=" * 60)

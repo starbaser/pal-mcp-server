@@ -1,5 +1,5 @@
 """
-Registry for tracking context stores, keyed by human-readable tree_path.
+Registry for tracking context trees, keyed by human-readable tree_path.
 
 Persists to {PAL_STORAGE_DIR}/context/stores.json.
 """
@@ -38,7 +38,7 @@ def save_registry(data: dict) -> None:
     os.rename(tmp_path, _REGISTRY_PATH)
 
 
-def get_store_entry(tree_path: str) -> dict | None:
+def get_tree_entry(tree_path: str) -> dict | None:
     """Look up a registry entry by its tree_path."""
     registry = load_registry()
     return registry.get(tree_path)
@@ -46,7 +46,7 @@ def get_store_entry(tree_path: str) -> dict | None:
 
 def resolve_thread_id(tree_path: str) -> str | None:
     """Return the internal thread UUID for a given tree_path."""
-    entry = get_store_entry(tree_path)
+    entry = get_tree_entry(tree_path)
     if entry is None:
         return None
     return entry.get("thread_id")
@@ -71,7 +71,7 @@ def get_next_tool_index(parent_tree_path: str, tool_name: str) -> int:
     return max(existing, default=-1) + 1
 
 
-def register_store(
+def register_tree(
     tree_path: str,
     thread_id: str,
     directory: str,
@@ -118,7 +118,7 @@ def increment_layer_count(tree_path: str) -> str:
         current_layer = 0
     new_path = f"{base}.L{current_layer + 1}"
 
-    register_store(
+    register_tree(
         tree_path=new_path,
         thread_id=entry["thread_id"],
         directory=entry["directory"],
@@ -143,7 +143,7 @@ def increment_follow_up_count(tree_path: str) -> str:
 
     new_path = f"{tree_path}.{new_count}"
 
-    register_store(
+    register_tree(
         tree_path=new_path,
         thread_id=entry["thread_id"],
         directory=entry["directory"],
@@ -154,7 +154,7 @@ def increment_follow_up_count(tree_path: str) -> str:
     return new_path
 
 
-def list_stores(directory: str | None = None) -> list[dict]:
+def list_trees(directory: str | None = None) -> list[dict]:
     """Return all entries, optionally filtered by directory."""
     registry = load_registry()
     if directory is not None:
@@ -162,7 +162,7 @@ def list_stores(directory: str | None = None) -> list[dict]:
     return list(registry.values())
 
 
-def build_store_tree(entries: list[dict]) -> list[dict]:
+def build_tree_listing(entries: list[dict]) -> list[dict]:
     """Build a tree from flat registry entries using parent_tree_path relationships.
 
     Returns root nodes, each augmented with a sorted ``children`` list.
@@ -192,7 +192,7 @@ def build_store_tree(entries: list[dict]) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Armed store management — {PAL_STORAGE_DIR}/context/armed.json
+# Armed tree management — {PAL_STORAGE_DIR}/context/armed.json
 # Maps directory paths to tree_paths for automatic SessionStart revival.
 # ---------------------------------------------------------------------------
 
@@ -219,25 +219,25 @@ def save_armed(data: dict) -> None:
     os.rename(tmp_path, _ARMED_PATH)
 
 
-def arm_store(directory: str, tree_path: str) -> None:
+def arm_tree(directory: str, tree_path: str) -> None:
     """Arm a directory for automatic context revival on SessionStart."""
     armed = load_armed()
     armed[directory] = tree_path
     save_armed(armed)
 
 
-def disarm_store(directory: str) -> None:
+def disarm_tree(directory: str) -> None:
     """Remove the armed state for a directory."""
     armed = load_armed()
     armed.pop(directory, None)
     save_armed(armed)
 
 
-def get_armed_store(directory: str) -> str | None:
+def get_armed_tree(directory: str) -> str | None:
     """Return the armed tree_path for a directory, or None."""
     return load_armed().get(directory)
 
 
-def list_armed_stores() -> dict:
+def list_armed_trees() -> dict:
     """Return the full directory-to-tree_path mapping."""
     return load_armed()

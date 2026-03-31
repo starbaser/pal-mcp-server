@@ -45,7 +45,7 @@ CLI Client (Claude/Gemini/Codex)
        │
        ▼
    Tool.execute()
-       │ build_store_context() / reconstruct_thread_context()
+       │ build_tree_context() / reconstruct_thread_context()
        ▼
    Conversation Memory (utils/conversation_memory.py)
        │ Provider selection
@@ -64,8 +64,8 @@ CLI Client (Claude/Gemini/Codex)
 - `handle_call_tool()` routes requests, resolves models, reconstructs conversation context
 - `configure_providers()` registers providers based on API keys
 - `parse_model_option()` splits `"model:option"` format (e.g. `"gemini-pro:for"` → model + option), preserving OpenRouter suffixes (`:free`, `:beta`, `:preview`)
-- PALTree continuation: `_resolve_store_continuation()` calls `build_store_context()` directly from PALTree paths (not just UUIDs). Creates a numeric child node under the target for each continuation turn. PALTree paths skip `reconstruct_thread_context` — dispatch in `handle_call_tool` is bifurcated.
-- Response post-processing pipeline: `_inject_store_path_continuation()` → `_save_response_content()` → `_inject_saved_content_path()` → `_extract_gen_files()` → `_apply_output_format()`
+- PALTree continuation: `_resolve_tree_continuation()` calls `build_tree_context()` directly from PALTree paths (not just UUIDs). Creates a numeric child node under the target for each continuation turn. PALTree paths skip `reconstruct_thread_context` — dispatch in `handle_call_tool` is bifurcated.
+- Response post-processing pipeline: `_inject_tree_path_continuation()` → `_save_response_content()` → `_inject_saved_content_path()` → `_extract_gen_files()` → `_apply_output_format()`
 - `_extract_gen_files()`: universal `#!/>` sigil extraction from model responses — saves complete files to `CODE_STORAGE_DIR/{encoded_cwd}/{call_id}/`, strips sigil blocks from response content, adds `gen_files` metadata
 
 **`tools/`** — MCP tool implementations. Two base classes:
@@ -137,7 +137,7 @@ BaseTool (direct) ─── PalInitTool, PalForkTool, PalListTool, PalReadTool,
 BaseTool (direct) ─── GerminateTool
                       (requires_model=False, manages own provider calls internally)
 
-SimpleTool → PalStoreBaseTool ─── PalAddTreeLayerTool, PalQueryTool
+SimpleTool → PalTreeBaseTool ─── PalAddTreeLayerTool, PalQueryTool
                                   (requires_model=True, thinking_mode="max")
 ```
 
@@ -146,7 +146,7 @@ SimpleTool → PalStoreBaseTool ─── PalAddTreeLayerTool, PalQueryTool
 - `input` = full tool call data rendered via `render_markdown_output()` (uses `oboros.tome.dumps` — TOME BFS-linearized markdown with `§` sigils)
 - `output` = full tool response rendered via `render_markdown_output()`
 - `files` = flat list of absolute path strings attached to this node (populated by `addtreelayer`/`querynode` via `absolute_file_paths`, or by `writenodefile` post-hoc)
-- Each node stores only its own layer's data — the O(n²) content duplication bug is fixed
+- Each node holds only its own data
 - `format_layer_markdown` (used by `readnode`/`treedump`) accepts `input_text`/`output_text` params
 
 **PalRoot model** (`utils/palstore.py`):
@@ -157,7 +157,7 @@ SimpleTool → PalStoreBaseTool ─── PalAddTreeLayerTool, PalQueryTool
 
 `add_palnode()` inserts a child node with no structural restrictions. Any node can have any child with any key.
 
-**`utils/palstore_builder.py`** — `build_store_context()` builds enhanced arguments directly from PalNode ancestry for a given store path. Replaces the former `hydrate_thread_context` approach. Uses token-budgeted history building via `_build_budgeted_history()`.
+**`utils/palstore_builder.py`** — `build_tree_context()` builds enhanced arguments directly from PalNode ancestry for a given tree path. Replaces the former `hydrate_thread_context` approach. Uses token-budgeted history building via `_build_budgeted_history()`.
 
 ### MCP Transport Limits
 
@@ -206,7 +206,7 @@ Register in `server.py` TOOLS dict. Tools that bypass model resolution override 
 
 MCP tool names follow a scope convention: **node tools** (`*node`) operate on a single PALNode, **tree tools** (`tree*`/`*tree`) operate on a subtree or the whole tree. Source class names (e.g. `PalAddTreeLayerTool`) are unchanged.
 
-The MCP parameter `tree_path` identifies nodes using dot-path notation. The `PalRoot` model field is also `tree_path`. A `model_validator(mode="before")` on `PalRoot` transparently migrates legacy JSON files that still use the old `store_id` key.
+The MCP parameter `tree_path` identifies nodes using dot-path notation. The `PalRoot` model field is also `tree_path`. A `model_validator(mode="before")` on `PalRoot` transparently migrates legacy JSON files that still use the legacy `store_id` key.
 
 **PALTree path** formal definition: `𝒫 = { r · s₁ · s₂ · ⋯ · sₖ  |  r ∈ 𝒩,  sᵢ = (tᵢ, nᵢ),  ρ → t₁,  ∀i: tᵢ → tᵢ₊₁ }`
 
@@ -238,7 +238,7 @@ The MCP parameter `tree_path` identifies nodes using dot-path notation. The `Pal
 - Two model calls per layer: (a) analyze with file contents injected, (b) synthesize with accumulated ancestry context
 - Nested numeric nodes for context accumulation — each layer's node is the child of the previous layer's node, creating a linear ancestry chain. `walk_palnode_ancestry()` does pure parent-chain traversal.
 - File contents are injected into prompts but **not persisted** in nodes — only analysis/synthesis text is saved. File paths go in `PalNode.files`.
-- `save_store()` after each layer for crash recovery of partial gestations.
+- `save_tree()` after each layer for crash recovery of partial gestations.
 
 Node structure produced:
 ```

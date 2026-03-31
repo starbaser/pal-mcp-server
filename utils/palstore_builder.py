@@ -1,8 +1,8 @@
 """
 Context reconstruction utilities for tree-based PALTrees.
 
-Builds conversation history from store node ancestry chains for model consumption.
-The primary entry point is build_store_context(), which constructs enhanced tool
+Builds conversation history from node ancestry chains for model consumption.
+The primary entry point is build_tree_context(), which constructs enhanced tool
 arguments directly from PalNode ancestry — no ThreadContext intermediate needed.
 """
 
@@ -18,19 +18,19 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# build_store_context — unified context builder for store-path continuations
+# build_tree_context — unified context builder for tree-path continuations
 # ---------------------------------------------------------------------------
 
 
-def build_store_context(
-    store: PalRoot,
+def build_tree_context(
+    tree: PalRoot,
     node_path: str,
     arguments: dict,
     model_context=None,
 ) -> dict:
     """Build enhanced arguments directly from PalNode ancestry.
 
-    Replaces hydrate_thread_context + reconstruct_thread_context for store-path
+    Replaces hydrate_thread_context + reconstruct_thread_context for tree-path
     continuations. Walks ancestry, builds token-budgeted conversation history,
     and assembles the enhanced prompt — all without creating a ThreadContext.
 
@@ -38,7 +38,7 @@ def build_store_context(
     """
     from utils.palstore import walk_palnode_ancestry
 
-    ancestors = walk_palnode_ancestry(store, node_path)
+    ancestors = walk_palnode_ancestry(tree, node_path)
 
     # Filter to content nodes (skip empty nodes)
     content_nodes = [n for n in ancestors if n.input or n.output]
@@ -85,10 +85,10 @@ def build_store_context(
     # Workflow metadata: extract from most recent node with metadata
     for node in reversed(ancestors):
         if node.metadata:
-            arguments["_store_workflow_metadata"] = node.metadata
+            arguments["_tree_workflow_metadata"] = node.metadata
             break
 
-    arguments["_store_context_built"] = True
+    arguments["_tree_context_built"] = True
     return arguments
 
 
@@ -154,7 +154,7 @@ def _build_budgeted_history(
 
     header_parts = [
         "=== CONVERSATION HISTORY (CONTINUATION) ===",
-        f"Store: {node_path}",
+        f"Tree: {node_path}",
     ]
     if tool_name:
         header_parts.append(f"Tool: {tool_name}")
@@ -310,9 +310,9 @@ def build_context_from_ancestry(ancestors: list[PalNode], include_files: bool = 
 
 
 def hydrate_thread_context(store: PalRoot, node_path: str):
-    """DEPRECATED: Use build_store_context() instead.
+    """DEPRECATED: Use build_tree_context() instead.
 
-    Creates an ephemeral ThreadContext from store tree. Kept for backward compatibility
+    Creates an ephemeral ThreadContext from a PALTree. Kept for backward compatibility
     with legacy UUID-based continuation paths.
     """
     from utils.conversation_memory import add_turn, create_thread, get_thread
@@ -333,6 +333,6 @@ def hydrate_thread_context(store: PalRoot, node_path: str):
     if thread is None:
         raise RuntimeError(f"Failed to retrieve hydrated thread {thread_id} from storage")
 
-    logger.debug(f"[CTX] Hydrated thread {thread_id} from store '{store.tree_path}' at path '{node_path}'")
+    logger.debug(f"[CTX] Hydrated thread {thread_id} from PALTree '{store.tree_path}' at path '{node_path}'")
 
     return thread

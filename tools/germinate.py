@@ -369,8 +369,8 @@ class GerminateTool(BaseTool):
             PalRoot,
             add_palnode,
             get_next_key,
-            resolve_store_location,
-            save_store,
+            resolve_tree_location,
+            save_tree,
             update_index,
             walk_palnode_ancestry,
         )
@@ -386,7 +386,7 @@ class GerminateTool(BaseTool):
             return self._error("tree_name must not contain dots.")
 
         # Check for existing tree
-        existing = resolve_store_location(tree_name)
+        existing = resolve_tree_location(tree_name)
         if existing is not None:
             return self._error(f'PALTree "{tree_name}" already exists. Use treelist to view it.')
 
@@ -417,7 +417,7 @@ class GerminateTool(BaseTool):
         # Phase 1: create tree + manifest node
         now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         store = PalRoot(tree_path=tree_name, directory=directory, created_at=now)
-        save_store(store)
+        save_tree(store)
         update_index(directory, tree_name)
 
         manifest_summary = self._build_manifest(directory, layers)
@@ -438,7 +438,7 @@ class GerminateTool(BaseTool):
             output=manifest_summary,
         )
         add_palnode(store, tree_name, "0", l1_node)
-        save_store(store)
+        save_tree(store)
         logger.info("germinate: manifest node created")
 
         # Phase 2: per-layer analysis loop
@@ -485,7 +485,7 @@ class GerminateTool(BaseTool):
                     output=synthesis,
                 )
                 new_path = add_palnode(store, parent_path, next_key, q_node)
-                save_store(store)
+                save_tree(store)
 
                 parent_path = new_path
                 layers_completed += 1

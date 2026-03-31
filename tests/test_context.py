@@ -26,9 +26,9 @@ class TestPalInitTool:
         props = schema["properties"]
         required = schema["required"]
 
-        assert "store_name" in props
+        assert "tree_name" in props
         assert "directory" in props
-        assert "store_name" in required
+        assert "tree_name" in required
         assert "directory" in required
 
     def test_annotations_not_read_only(self):
@@ -36,10 +36,10 @@ class TestPalInitTool:
         assert annotations["readOnlyHint"] is False
 
     async def test_create_store(self):
-        with patch("utils.palstore.resolve_store_location", return_value=None):
-            with patch("utils.palstore.save_store") as mock_save:
+        with patch("utils.palstore.resolve_tree_location", return_value=None):
+            with patch("utils.palstore.save_tree") as mock_save:
                 with patch("utils.palstore.update_index") as mock_update:
-                    result = await self.tool.execute({"store_name": "myproject", "directory": "/tmp/proj"})
+                    result = await self.tool.execute({"tree_name": "myproject", "directory": "/tmp/proj"})
 
         assert len(result) == 1
         payload = json.loads(result[0].text)
@@ -49,8 +49,8 @@ class TestPalInitTool:
         mock_update.assert_called_once_with("/tmp/proj", "myproject")
 
     async def test_collision_existing_store(self):
-        with patch("utils.palstore.resolve_store_location", return_value=("/tmp/proj", "myproject")):
-            result = await self.tool.execute({"store_name": "myproject", "directory": "/tmp/proj"})
+        with patch("utils.palstore.resolve_tree_location", return_value=("/tmp/proj", "myproject")):
+            result = await self.tool.execute({"tree_name": "myproject", "directory": "/tmp/proj"})
 
         assert len(result) == 1
         payload = json.loads(result[0].text)
@@ -58,7 +58,7 @@ class TestPalInitTool:
         assert "already exists" in payload["content"].lower()
 
     async def test_dots_in_name_rejected(self):
-        result = await self.tool.execute({"store_name": "my.project", "directory": "/tmp/proj"})
+        result = await self.tool.execute({"tree_name": "my.project", "directory": "/tmp/proj"})
 
         assert len(result) == 1
         payload = json.loads(result[0].text)
@@ -94,7 +94,7 @@ class TestPalAddTreeLayerTool:
         assert "newtree" in payload["content"].lower()
 
     async def test_tree_path_not_found(self):
-        with patch("utils.palstore.resolve_store_location", return_value=None):
+        with patch("utils.palstore.resolve_tree_location", return_value=None):
             result = await self.tool.execute({"tree_path": "nonexistent", "prompt": "test"})
 
         assert len(result) == 1
@@ -144,7 +144,7 @@ class TestPalQueryTool:
         assert payload["status"] == "error"
 
     async def test_query_tree_path_not_found(self):
-        with patch("utils.palstore.resolve_store_location", return_value=None):
+        with patch("utils.palstore.resolve_tree_location", return_value=None):
             result = await self.tool.execute({"tree_path": "missing", "prompt": "test"})
 
         assert len(result) == 1
@@ -172,7 +172,7 @@ class TestPalListTool:
         assert annotations["readOnlyHint"] is True
 
     async def test_execute_empty_registry(self):
-        with patch("utils.palstore.list_stores", return_value=[]):
+        with patch("utils.palstore.list_trees", return_value=[]):
             result = await self.tool.execute({})
 
         assert len(result) == 1
@@ -187,7 +187,7 @@ class TestPalListTool:
             PalRoot(tree_path="myproject", directory="/tmp/proj", created_at="2026-01-01T00:00:00Z"),
         ]
 
-        with patch("utils.palstore.list_stores", return_value=stores):
+        with patch("utils.palstore.list_trees", return_value=stores):
             result = await self.tool.execute({})
 
         assert len(result) == 1
@@ -325,19 +325,19 @@ class TestContextForkChain:
         assert chain[2].thread_id == id_c
 
 
-class TestResolveStoreContinuation:
-    """Tests for _resolve_store_continuation in server.py."""
+class TestResolveTreeContinuation:
+    """Tests for _resolve_tree_continuation in server.py."""
 
     def _make_store(self, tmp_path, monkeypatch, tree_path: str, directory: str):
         """Create, save, and index a PalRoot under tmp_path."""
         import os
 
         from utils import palstore
-        from utils.palstore import PalRoot, save_store, update_index
+        from utils.palstore import PalRoot, save_tree, update_index
 
         ctx_dir = str(tmp_path / "context")
         monkeypatch.setattr(palstore, "_CTX_DIR", ctx_dir)
-        monkeypatch.setattr(palstore, "_INDEX_PATH", os.path.join(ctx_dir, "store-index.json"))
+        monkeypatch.setattr(palstore, "_INDEX_PATH", os.path.join(ctx_dir, "tree-index.json"))
         monkeypatch.setattr(palstore, "_ARMED_PATH", os.path.join(ctx_dir, "armed.json"))
 
         from datetime import datetime, timezone
@@ -347,50 +347,50 @@ class TestResolveStoreContinuation:
             directory=directory,
             created_at=datetime.now(timezone.utc).isoformat(),
         )
-        save_store(store)
+        save_tree(store)
         update_index(directory, tree_path)
         return store
 
     def test_returns_none_for_uuid(self, tmp_path, monkeypatch):
         import os
 
-        from server import _resolve_store_continuation
+        from server import _resolve_tree_continuation
         from utils import palstore
 
         ctx_dir = str(tmp_path / "context")
         monkeypatch.setattr(palstore, "_CTX_DIR", ctx_dir)
-        monkeypatch.setattr(palstore, "_INDEX_PATH", os.path.join(ctx_dir, "store-index.json"))
+        monkeypatch.setattr(palstore, "_INDEX_PATH", os.path.join(ctx_dir, "tree-index.json"))
         monkeypatch.setattr(palstore, "_ARMED_PATH", os.path.join(ctx_dir, "armed.json"))
 
         args = {"continuation_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"}
-        result = _resolve_store_continuation("thinkdeep", args)
+        result = _resolve_tree_continuation("thinkdeep", args)
 
         assert result is None
         assert args["continuation_id"] == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
     def test_continue_from_store_root(self, tmp_path, monkeypatch):
-        from server import _resolve_store_continuation
+        from server import _resolve_tree_continuation
 
         self._make_store(tmp_path, monkeypatch, "myproject", "/tmp/proj")
 
         args = {"continuation_id": "myproject"}
-        result = _resolve_store_continuation("thinkdeep", args)
+        result = _resolve_tree_continuation("thinkdeep", args)
 
         # Creates numeric child "0" under root
         assert result == "myproject.0"
-        assert args.get("_store_context_built") is True
+        assert args.get("_tree_context_built") is True
 
-        bridge = args["_store_bridge"]
+        bridge = args["_tree_bridge"]
         assert bridge["tool_path"] == "myproject.0"
         assert bridge["tool_name"] == "thinkdeep"
         assert bridge["mode"] == "continue"
-        assert bridge["store"].tree_path == "myproject"
+        assert bridge["tree"].tree_path == "myproject"
 
     def test_continue_from_existing_node(self, tmp_path, monkeypatch):
         from datetime import datetime, timezone
 
-        from server import _resolve_store_continuation
-        from utils.palstore import PalNode, save_store
+        from server import _resolve_tree_continuation
+        from utils.palstore import PalNode, save_tree
 
         store = self._make_store(tmp_path, monkeypatch, "myproject", "/tmp/proj")
 
@@ -401,16 +401,16 @@ class TestResolveStoreContinuation:
             output="initial response",
         )
         store.children["0"] = existing_node
-        save_store(store)
+        save_tree(store)
 
         args = {"continuation_id": "myproject.0"}
-        result = _resolve_store_continuation("thinkdeep", args)
+        result = _resolve_tree_continuation("thinkdeep", args)
 
         # Creates numeric child "0" under the existing node
         assert result == "myproject.0.0"
-        assert args.get("_store_context_built") is True
+        assert args.get("_tree_context_built") is True
 
-        bridge = args["_store_bridge"]
+        bridge = args["_tree_bridge"]
         assert bridge["tool_path"] == "myproject.0.0"
         assert bridge["tool_name"] == "thinkdeep"
         assert bridge["mode"] == "continue"
@@ -418,8 +418,8 @@ class TestResolveStoreContinuation:
     def test_continue_different_tool(self, tmp_path, monkeypatch):
         from datetime import datetime, timezone
 
-        from server import _resolve_store_continuation
-        from utils.palstore import PalNode, save_store
+        from server import _resolve_tree_continuation
+        from utils.palstore import PalNode, save_tree
 
         store = self._make_store(tmp_path, monkeypatch, "myproject", "/tmp/proj")
 
@@ -430,16 +430,16 @@ class TestResolveStoreContinuation:
             output="initial response",
         )
         store.children["0"] = existing_node
-        save_store(store)
+        save_tree(store)
 
         args = {"continuation_id": "myproject.0"}
-        result = _resolve_store_continuation("analyze", args)
+        result = _resolve_tree_continuation("analyze", args)
 
         # Any tool targeting any node creates a numeric child — no FORK mode
         assert result == "myproject.0.0"
-        assert args.get("_store_context_built") is True
+        assert args.get("_tree_context_built") is True
 
-        bridge = args["_store_bridge"]
+        bridge = args["_tree_bridge"]
         assert bridge["tool_path"] == "myproject.0.0"
         assert bridge["tool_name"] == "analyze"
         assert bridge["mode"] == "continue"
@@ -447,8 +447,8 @@ class TestResolveStoreContinuation:
     def test_continue_from_query_node(self, tmp_path, monkeypatch):
         from datetime import datetime, timezone
 
-        from server import _resolve_store_continuation
-        from utils.palstore import PalNode, save_store
+        from server import _resolve_tree_continuation
+        from utils.palstore import PalNode, save_tree
 
         store = self._make_store(tmp_path, monkeypatch, "myproject", "/tmp/proj")
 
@@ -458,40 +458,40 @@ class TestResolveStoreContinuation:
             output="query response",
         )
         store.children["0"] = query_node
-        save_store(store)
+        save_tree(store)
 
         args = {"continuation_id": "myproject.0"}
-        result = _resolve_store_continuation("thinkdeep", args)
+        result = _resolve_tree_continuation("thinkdeep", args)
 
         assert result == "myproject.0.0"
 
-        bridge = args["_store_bridge"]
+        bridge = args["_tree_bridge"]
         assert bridge["tool_path"] == "myproject.0.0"
         assert bridge["mode"] == "continue"
 
     def test_child_index_increments(self, tmp_path, monkeypatch):
-        from server import _resolve_store_continuation
+        from server import _resolve_tree_continuation
 
         self._make_store(tmp_path, monkeypatch, "myproject", "/tmp/proj")
 
         # First call — no children; creates "0"
         args1 = {"continuation_id": "myproject"}
-        result1 = _resolve_store_continuation("thinkdeep", args1)
+        result1 = _resolve_tree_continuation("thinkdeep", args1)
         assert result1 == "myproject.0"
 
         # Second call: reload from disk so "0" is visible, then creates "1"
         args2 = {"continuation_id": "myproject"}
-        result2 = _resolve_store_continuation("thinkdeep", args2)
+        result2 = _resolve_tree_continuation("thinkdeep", args2)
         assert result2 == "myproject.1"
 
 
-class TestInjectStorePathContinuation:
-    """Tests for _inject_store_path_continuation response post-processing."""
+class TestInjectTreePathContinuation:
+    """Tests for _inject_tree_path_continuation response post-processing."""
 
     def test_uuid_replaced_in_response(self):
         from mcp.types import TextContent
 
-        from server import _inject_store_path_continuation
+        from server import _inject_tree_path_continuation
 
         response_json = json.dumps(
             {
@@ -508,7 +508,7 @@ class TestInjectStorePathContinuation:
         )
         items = [TextContent(type="text", text=response_json)]
 
-        result = _inject_store_path_continuation(items, "myproject.F0.thinkdeep")
+        result = _inject_tree_path_continuation(items, "myproject.F0.thinkdeep")
 
         parsed = json.loads(result[0].text)
         assert parsed["continuation_offer"]["continuation_id"] == "myproject.F0.thinkdeep"
@@ -517,7 +517,7 @@ class TestInjectStorePathContinuation:
     def test_bare_continuation_id_replaced_in_workflow_response(self):
         from mcp.types import TextContent
 
-        from server import _inject_store_path_continuation
+        from server import _inject_tree_path_continuation
 
         response_json = json.dumps(
             {
@@ -531,7 +531,7 @@ class TestInjectStorePathContinuation:
         )
         items = [TextContent(type="text", text=response_json)]
 
-        result = _inject_store_path_continuation(items, "myproject.F0.analyze")
+        result = _inject_tree_path_continuation(items, "myproject.F0.analyze")
 
         parsed = json.loads(result[0].text)
         assert parsed["continuation_id"] == "myproject.F0.analyze"
@@ -540,7 +540,7 @@ class TestInjectStorePathContinuation:
     def test_workflow_next_step_injects_guidance(self):
         from mcp.types import TextContent
 
-        from server import _inject_store_path_continuation
+        from server import _inject_tree_path_continuation
 
         bridge = {"tool_name": "analyze", "tool_path": "myproject.F0.analyze", "mode": "continue"}
         response_json = json.dumps(
@@ -554,20 +554,20 @@ class TestInjectStorePathContinuation:
             }
         )
         items = [TextContent(type="text", text=response_json)]
-        args = {"_store_bridge": bridge, "prompt": "test"}
+        args = {"_tree_bridge": bridge, "prompt": "test"}
 
-        result = _inject_store_path_continuation(items, "myproject.F0.analyze", arguments=args)
+        result = _inject_tree_path_continuation(items, "myproject.F0.analyze", arguments=args)
 
         parsed = json.loads(result[0].text)
-        assert "store_continuation_guidance" in parsed
-        guidance = parsed["store_continuation_guidance"]
+        assert "tree_continuation_guidance" in parsed
+        guidance = parsed["tree_continuation_guidance"]
         assert "myproject.F0.analyze" in guidance
         assert "step_number=2" in guidance
 
     def test_completed_workflow_injects_chain_note(self):
         from mcp.types import TextContent
 
-        from server import _inject_store_path_continuation
+        from server import _inject_tree_path_continuation
 
         bridge = {"tool_name": "planner", "tool_path": "myproject.F0.planner", "mode": "continue"}
         response_json = json.dumps(
@@ -579,34 +579,34 @@ class TestInjectStorePathContinuation:
             }
         )
         items = [TextContent(type="text", text=response_json)]
-        args = {"_store_bridge": bridge, "prompt": "test"}
+        args = {"_tree_bridge": bridge, "prompt": "test"}
 
-        result = _inject_store_path_continuation(items, "myproject.F0.planner", arguments=args)
+        result = _inject_tree_path_continuation(items, "myproject.F0.planner", arguments=args)
 
         parsed = json.loads(result[0].text)
-        assert "store_chain_note" in parsed
-        assert "myproject.F0.planner" in parsed["store_chain_note"]
-        assert "store_continuation_guidance" not in parsed
+        assert "tree_chain_note" in parsed
+        assert "myproject.F0.planner" in parsed["tree_chain_note"]
+        assert "tree_continuation_guidance" not in parsed
 
     def test_non_json_passthrough(self):
         from mcp.types import TextContent
 
-        from server import _inject_store_path_continuation
+        from server import _inject_tree_path_continuation
 
         items = [TextContent(type="text", text="not json")]
-        result = _inject_store_path_continuation(items, "myproject.F0.thinkdeep")
+        result = _inject_tree_path_continuation(items, "myproject.F0.thinkdeep")
 
         assert result[0].text == "not json"
 
     def test_no_continuation_offer_passthrough(self):
         from mcp.types import TextContent
 
-        from server import _inject_store_path_continuation
+        from server import _inject_tree_path_continuation
 
         response_json = json.dumps({"status": "success", "content": "Done."})
         items = [TextContent(type="text", text=response_json)]
 
-        result = _inject_store_path_continuation(items, "myproject.F0.thinkdeep")
+        result = _inject_tree_path_continuation(items, "myproject.F0.thinkdeep")
 
         parsed = json.loads(result[0].text)
         assert "continuation_offer" not in parsed or parsed.get("continuation_offer") is None
@@ -771,7 +771,7 @@ class TestPalUpsertTool:
     async def test_update_mode_sets_fields(self, tmp_path):
         import os
 
-        from utils.palstore import PalNode, PalRoot, save_store, update_index
+        from utils.palstore import PalNode, PalRoot, save_tree, update_index
 
         os.environ["PAL_STORAGE_DIR"] = str(tmp_path)
 
@@ -781,7 +781,7 @@ class TestPalUpsertTool:
             created_at="2024-01-01T00:00:00Z",
             children={"0": PalNode(label="original", input="old input", output="old output")},
         )
-        save_store(store)
+        save_tree(store)
         update_index(str(tmp_path), "test-upsert")
 
         result = await self.tool.execute(
@@ -805,7 +805,7 @@ class TestPalUpsertTool:
     async def test_update_mode_rejects_root(self, tmp_path):
         import os
 
-        from utils.palstore import PalRoot, save_store, update_index
+        from utils.palstore import PalRoot, save_tree, update_index
 
         os.environ["PAL_STORAGE_DIR"] = str(tmp_path)
 
@@ -814,7 +814,7 @@ class TestPalUpsertTool:
             directory=str(tmp_path),
             created_at="2024-01-01T00:00:00Z",
         )
-        save_store(store)
+        save_tree(store)
         update_index(str(tmp_path), "test-root")
 
         result = await self.tool.execute({"tree_path": "test-root"})
@@ -828,7 +828,7 @@ class TestPalUpsertTool:
     async def test_insert_mode_creates_child(self, tmp_path):
         import os
 
-        from utils.palstore import PalNode, PalRoot, save_store, update_index
+        from utils.palstore import PalNode, PalRoot, save_tree, update_index
 
         os.environ["PAL_STORAGE_DIR"] = str(tmp_path)
 
@@ -838,7 +838,7 @@ class TestPalUpsertTool:
             created_at="2024-01-01T00:00:00Z",
             children={"0": PalNode(label="layer")},
         )
-        save_store(store)
+        save_tree(store)
         update_index(str(tmp_path), "test-child")
 
         result = await self.tool.execute(
@@ -860,7 +860,7 @@ class TestPalUpsertTool:
     async def test_update_mode_metadata_merge(self, tmp_path):
         import os
 
-        from utils.palstore import PalNode, PalRoot, load_store, save_store, update_index
+        from utils.palstore import PalNode, PalRoot, load_tree, save_tree, update_index
 
         os.environ["PAL_STORAGE_DIR"] = str(tmp_path)
 
@@ -870,7 +870,7 @@ class TestPalUpsertTool:
             created_at="2024-01-01T00:00:00Z",
             children={"0": PalNode(label="layer", metadata={"existing": "keep"})},
         )
-        save_store(store)
+        save_tree(store)
         update_index(str(tmp_path), "test-merge")
 
         result = await self.tool.execute(
@@ -886,7 +886,7 @@ class TestPalUpsertTool:
         assert data["status"] == "success"
 
         # Reload and verify merge
-        reloaded = load_store(str(tmp_path), "test-merge")
+        reloaded = load_tree(str(tmp_path), "test-merge")
         node = reloaded.children["0"]
         assert node.metadata["existing"] == "keep"
         assert node.metadata["new_key"] == "new_value"
@@ -895,7 +895,7 @@ class TestPalUpsertTool:
     async def test_insert_duplicate_key_rejected(self, tmp_path):
         import os
 
-        from utils.palstore import PalNode, PalRoot, save_store, update_index
+        from utils.palstore import PalNode, PalRoot, save_tree, update_index
 
         os.environ["PAL_STORAGE_DIR"] = str(tmp_path)
 
@@ -910,7 +910,7 @@ class TestPalUpsertTool:
                 )
             },
         )
-        save_store(store)
+        save_tree(store)
         update_index(str(tmp_path), "test-dup")
 
         result = await self.tool.execute(

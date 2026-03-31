@@ -5,6 +5,19 @@ from oboros import tome
 logger = logging.getLogger("pal_mcp")
 
 
+def _strip_context_files(text: str) -> str:
+    """Strip the === CONTEXT FILES === section from input text.
+
+    The embedded file content/diffs are already represented by the files list
+    and waste context when rendered in MCP responses.
+    """
+    marker = "\n=== CONTEXT FILES ==="
+    idx = text.find(marker)
+    if idx < 0:
+        return text
+    return text[:idx].rstrip()
+
+
 def format_layer_markdown(
     heading: str,
     *,
@@ -15,10 +28,13 @@ def format_layer_markdown(
     files: list[str] | None = None,
     input_text: str | None = None,
     output_text: str | None = None,
+    include_file_content: bool = False,
 ) -> str:
     """Format a context layer or tool response as structured markdown.
 
     Shared by readnode (layer display) and content save (response persistence).
+    When include_file_content is False (default), embedded file content/diffs
+    are stripped from input_text since the file list is shown separately.
     """
     lines = [f"# {heading}", ""]
     if label:
@@ -34,7 +50,8 @@ def format_layer_markdown(
         for f in files:
             lines.append(f"- {f}")
     if input_text:
-        lines.extend(["", "## Input", "", input_text])
+        display_input = input_text if include_file_content else _strip_context_files(input_text)
+        lines.extend(["", "## Input", "", display_input])
     if output_text:
         lines.extend(["", "## Output", "", output_text])
     return "\n".join(lines)

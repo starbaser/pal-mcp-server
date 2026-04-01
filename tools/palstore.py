@@ -34,42 +34,39 @@ def _truncate_label(text: str, max_len: int = 80) -> str:
     return truncated + "…"
 
 
-def _natural_sort_key(key: str) -> tuple:
-    """Sort key that handles mixed alpha-numeric keys naturally: 0, 1, ..., 10."""
-    import re
+def _render_tree(tree, root_path: str = "", indent: int = 0, tlog=None) -> list[str]:
+    """Render a tree's node dict as indented markdown link lines.
 
-    parts = re.split(r"(\d+)", key)
-    return tuple(int(p) if p.isdigit() else p for p in parts)
-
-
-def _render_tree(tree, root_path: str = "", indent: int = 0) -> list[str]:
-    """Render a tree's node dict as indented markdown link lines."""
-    from utils.palstore import PalNode
-
-    lines: list[str] = []
-
-    def _render_nodes(nodes: dict[str, PalNode], parent_path: str, depth: int) -> None:
-        p = "  " * depth
-        for key, node in sorted(nodes.items(), key=lambda kv: _natural_sort_key(kv[0])):
-            full_path = f"{parent_path}.{key}"
-            ts = (node.timestamp or "")[:10]
-            if node.label:
-                label_part = node.label if node.label.startswith(f"{key}:") else f"{key}. {node.label}"
-            else:
-                label_part = key
-            date_part = f" — {ts}" if ts else ""
-            files_part = ""
-            if node.files:
-                basenames = ", ".join(os.path.basename(f) for f in node.files)
-                files_part = f" — {basenames}"
-            lines.append(f"{p}- [{label_part}](#{full_path}){date_part}{files_part}")
-            if node.children:
-                _render_nodes(node.children, full_path, depth + 1)
+    Uses iter_dfs from utils.palstore for consistent traversal.
+    Optionally populates a TraversalLog.
+    """
+    from utils.palstore import iter_dfs
 
     if isinstance(tree, dict):
-        _render_nodes(tree, root_path, indent)
+        children = tree
+        base_path = root_path
     else:
-        _render_nodes(tree.children, tree.tree_path, indent)
+        children = tree.children
+        base_path = tree.tree_path
+
+    lines: list[str] = []
+    for full_path, node in iter_dfs(base_path, children):
+        if tlog is not None:
+            tlog.record(full_path, node)
+        depth = full_path.count(".") - base_path.count(".") - 1
+        p = "  " * (depth + indent)
+        key = full_path.rsplit(".", 1)[-1]
+        ts = (node.timestamp or "")[:10]
+        if node.label:
+            label_part = node.label if node.label.startswith(f"{key}:") else f"{key}. {node.label}"
+        else:
+            label_part = key
+        date_part = f" — {ts}" if ts else ""
+        files_part = ""
+        if node.files:
+            basenames = ", ".join(os.path.basename(f) for f in node.files)
+            files_part = f" — {basenames}"
+        lines.append(f"{p}- [{label_part}](#{full_path}){date_part}{files_part}")
 
     return lines
 
@@ -121,6 +118,18 @@ class PalTreeBaseTool(SimpleTool):
 
     def get_annotations(self) -> dict:
         return {"readOnlyHint": False, "openWorldHint": False}
+
+    def _parse_response(self, raw_text, request, model_info=None):
+        """Override to inject traversal data into ToolOutput metadata."""
+        from tools.models import ToolOutput
+
+        tool_output = super()._parse_response(raw_text, request, model_info)
+        tlog = getattr(self, "_tlog", None)
+        if tlog and isinstance(tool_output, ToolOutput):
+            if tool_output.metadata is None:
+                tool_output.metadata = {}
+            tool_output.metadata.update(tlog.to_dict())
+        return tool_output
 
     def _resolve_tree(self, tree_path: str):
         """Load tree for a given tree_path. Returns (tree, root_id).
@@ -201,7 +210,7 @@ class PalInitTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
-        from utils.palstore import PalRoot, save_tree, update_index
+        from utils.palstore import PalRoot, TraversalLog, save_tree, update_index
 
         tree_name = arguments.get("tree_name", "")
         directory = arguments.get("directory", "")
@@ -233,6 +242,7 @@ class PalInitTool(BaseTool):
         save_tree(tree)
         update_index(directory, tree_name)
 
+        tlog = TraversalLog(traversal_type="none")
         tool_output = ToolOutput(
             status="success",
             content=(
@@ -242,7 +252,7 @@ class PalInitTool(BaseTool):
                 f'Use addtreelayer(tree_path="{tree_name}", ...) to add context layers.'
             ),
             content_type="text",
-            metadata={"tree_path": tree_name, "directory": directory},
+            metadata={"tree_path": tree_name, "directory": directory, **tlog.to_dict()},
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]
 
@@ -351,18 +361,18 @@ class PalAddTreeLayerTool(PalTreeBaseTool):
             return [TextContent(type="text", text=error.model_dump_json())]
 
         from utils.file_diff import build_file_state_from_ancestry
-        from utils.palstore import walk_palnode_ancestry
+        from utils.palstore import collect_traversal, iter_ancestry
         from utils.palstore_builder import build_context_from_ancestry
 
-        ancestors = walk_palnode_ancestry(tree, tree_path)
+        ancestors, tlog = collect_traversal(iter_ancestry(tree, tree_path), "ancestry")
+        self._tlog = tlog
         self._ancestors = ancestors
         self._prior_file_state = build_file_state_from_ancestry(ancestors)
         self._injected_history = build_context_from_ancestry(ancestors)
         self._tree = tree
         self._tree_path = tree_path
 
-        # Estimate context usage for continuation_offer reporting
-        arguments["_context_used"] = len(self._injected_history) // 4 if self._injected_history else 0
+        arguments["_context_used"] = tlog.total_tokens
 
         arguments.pop("continuation_id", None)
         arguments["thinking_mode"] = "max"
@@ -656,11 +666,16 @@ class PalUpsertTool(BaseTool):
             return [TextContent(type="text", text=error.model_dump_json())]
 
         save_tree(tree)
+
+        from utils.palstore import TraversalLog
+
+        tlog = TraversalLog(traversal_type="resolve")
+        tlog.record(tree_path, node)
         result = ToolOutput(
             status="success",
             content=f"Updated {', '.join(updated_fields)} on {tree_path}.",
             content_type="text",
-            metadata={"tree_path": tree_path, "updated_fields": updated_fields},
+            metadata={"tree_path": tree_path, "updated_fields": updated_fields, **tlog.to_dict()},
         )
         return [TextContent(type="text", text=result.model_dump_json())]
 
@@ -713,11 +728,16 @@ class PalUpsertTool(BaseTool):
             return [TextContent(type="text", text=error.model_dump_json())]
 
         save_tree(tree)
+
+        from utils.palstore import TraversalLog
+
+        tlog = TraversalLog(traversal_type="resolve")
+        tlog.record(new_path, node)
         result = ToolOutput(
             status="success",
             content=f"Inserted node at {new_path}.",
             content_type="text",
-            metadata={"tree_path": new_path, "child_key": child_key},
+            metadata={"tree_path": new_path, "child_key": child_key, **tlog.to_dict()},
         )
         return [TextContent(type="text", text=result.model_dump_json())]
 
@@ -812,7 +832,7 @@ class PalQueryTool(PalTreeBaseTool):
             error = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        from utils.palstore import resolve_palnode, walk_palnode_ancestry
+        from utils.palstore import collect_traversal, iter_ancestry, resolve_palnode
         from utils.palstore_builder import build_context_from_ancestry
 
         node = resolve_palnode(tree, tree_path)
@@ -828,13 +848,14 @@ class PalQueryTool(PalTreeBaseTool):
         self._parent_path = tree_path
         self._child_prefix = "Q"
 
-        ancestors = walk_palnode_ancestry(tree, tree_path)
+        ancestors, tlog = collect_traversal(iter_ancestry(tree, tree_path), "ancestry")
+        self._tlog = tlog
 
         self._injected_history = build_context_from_ancestry(ancestors)
         self._tree = tree
         self._tree_path = tree_path
 
-        arguments["_context_used"] = len(self._injected_history) // 4 if self._injected_history else 0
+        arguments["_context_used"] = tlog.total_tokens
 
         arguments.pop("continuation_id", None)
         arguments["thinking_mode"] = "max"
@@ -1026,15 +1047,17 @@ class PalForkTool(BaseTool):
         new_path = add_palnode(tree, tree_path, next_key, fork_node)
         save_tree(tree)
 
+        from utils.palstore import TraversalLog
+
+        tlog = TraversalLog(traversal_type="resolve")
+        tlog.record(new_path, fork_node)
         tool_output = ToolOutput(
             status="success",
             content=(
-                f"Fork created.\n\n"
-                f"tree_path: {new_path}\n\n"
-                f"Use this tree_path to build a new branch from this point."
+                f"Fork created.\n\ntree_path: {new_path}\n\nUse this tree_path to build a new branch from this point."
             ),
             content_type="text",
-            metadata={"tree_path": new_path, "parent_tree_path": tree_path},
+            metadata={"tree_path": new_path, "parent_tree_path": tree_path, **tlog.to_dict()},
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]
 
@@ -1062,8 +1085,7 @@ class PalListTool(BaseTool):
                 "directory": {
                     "type": "string",
                     "description": (
-                        "Absolute path to filter trees by project directory. "
-                        "Defaults to the current working directory."
+                        "Absolute path to filter trees by project directory. Defaults to the current working directory."
                     ),
                 },
                 "tree_path": {
@@ -1103,10 +1125,12 @@ class PalListTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
-        from utils.palstore import list_trees, load_tree, resolve_palnode, resolve_tree_location
+        from utils.palstore import TraversalLog, list_trees, load_tree, resolve_palnode, resolve_tree_location
 
         directory = arguments.get("directory", os.getcwd())
         tree_path = arguments.get("tree_path")
+
+        tlog = TraversalLog(traversal_type="dfs")
 
         if tree_path:
             location = resolve_tree_location(tree_path)
@@ -1124,10 +1148,10 @@ class PalListTool(BaseTool):
             if node is None and tree_path == tree.tree_path:
                 n_nodes = len(tree.children)
                 lines = [f"{tree.tree_path}  ({n_nodes} nodes)"]
-                lines.extend(_render_tree(tree, indent=1))
+                lines.extend(_render_tree(tree, indent=1, tlog=tlog))
             elif node is not None:
                 lines = [f"{tree_path}"]
-                lines.extend(_render_tree(node.children, root_path=tree_path, indent=1))
+                lines.extend(_render_tree(node.children, root_path=tree_path, indent=1, tlog=tlog))
             else:
                 lines = [f"Node not found: {tree_path}"]
 
@@ -1139,7 +1163,7 @@ class PalListTool(BaseTool):
                 for tree in trees:
                     n_nodes = len(tree.children)
                     lines.append(f"{tree.tree_path}  ({n_nodes} nodes)")
-                    lines.extend(_render_tree(tree, indent=1))
+                    lines.extend(_render_tree(tree, indent=1, tlog=tlog))
                 content = "\n".join(lines)
             else:
                 scope = f" for directory '{directory}'" if directory else ""
@@ -1149,6 +1173,7 @@ class PalListTool(BaseTool):
             status="success",
             content=content,
             content_type="text",
+            metadata={**tlog.to_dict()},
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]
 
@@ -1222,6 +1247,8 @@ class PalReadTool(BaseTool):
             error = ToolOutput(status="error", content=f'PALTree file not found: "{root_id}".', content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
+        from utils.palstore import TraversalLog
+
         node = resolve_palnode(tree, tree_path)
 
         if node is None:
@@ -1244,11 +1271,13 @@ class PalReadTool(BaseTool):
                 output_text=node.output,
             )
 
+        tlog = TraversalLog(traversal_type="resolve")
+        tlog.record(tree_path, node)
         tool_output = ToolOutput(
             status="success",
             content=content,
             content_type="text",
-            metadata={"tree_path": tree_path},
+            metadata={"tree_path": tree_path, **tlog.to_dict()},
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]
 
@@ -1337,11 +1366,14 @@ class PalRenameTool(BaseTool):
             tool_output = ToolOutput(status="error", content=str(e), content_type="text")
             return [TextContent(type="text", text=tool_output.model_dump_json())]
 
+        from utils.palstore import TraversalLog
+
+        tlog = TraversalLog(traversal_type="none")
         tool_output = ToolOutput(
             status="success",
             content=(f"Tree renamed.\n\nold tree_path: {tree_path}\nnew tree_path: {new_name}\ndirectory: {directory}"),
             content_type="text",
-            metadata={"tree_path": new_name, "old_tree_path": tree_path, "directory": directory},
+            metadata={"tree_path": new_name, "old_tree_path": tree_path, "directory": directory, **tlog.to_dict()},
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]
 
@@ -1439,35 +1471,37 @@ class PalExportTool(BaseTool):
 
         return lines
 
-    def _walk_tree(self, nodes: dict, parent_path: str, depth: int) -> list[str]:
-        """Recursively render all nodes depth-first."""
+    def _walk_tree(self, nodes: dict, parent_path: str, depth: int, tlog=None) -> list[str]:
+        """Render all nodes depth-first using iter_dfs."""
+        from utils.palstore import iter_dfs
+
+        base_depth = parent_path.count(".")
         lines: list[str] = []
-        for key in sorted(nodes, key=_natural_sort_key):
-            node = nodes[key]
-            full_path = f"{parent_path}.{key}"
-            lines.extend(self._render_node(full_path, node, depth))
-            if node.children:
-                lines.extend(self._walk_tree(node.children, full_path, depth + 1))
+        for full_path, node in iter_dfs(parent_path, nodes):
+            if tlog is not None:
+                tlog.record(full_path, node)
+            node_depth = depth + (full_path.count(".") - base_depth - 1)
+            lines.extend(self._render_node(full_path, node, node_depth))
         return lines
 
-    def _build_toc(self, nodes: dict, parent_path: str, indent: int = 0) -> list[str]:
-        """Build a flat table of contents with anchor links."""
+    def _build_toc(self, nodes: dict, parent_path: str) -> list[str]:
+        """Build a flat table of contents with anchor links using iter_dfs."""
+        from utils.palstore import iter_dfs
+
+        base_depth = parent_path.count(".")
         lines: list[str] = []
-        pad = "  " * indent
-        for key in sorted(nodes, key=_natural_sort_key):
-            node = nodes[key]
-            full_path = f"{parent_path}.{key}"
+        for full_path, node in iter_dfs(parent_path, nodes):
+            indent = full_path.count(".") - base_depth - 1
+            pad = "  " * indent
             anchor = full_path.lower().replace(".", "")
             ts = (node.timestamp or "")[:10]
             date_part = f" — {ts}" if ts else ""
             lines.append(f"{pad}- [{full_path}](#{anchor}){date_part}")
-            if node.children:
-                lines.extend(self._build_toc(node.children, full_path, indent + 1))
         return lines
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
-        from utils.palstore import load_tree, resolve_tree_location
+        from utils.palstore import TraversalLog, load_tree, resolve_tree_location
 
         tree_path = arguments.get("tree_path", "")
         output_path = arguments.get("output_path", "")
@@ -1495,6 +1529,8 @@ class PalExportTool(BaseTool):
         if tree is None:
             error = ToolOutput(status="error", content=f'PALTree file not found: "{root_id}".', content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
+
+        tlog = TraversalLog(traversal_type="dfs")
 
         # Build the markdown document
         doc: list[str] = []
@@ -1525,7 +1561,7 @@ class PalExportTool(BaseTool):
         doc.append("")
 
         # All nodes
-        doc.extend(self._walk_tree(tree.children, tree.tree_path, depth=2))
+        doc.extend(self._walk_tree(tree.children, tree.tree_path, depth=2, tlog=tlog))
 
         content = "\n".join(doc)
 
@@ -1540,7 +1576,7 @@ class PalExportTool(BaseTool):
             status="success",
             content=f"Exported tree '{tree.tree_path}' ({n_nodes} nodes) to:\n{output_path}",
             content_type="text",
-            metadata={"tree_path": tree_path, "output_path": output_path, "nodes": n_nodes},
+            metadata={"tree_path": tree_path, "output_path": output_path, "nodes": n_nodes, **tlog.to_dict()},
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]
 
@@ -1597,21 +1633,21 @@ class PalFileListTool(BaseTool):
     def format_response(self, response: str, _request: ToolRequest, _model_info: Optional[dict] = None) -> str:
         return response
 
-    def _collect_files(self, nodes: dict, parent_path: str) -> list[tuple[str, str, str, list[str]]]:
-        """Recursively collect (node_path, timestamp, label, files) for nodes with files."""
+    def _collect_files(self, nodes: dict, parent_path: str, tlog=None) -> list[tuple[str, str, str, list[str]]]:
+        """Collect (node_path, timestamp, label, files) for nodes with files using iter_dfs."""
+        from utils.palstore import iter_dfs
+
         results: list[tuple[str, str, str, list[str]]] = []
-        for key in sorted(nodes, key=_natural_sort_key):
-            node = nodes[key]
-            full_path = f"{parent_path}.{key}"
+        for full_path, node in iter_dfs(parent_path, nodes):
+            if tlog is not None:
+                tlog.record(full_path, node)
             if node.files:
                 results.append((full_path, node.timestamp or "", node.label or "", list(node.files)))
-            if node.children:
-                results.extend(self._collect_files(node.children, full_path))
         return results
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
-        from utils.palstore import load_tree, resolve_palnode, resolve_tree_location
+        from utils.palstore import TraversalLog, load_tree, resolve_palnode, resolve_tree_location
 
         tree_path = arguments.get("tree_path", "")
 
@@ -1626,11 +1662,12 @@ class PalFileListTool(BaseTool):
             error = ToolOutput(status="error", content=f'PALTree file not found: "{root_id}".', content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
+        tlog = TraversalLog(traversal_type="dfs")
         node = resolve_palnode(tree, tree_path)
         if node is None and tree_path == tree.tree_path:
-            collected = self._collect_files(tree.children, tree.tree_path)
+            collected = self._collect_files(tree.children, tree.tree_path, tlog=tlog)
         elif node is not None:
-            collected = self._collect_files(node.children, tree_path)
+            collected = self._collect_files(node.children, tree_path, tlog=tlog)
             if node.files:
                 collected.insert(0, (tree_path, node.timestamp or "", node.label or "", list(node.files)))
         else:
@@ -1651,7 +1688,12 @@ class PalFileListTool(BaseTool):
                 lines.append("")
             content = "\n".join(lines)
 
-        tool_output = ToolOutput(status="success", content=content, content_type="text")
+        tool_output = ToolOutput(
+            status="success",
+            content=content,
+            content_type="text",
+            metadata={**tlog.to_dict()},
+        )
         return [TextContent(type="text", text=tool_output.model_dump_json())]
 
 
@@ -1711,18 +1753,18 @@ class PalFileReadTool(BaseTool):
     def format_response(self, response: str, _request: ToolRequest, _model_info: Optional[dict] = None) -> str:
         return response
 
-    def _find_nodes_with_file(self, nodes: dict, parent_path: str, file_path: str) -> list[tuple[str, str, "Any"]]:
-        """Recursively find nodes referencing file_path. Returns (node_path, timestamp, node)."""
-        from utils.palstore import PalNode
+    def _find_nodes_with_file(
+        self, nodes: dict, parent_path: str, file_path: str, tlog=None
+    ) -> list[tuple[str, str, "Any"]]:
+        """Find nodes referencing file_path using iter_dfs. Returns (node_path, timestamp, node)."""
+        from utils.palstore import PalNode, iter_dfs
 
         results: list[tuple[str, str, PalNode]] = []
-        for key in sorted(nodes, key=_natural_sort_key):
-            node = nodes[key]
-            full_path = f"{parent_path}.{key}"
+        for full_path, node in iter_dfs(parent_path, nodes):
+            if tlog is not None:
+                tlog.record(full_path, node)
             if node.files and file_path in node.files:
                 results.append((full_path, node.timestamp or "", node))
-            if node.children:
-                results.extend(self._find_nodes_with_file(node.children, full_path, file_path))
         return results
 
     def _extract_file_from_blob(self, content_blob: str, file_path: str) -> Optional[str]:
@@ -1738,7 +1780,7 @@ class PalFileReadTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
-        from utils.palstore import load_tree, resolve_palnode, resolve_tree_location
+        from utils.palstore import TraversalLog, load_tree, resolve_palnode, resolve_tree_location
 
         tree_path = arguments.get("tree_path", "")
         file_path = arguments.get("file_path", "")
@@ -1758,12 +1800,13 @@ class PalFileReadTool(BaseTool):
             error = ToolOutput(status="error", content=f'PALTree file not found: "{root_id}".', content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
+        tlog = TraversalLog(traversal_type="dfs")
         # Search from root or subtree
         node = resolve_palnode(tree, tree_path)
         if node is None and tree_path == tree.tree_path:
-            matches = self._find_nodes_with_file(tree.children, tree.tree_path, file_path)
+            matches = self._find_nodes_with_file(tree.children, tree.tree_path, file_path, tlog=tlog)
         elif node is not None:
-            matches = self._find_nodes_with_file(node.children, tree_path, file_path)
+            matches = self._find_nodes_with_file(node.children, tree_path, file_path, tlog=tlog)
             if node.files and file_path in node.files:
                 matches.insert(0, (tree_path, node.timestamp or "", node))
         else:
@@ -1816,7 +1859,13 @@ class PalFileReadTool(BaseTool):
             status="success",
             content=content,
             content_type="text",
-            metadata={"tree_path": tree_path, "file_path": file_path, "source": source, "node_path": node_path},
+            metadata={
+                "tree_path": tree_path,
+                "file_path": file_path,
+                "source": source,
+                "node_path": node_path,
+                **tlog.to_dict(),
+            },
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]
 
@@ -1912,12 +1961,22 @@ class PalFileWriteTool(BaseTool):
             error = ToolOutput(status="error", content=f"Node not found: {tree_path}", content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
+        from utils.palstore import TraversalLog
+
+        tlog = TraversalLog(traversal_type="resolve")
+        tlog.record(tree_path, node)
+
         if file_path in node.files:
             tool_output = ToolOutput(
                 status="success",
                 content=f"File already attached to node {tree_path}: {file_path}",
                 content_type="text",
-                metadata={"tree_path": tree_path, "file_path": file_path, "action": "already_present"},
+                metadata={
+                    "tree_path": tree_path,
+                    "file_path": file_path,
+                    "action": "already_present",
+                    **tlog.to_dict(),
+                },
             )
             return [TextContent(type="text", text=tool_output.model_dump_json())]
 
@@ -1933,6 +1992,7 @@ class PalFileWriteTool(BaseTool):
                 "file_path": file_path,
                 "action": "added",
                 "total_files": len(node.files),
+                **tlog.to_dict(),
             },
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]
@@ -1966,8 +2026,7 @@ class PalTraverseTool(BaseTool):
                 "start_node": {
                     "type": "string",
                     "description": (
-                        "Segment path relative to tree root for the start of the range"
-                        "(e.g. '0', '2.1'). Inclusive."
+                        "Segment path relative to tree root for the start of the range(e.g. '0', '2.1'). Inclusive."
                     ),
                 },
                 "end_node": {
@@ -2007,7 +2066,7 @@ class PalTraverseTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
-        from utils.palstore import load_tree, resolve_tree_location, walk_palnode_range
+        from utils.palstore import collect_traversal, iter_range, load_tree, resolve_tree_location
         from utils.palstore_builder import build_context_from_ancestry
 
         tree_path = arguments.get("tree_path", "")
@@ -2035,7 +2094,7 @@ class PalTraverseTool(BaseTool):
         end_full = f"{root_id}.{end_node}"
 
         try:
-            range_nodes = walk_palnode_range(tree, start_full, end_full)
+            range_nodes, tlog = collect_traversal(iter_range(tree, start_full, end_full), "range")
         except ValueError as exc:
             error = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
@@ -2053,6 +2112,7 @@ class PalTraverseTool(BaseTool):
                 "start_node": start_node,
                 "end_node": end_node,
                 "traversed_path": f"{start_full} → {end_full}",
+                **tlog.to_dict(),
             },
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]
@@ -2160,11 +2220,17 @@ class PalMoveTool(BaseTool):
 
         save_tree(tree)
 
+        from utils.palstore import TraversalLog, resolve_palnode
+
+        tlog = TraversalLog(traversal_type="resolve")
+        moved_node = resolve_palnode(tree, new_path)
+        if moved_node is not None:
+            tlog.record(new_path, moved_node)
         tool_output = ToolOutput(
             status="success",
             content=f"Moved {source_path} to {new_path}.",
             content_type="text",
-            metadata={"source_path": source_path, "new_path": new_path, "dest_parent": dest_parent},
+            metadata={"source_path": source_path, "new_path": new_path, "dest_parent": dest_parent, **tlog.to_dict()},
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]
 
@@ -2180,8 +2246,7 @@ class PalCopyTool(BaseTool):
 
     def get_description(self) -> str:
         return (
-            "Deep copy a PALTree subtree to a new location, preserving the original. "
-            "Use treelist to find node paths."
+            "Deep copy a PALTree subtree to a new location, preserving the original. Use treelist to find node paths."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -2271,11 +2336,17 @@ class PalCopyTool(BaseTool):
 
         save_tree(tree)
 
+        from utils.palstore import TraversalLog, resolve_palnode
+
+        tlog = TraversalLog(traversal_type="resolve")
+        copied_node = resolve_palnode(tree, new_path)
+        if copied_node is not None:
+            tlog.record(new_path, copied_node)
         tool_output = ToolOutput(
             status="success",
             content=f"Copied {source_path} to {new_path}.",
             content_type="text",
-            metadata={"source_path": source_path, "new_path": new_path, "dest_parent": dest_parent},
+            metadata={"source_path": source_path, "new_path": new_path, "dest_parent": dest_parent, **tlog.to_dict()},
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]
 
@@ -2379,7 +2450,7 @@ class PalFoldTool(BaseTool):
             return [TextContent(type="text", text=error.model_dump_json())]
 
         try:
-            folded = fold_palnode_range(tree, start_path, end_path)
+            folded, tlog = fold_palnode_range(tree, start_path, end_path)
         except (KeyError, ValueError) as exc:
             error = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
@@ -2413,6 +2484,7 @@ class PalFoldTool(BaseTool):
                 "end_path": end_path,
                 "content_length": content_len,
                 "file_count": file_count,
+                **tlog.to_dict(),
             },
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]
@@ -2502,6 +2574,9 @@ class PalDeleteTool(BaseTool):
 
         save_tree(tree)
 
+        from utils.palstore import TraversalLog
+
+        tlog = TraversalLog(traversal_type="resolve")
         shifted_summary = [f"{old} -> {new}" for old, new in result["shifted"]]
         lines = [f"Deleted {result['deleted']}."]
         if shifted_summary:
@@ -2517,6 +2592,7 @@ class PalDeleteTool(BaseTool):
                 "deleted": result["deleted"],
                 "shifted": shifted_summary,
                 "had_children": result["had_children"],
+                **tlog.to_dict(),
             },
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]
@@ -2595,10 +2671,13 @@ class PalDeleteTreeTool(BaseTool):
         index["trees"].pop(tree_path, None)
         save_index(index)
 
+        from utils.palstore import TraversalLog
+
+        tlog = TraversalLog(traversal_type="none")
         tool_output = ToolOutput(
             status="success",
             content=f'PALTree "{tree_path}" deleted.',
             content_type="text",
-            metadata={"tree_path": tree_path, "directory": directory, "file_removed": tree_file},
+            metadata={"tree_path": tree_path, "directory": directory, "file_removed": tree_file, **tlog.to_dict()},
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]

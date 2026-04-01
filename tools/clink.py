@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, NoReturn
@@ -23,7 +22,7 @@ from clink.agent_definitions import (
 from clink.agents import AgentOutput, CLIAgentError, create_agent
 from clink.constants import BUILTIN_PROMPTS_DIR
 from clink.models import ResolvedCLIClient, ResolvedCLIRole
-from config import MAX_MCP_OUTPUT_TOKENS, TEMPERATURE_BALANCED
+from config import TEMPERATURE_BALANCED
 from tools.models import ToolModelCategory, ToolOutput
 from tools.shared.base_models import COMMON_FIELD_DESCRIPTIONS, ToolRequest
 from tools.shared.exceptions import ToolExecutionError
@@ -359,14 +358,7 @@ class CLinkTool(SimpleTool):
         metadata = self._build_success_metadata(client_config, role_config, result)
         metadata = self._prune_metadata(metadata, client_config, reason="normal")
 
-        content, metadata = self._apply_output_limit(
-            client_config,
-            result.parsed.content,
-            metadata,
-            cwd=request.cwd,
-            is_json=resolved_schema is not None,
-            session_id=result.parsed.metadata.get("session_id"),
-        )
+        content = result.parsed.content
 
         model_info = {
             "provider": client_config.name,
@@ -492,55 +484,6 @@ class CLinkTool(SimpleTool):
         merged = dict(base or {})
         merged.update(extra)
         return merged
-
-    def _apply_output_limit(
-        self,
-        client: ResolvedCLIClient,
-        content: str,
-        metadata: dict[str, Any],
-        *,
-        cwd: str,
-        is_json: bool = False,
-        session_id: str | None = None,
-    ) -> tuple[str, dict[str, Any]]:
-        from utils.token_utils import count_tokens
-
-        token_count = count_tokens(content)
-        if token_count <= MAX_MCP_OUTPUT_TOKENS:
-            return content, metadata
-
-        file_id = session_id or uuid.uuid4().hex[:12]
-        ext = ".json" if is_json else ".md"
-        output_dir = Path(cwd) / ".claude" / "output"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_path = output_dir / f"{file_id}{ext}"
-        output_path.write_text(content, encoding="utf-8")
-
-        logger.info(
-            "Clink offloaded %s output to %s: %d tokens exceeds limit of %d",
-            client.name,
-            output_path,
-            token_count,
-            MAX_MCP_OUTPUT_TOKENS,
-        )
-
-        offload_metadata = self._prune_metadata(metadata, client, reason="offloaded")
-        offload_metadata.update(
-            {
-                "output_offloaded": True,
-                "output_file": str(output_path),
-                "output_token_count": token_count,
-                "output_limit": MAX_MCP_OUTPUT_TOKENS,
-            }
-        )
-
-        message = (
-            f"The agent response exceeded the MCP output token limit "
-            f"({token_count} tokens > {MAX_MCP_OUTPUT_TOKENS} limit).\n"
-            f"Full output saved to: {output_path}"
-        )
-
-        return message, offload_metadata
 
     def _prune_metadata(
         self,

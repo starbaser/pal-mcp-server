@@ -35,10 +35,12 @@ def build_tree_context(
     and assembles the enhanced prompt — all without creating a ThreadContext.
 
     Returns the mutated arguments dict with injected history and metadata.
+    Stores a TraversalLog in arguments["_traversal_log"].
     """
-    from utils.palstore import walk_palnode_ancestry
+    from utils.palstore import collect_traversal, iter_ancestry
 
-    ancestors = walk_palnode_ancestry(tree, node_path)
+    ancestors, tlog = collect_traversal(iter_ancestry(tree, node_path), "ancestry")
+    arguments["_traversal_log"] = tlog
 
     # Filter to content nodes (skip empty nodes)
     content_nodes = [n for n in ancestors if n.input or n.output]

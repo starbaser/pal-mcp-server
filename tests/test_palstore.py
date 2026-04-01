@@ -9,9 +9,11 @@ import pytest
 from utils.palstore import (
     PalNode,
     PalRoot,
+    TraversalLog,
     add_palnode,
     arm_tree,
     collect_palnode_files,
+    collect_traversal,
     copy_palnode,
     detach_palnode,
     disarm_tree,
@@ -20,6 +22,9 @@ from utils.palstore import (
     fold_palnode_range,
     get_armed_tree,
     get_next_key,
+    iter_ancestry,
+    iter_dfs,
+    iter_range,
     list_armed_trees,
     list_trees,
     load_tree,
@@ -800,9 +805,9 @@ class TestContextBuilder:
         history = build_context_from_ancestry(ancestors)
 
         # The file body should appear exactly once (in L1's turn)
-        assert (
-            history.count("def hello():") == 1
-        ), f"file body appeared {history.count('def hello():')} times after migration, expected 1"
+        assert history.count("def hello():") == 1, (
+            f"file body appeared {history.count('def hello():')} times after migration, expected 1"
+        )
         # All responses should still be present
         assert "stored L1" in history
         assert "stored L2" in history
@@ -1834,7 +1839,7 @@ class TestFoldRange:
         n1.children["Q0"] = n2
         n2.children["1"] = n3
 
-        result = fold_palnode_range(store, "mystore.L1", "mystore.L1.Q0.1")
+        result, _ = fold_palnode_range(store, "mystore.L1", "mystore.L1.Q0.1")
 
         expected_content = build_context_from_ancestry([n1, n2, n3])
         assert result.input == expected_content
@@ -1847,7 +1852,7 @@ class TestFoldRange:
         store.children["L1"] = n1
         n1.children["Q0"] = n2
 
-        result = fold_palnode_range(store, "mystore.L1", "mystore.L1.Q0")
+        result, _ = fold_palnode_range(store, "mystore.L1", "mystore.L1.Q0")
 
         assert result.files == ["a.py", "b.py", "c.py"]
 
@@ -1862,7 +1867,7 @@ class TestFoldRange:
         n1.children["F0"] = n2
         n2.children["L1"] = n3
 
-        result = fold_palnode_range(store, "mystore.L1", "mystore.L1.F0.L1")
+        result, _ = fold_palnode_range(store, "mystore.L1", "mystore.L1.F0.L1")
 
         assert "f1.py" in result.files
         assert "f3.py" in result.files
@@ -1873,7 +1878,7 @@ class TestFoldRange:
         n1 = _make_node(input="p1", output="r1")
         store.children["L1"] = n1
 
-        result = fold_palnode_range(store, "mystore.L1", "mystore.L1")
+        result, _ = fold_palnode_range(store, "mystore.L1", "mystore.L1")
 
         assert isinstance(result, PalNode)
         assert "L1" in store.children  # original unchanged
@@ -2005,3 +2010,172 @@ class TestCollectSubtreeFiles:
         result = collect_palnode_files(root)
 
         assert result == ["root.py", "l1.py", "l2.py", "l3.py"]
+
+
+# ---------------------------------------------------------------------------
+# TestTraversalLog
+# ---------------------------------------------------------------------------
+
+
+class TestTraversalLog:
+    def test_empty_log(self):
+        tlog = TraversalLog(traversal_type="test")
+        assert tlog.nodes_visited == []
+        assert tlog.total_content_chars == 0
+        assert tlog.total_tokens == 0
+        d = tlog.to_dict()
+        assert d["traversal_type"] == "test"
+        assert d["traversal_order"] == []
+        assert d["node_count"] == 0
+
+    def test_record_accumulates(self):
+        tlog = TraversalLog(traversal_type="ancestry")
+        n1 = _make_node(input="hello", output="world")
+        n2 = _make_node(input="foo", output="bar")
+        tlog.record("mystore.L0", n1)
+        tlog.record("mystore.L1", n2)
+
+        assert tlog.nodes_visited == ["mystore.L0", "mystore.L1"]
+        assert tlog.total_content_chars == len("helloworld") + len("foobar")
+        assert tlog.total_tokens > 0
+        assert tlog.to_dict()["node_count"] == 2
+
+    def test_record_empty_node(self):
+        tlog = TraversalLog(traversal_type="dfs")
+        n = _make_node(input="", output="")
+        tlog.record("mystore.L0", n)
+        assert tlog.nodes_visited == ["mystore.L0"]
+        assert tlog.total_content_chars == 0
+        assert tlog.total_tokens == 0
+
+
+# ---------------------------------------------------------------------------
+# TestIterAncestry
+# ---------------------------------------------------------------------------
+
+
+class TestIterAncestry:
+    def test_yields_ancestry_chain(self):
+        root = _make_root()
+        root.children["L0"] = _make_node(input="a", output="A")
+        root.children["L0"].children["Q0"] = _make_node(input="b", output="B")
+        root.children["L0"].children["Q0"].children["Q0"] = _make_node(input="c", output="C")
+
+        pairs = list(iter_ancestry(root, "mystore.L0.Q0.Q0"))
+
+        assert len(pairs) == 3
+        assert [p for p, _ in pairs] == ["mystore.L0", "mystore.L0.Q0", "mystore.L0.Q0.Q0"]
+        assert pairs[0][1].input == "a"
+        assert pairs[2][1].input == "c"
+
+    def test_root_yields_nothing(self):
+        root = _make_root()
+        assert list(iter_ancestry(root, "mystore")) == []
+
+    def test_missing_node_stops(self):
+        root = _make_root()
+        root.children["L0"] = _make_node(input="a")
+        pairs = list(iter_ancestry(root, "mystore.L0.Q0"))
+        assert len(pairs) == 1
+        assert pairs[0][0] == "mystore.L0"
+
+
+# ---------------------------------------------------------------------------
+# TestIterDfs
+# ---------------------------------------------------------------------------
+
+
+class TestIterDfs:
+    def test_flat_children(self):
+        n0 = _make_node(input="zero")
+        n1 = _make_node(input="one")
+        children = {"L0": n0, "L1": n1}
+
+        pairs = list(iter_dfs("root", children))
+        assert [p for p, _ in pairs] == ["root.L0", "root.L1"]
+
+    def test_nested_dfs_order(self):
+        root_children = {}
+        l0 = _make_node(input="l0")
+        l0.children["Q0"] = _make_node(input="q0")
+        l0.children["Q1"] = _make_node(input="q1")
+        l1 = _make_node(input="l1")
+        root_children["L0"] = l0
+        root_children["L1"] = l1
+
+        paths = [p for p, _ in iter_dfs("r", root_children)]
+        assert paths == ["r.L0", "r.L0.Q0", "r.L0.Q1", "r.L1"]
+
+    def test_empty_children(self):
+        assert list(iter_dfs("r", {})) == []
+
+    def test_natural_sort_order(self):
+        children = {f"L{i}": _make_node(input=str(i)) for i in [10, 2, 1, 0]}
+        paths = [p for p, _ in iter_dfs("r", children)]
+        assert paths == ["r.L0", "r.L1", "r.L2", "r.L10"]
+
+
+# ---------------------------------------------------------------------------
+# TestIterRange
+# ---------------------------------------------------------------------------
+
+
+class TestIterRange:
+    def test_range_slice(self):
+        root = _make_root()
+        root.children["L0"] = _make_node(input="a")
+        root.children["L0"].children["Q0"] = _make_node(input="b")
+        root.children["L0"].children["Q0"].children["Q0"] = _make_node(input="c")
+
+        pairs = list(iter_range(root, "mystore.L0.Q0", "mystore.L0.Q0.Q0"))
+        assert len(pairs) == 2
+        assert [p for p, _ in pairs] == ["mystore.L0.Q0", "mystore.L0.Q0.Q0"]
+
+    def test_single_node_range(self):
+        root = _make_root()
+        root.children["L0"] = _make_node(input="a")
+        pairs = list(iter_range(root, "mystore.L0", "mystore.L0"))
+        assert len(pairs) == 1
+
+    def test_invalid_range_raises(self):
+        root = _make_root()
+        root.children["L0"] = _make_node(input="a")
+        root.children["L1"] = _make_node(input="b")
+        with pytest.raises(ValueError, match="not an ancestor"):
+            list(iter_range(root, "mystore.L1", "mystore.L0"))
+
+
+# ---------------------------------------------------------------------------
+# TestCollectTraversal
+# ---------------------------------------------------------------------------
+
+
+class TestCollectTraversal:
+    def test_collects_nodes_and_log(self):
+        root = _make_root()
+        root.children["L0"] = _make_node(input="hello", output="world")
+        root.children["L0"].children["Q0"] = _make_node(input="foo", output="bar")
+
+        nodes, tlog = collect_traversal(iter_ancestry(root, "mystore.L0.Q0"), "ancestry")
+
+        assert len(nodes) == 2
+        assert nodes[0].input == "hello"
+        assert nodes[1].input == "foo"
+        assert tlog.traversal_type == "ancestry"
+        assert tlog.nodes_visited == ["mystore.L0", "mystore.L0.Q0"]
+        assert tlog.total_content_chars == len("helloworld") + len("foobar")
+        assert tlog.total_tokens > 0
+
+    def test_empty_generator(self):
+        root = _make_root()
+        nodes, tlog = collect_traversal(iter_ancestry(root, "mystore"), "ancestry")
+        assert nodes == []
+        assert tlog.nodes_visited == []
+        assert tlog.total_tokens == 0
+
+    def test_dfs_collect(self):
+        children = {"L0": _make_node(input="a"), "L1": _make_node(input="b")}
+        nodes, tlog = collect_traversal(iter_dfs("r", children), "dfs")
+        assert len(nodes) == 2
+        assert tlog.traversal_type == "dfs"
+        assert len(tlog.nodes_visited) == 2

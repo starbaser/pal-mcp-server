@@ -1,12 +1,10 @@
 import json
-from pathlib import Path
 
 import pytest
 
 from clink import get_registry
 from clink.agents import AgentOutput
 from clink.parsers.base import ParsedCLIResponse
-from config import MAX_MCP_OUTPUT_TOKENS
 from tools.clink import CLinkTool
 
 
@@ -106,59 +104,6 @@ async def test_clink_tool_defaults_to_first_cli(monkeypatch):
     metadata = payload.get("metadata", {})
     assert metadata.get("cli_name") == tool._default_cli_name
     assert "events" in metadata.get("pruned_for_normal", [])
-
-
-@pytest.mark.asyncio
-async def test_clink_tool_offloads_large_output(monkeypatch, tmp_path):
-    tool = CLinkTool()
-
-    # Generate text that exceeds the token limit (~4 chars per token)
-    long_text = "word " * (MAX_MCP_OUTPUT_TOKENS + 1000)
-
-    async def fake_run(**kwargs):
-        return AgentOutput(
-            parsed=ParsedCLIResponse(
-                content=long_text,
-                metadata={"events": ["event1", "event2"], "session_id": "test-session-123"},
-            ),
-            sanitized_command=["codex"],
-            returncode=0,
-            stdout="{}",
-            stderr="",
-            duration_seconds=0.2,
-            parser_name="codex_jsonl",
-            output_file_content=None,
-        )
-
-    class DummyAgent:
-        async def run(self, **kwargs):
-            return await fake_run(**kwargs)
-
-    monkeypatch.setattr("tools.clink.create_agent", lambda client: DummyAgent())
-
-    arguments = {
-        "prompt": "Summarize",
-        "cwd": str(tmp_path),
-        "cli_name": tool._default_cli_name,
-        "absolute_file_paths": [],
-        "images": [],
-    }
-
-    result = await tool.execute(arguments)
-    payload = json.loads(result[0].text)
-    assert payload["status"] in {"success", "continuation_available"}
-    assert "exceeded the MCP output token limit" in payload["content"]
-
-    metadata = payload.get("metadata", {})
-    assert metadata.get("output_offloaded") is True
-    assert metadata.get("output_limit") == MAX_MCP_OUTPUT_TOKENS
-
-    # Verify file was written with correct content
-    output_file = Path(metadata["output_file"])
-    assert output_file.exists()
-    assert output_file.read_text(encoding="utf-8") == long_text
-    assert output_file.suffix == ".md"
-    assert output_file.parent == tmp_path / ".claude" / "output"
 
 
 @pytest.mark.asyncio

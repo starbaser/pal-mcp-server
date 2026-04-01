@@ -20,6 +20,8 @@ import json
 import os
 import re
 import tempfile
+from collections.abc import Generator
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -96,6 +98,56 @@ class PalRoot(BaseModel):
         if isinstance(data, dict) and "store_id" in data and "tree_path" not in data:
             data["tree_path"] = data.pop("store_id")
         return data
+
+
+# ---------------------------------------------------------------------------
+# Traversal log
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class TraversalLog:
+    """Records nodes visited during a PALTree traversal.
+
+    Accumulates paths, content size, and token counts as nodes are visited.
+    Every PALTree tool operation produces a TraversalLog included in the result.
+    """
+
+    traversal_type: str = ""
+    nodes_visited: list[str] = field(default_factory=list)
+    total_content_chars: int = 0
+    total_tokens: int = 0
+
+    def record(self, path: str, node: PalNode) -> None:
+        """Record a visited node, accumulating content stats."""
+        from utils.token_utils import count_tokens
+
+        self.nodes_visited.append(path)
+        content = (node.input or "") + (node.output or "")
+        chars = len(content)
+        self.total_content_chars += chars
+        self.total_tokens += count_tokens(content) if content else 0
+
+    def to_dict(self) -> dict:
+        """Serialize to dict for inclusion in ToolOutput metadata."""
+        return {
+            "traversal_type": self.traversal_type,
+            "traversal_order": self.nodes_visited,
+            "node_count": len(self.nodes_visited),
+            "content_chars": self.total_content_chars,
+            "tokens": self.total_tokens,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Sort utility (shared by generators and tool rendering)
+# ---------------------------------------------------------------------------
+
+
+def _natural_sort_key(key: str) -> tuple:
+    """Sort key that handles mixed alpha-numeric keys naturally: 0, 1, ..., 10."""
+    parts = re.split(r"(\d+)", key)
+    return tuple(int(p) if p.isdigit() else p for p in parts)
 
 
 # ---------------------------------------------------------------------------
@@ -274,20 +326,9 @@ def walk_palnode_ancestry(tree: PalRoot, tree_path: str) -> list[PalNode]:
 
     Pure parent-chain traversal: only direct ancestors are included.
     Returns an empty list when tree_path resolves to the root.
+    Delegates to iter_ancestry().
     """
-    _, segments = parse_tree_path(tree_path)
-    if not segments:
-        return []
-
-    ancestry: list[PalNode] = []
-    current: dict[str, PalNode] = tree.children
-    for seg in segments:
-        node = current.get(seg)
-        if node is None:
-            break
-        ancestry.append(node)
-        current = node.children
-    return ancestry
+    return [node for _, node in iter_ancestry(tree, tree_path)]
 
 
 def walk_palnode_range(tree: PalRoot, start_path: str, end_path: str) -> list[PalNode]:
@@ -295,19 +336,65 @@ def walk_palnode_range(tree: PalRoot, start_path: str, end_path: str) -> list[Pa
 
     The start node must appear in the ancestry of end_path as a direct tree
     ancestor. Raises ValueError when start is not reachable from end's ancestry.
+    Delegates to iter_range().
+    """
+    return [node for _, node in iter_range(tree, start_path, end_path)]
+
+
+# ---------------------------------------------------------------------------
+# Generator-based traversal primitives
+# ---------------------------------------------------------------------------
+
+
+def iter_ancestry(tree: PalRoot, tree_path: str) -> Generator[tuple[str, PalNode], None, None]:
+    """Yield (full_path, node) pairs from root down to the target node.
+
+    The shared traversal primitive for ancestry walks. Consumers use
+    collect_traversal() or iterate directly.
+    """
+    _, segments = parse_tree_path(tree_path)
+    if not segments:
+        return
+    current: dict[str, PalNode] = tree.children
+    for i, seg in enumerate(segments):
+        node = current.get(seg)
+        if node is None:
+            return
+        full_path = f"{tree.tree_path}.{'.'.join(segments[: i + 1])}"
+        yield full_path, node
+        current = node.children
+
+
+def iter_dfs(root_path: str, children: dict[str, PalNode]) -> Generator[tuple[str, PalNode], None, None]:
+    """Yield (full_path, node) pairs in depth-first order over a children dict.
+
+    The shared traversal primitive for subtree walks. Depth relative to
+    root_path is computable as: full_path.count('.') - root_path.count('.') - 1
+    """
+    for key in sorted(children, key=_natural_sort_key):
+        node = children[key]
+        full_path = f"{root_path}.{key}"
+        yield full_path, node
+        if node.children:
+            yield from iter_dfs(full_path, node.children)
+
+
+def iter_range(tree: PalRoot, start_path: str, end_path: str) -> Generator[tuple[str, PalNode], None, None]:
+    """Yield (full_path, node) pairs from start_path through end_path in ancestry.
+
+    start_path must be an ancestor of end_path. Raises ValueError otherwise.
     """
     start_node = resolve_palnode(tree, start_path)
     if start_node is None:
         raise ValueError(f"Start node not found: {start_path}")
-
     end_node = resolve_palnode(tree, end_path)
     if end_node is None:
         raise ValueError(f"End node not found: {end_path}")
 
-    ancestry = walk_palnode_ancestry(tree, end_path)
+    ancestry_pairs = list(iter_ancestry(tree, end_path))
 
     start_idx = None
-    for i, node in enumerate(ancestry):
+    for i, (_path, node) in enumerate(ancestry_pairs):
         if node is start_node:
             start_idx = i
             break
@@ -315,7 +402,23 @@ def walk_palnode_range(tree: PalRoot, start_path: str, end_path: str) -> list[Pa
     if start_idx is None:
         raise ValueError(f"Start node '{start_path}' is not an ancestor of end node '{end_path}'")
 
-    return ancestry[start_idx:]
+    yield from ancestry_pairs[start_idx:]
+
+
+def collect_traversal(
+    gen: Generator[tuple[str, PalNode], None, None],
+    traversal_type: str = "",
+) -> tuple[list[PalNode], TraversalLog]:
+    """Consume a traversal generator, returning (node_list, traversal_log).
+
+    The convenience wrapper that pairs any generator with a TraversalLog.
+    """
+    tlog = TraversalLog(traversal_type=traversal_type)
+    nodes: list[PalNode] = []
+    for path, node in gen:
+        tlog.record(path, node)
+        nodes.append(node)
+    return nodes, tlog
 
 
 def get_next_key(tree: PalRoot, parent_path: str, prefix: str = "") -> str:
@@ -412,14 +515,14 @@ def copy_palnode(tree: PalRoot, source_path: str, dest_parent: str, dest_key: st
     return add_palnode(tree, dest_parent, dest_key, clone)
 
 
-def fold_palnode_range(tree: PalRoot, start_path: str, end_path: str) -> PalNode:
+def fold_palnode_range(tree: PalRoot, start_path: str, end_path: str) -> tuple[PalNode, TraversalLog]:
     """Aggregate a range of ancestor nodes into a single new PalNode.
 
-    Does NOT insert the result — returns the folded node for the caller to place.
+    Does NOT insert the result — returns (folded_node, traversal_log).
     """
     from utils.palstore_builder import build_context_from_ancestry
 
-    nodes = walk_palnode_range(tree, start_path, end_path)
+    nodes, tlog = collect_traversal(iter_range(tree, start_path, end_path), "range")
     folded_history = build_context_from_ancestry(nodes)
 
     seen: set[str] = set()
@@ -431,7 +534,7 @@ def fold_palnode_range(tree: PalRoot, start_path: str, end_path: str) -> PalNode
                 files.append(f)
 
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    return PalNode(input=folded_history, files=files, timestamp=timestamp)
+    return PalNode(input=folded_history, files=files, timestamp=timestamp), tlog
 
 
 def find_palnode_ancestor(
@@ -454,7 +557,7 @@ def find_palnode_ancestor(
         node = current.get(seg)
         if node is None:
             break
-        current_path = f"{tree.tree_path}.{'.'.join(segments[:i + 1])}"
+        current_path = f"{tree.tree_path}.{'.'.join(segments[: i + 1])}"
         if predicate(seg, node):
             last_match = (current_path, node)
         current = node.children
@@ -465,20 +568,21 @@ def find_palnode_ancestor(
 def collect_palnode_files(node: PalNode) -> list[str]:
     """Recursively gather all unique file paths from a node and its descendants.
 
-    Preserves insertion order. DFS traversal.
+    Preserves insertion order. Uses iter_dfs for consistent traversal.
     """
     seen: set[str] = set()
     result: list[str] = []
 
-    def _collect(n: PalNode) -> None:
-        for f in n.files:
+    for f in node.files:
+        if f not in seen:
+            seen.add(f)
+            result.append(f)
+    for _, child in iter_dfs("", node.children):
+        for f in child.files:
             if f not in seen:
                 seen.add(f)
                 result.append(f)
-        for child in n.children.values():
-            _collect(child)
 
-    _collect(node)
     return result
 
 

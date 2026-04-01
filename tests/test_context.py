@@ -26,31 +26,31 @@ class TestPalInitTool:
         props = schema["properties"]
         required = schema["required"]
 
-        assert "tree_name" in props
-        assert "directory" in props
-        assert "tree_name" in required
-        assert "directory" in required
+        assert "tree_path" in props
+        assert "tree_name" not in props
+        assert "directory" not in props
+        assert "tree_path" in required
 
     def test_annotations_not_read_only(self):
         annotations = self.tool.get_annotations()
         assert annotations["readOnlyHint"] is False
 
     async def test_create_store(self):
-        with patch("utils.palstore.resolve_tree_location", return_value=None):
+        with patch("tools.palstore.os.path.exists", return_value=False):
             with patch("utils.palstore.save_tree") as mock_save:
                 with patch("utils.palstore.update_index") as mock_update:
-                    result = await self.tool.execute({"tree_name": "myproject", "directory": "/tmp/proj"})
+                    result = await self.tool.execute({"tree_path": "/tmp/proj:myproject"})
 
         assert len(result) == 1
         payload = json.loads(result[0].text)
         assert payload["status"] == "success"
         assert "myproject" in payload["content"]
         mock_save.assert_called_once()
-        mock_update.assert_called_once_with("/tmp/proj", "myproject")
+        mock_update.assert_called_once_with("/tmp/proj:myproject")
 
     async def test_collision_existing_store(self):
-        with patch("utils.palstore.resolve_tree_location", return_value=("/tmp/proj", "myproject")):
-            result = await self.tool.execute({"tree_name": "myproject", "directory": "/tmp/proj"})
+        with patch("tools.palstore.os.path.exists", return_value=True):
+            result = await self.tool.execute({"tree_path": "/tmp/proj:myproject"})
 
         assert len(result) == 1
         payload = json.loads(result[0].text)
@@ -58,7 +58,7 @@ class TestPalInitTool:
         assert "already exists" in payload["content"].lower()
 
     async def test_dots_in_name_rejected(self):
-        result = await self.tool.execute({"tree_name": "my.project", "directory": "/tmp/proj"})
+        result = await self.tool.execute({"tree_path": "/tmp:name.bad"})
 
         assert len(result) == 1
         payload = json.loads(result[0].text)
@@ -184,7 +184,7 @@ class TestPalListTool:
         from utils.palstore import PalRoot
 
         stores = [
-            PalRoot(tree_path="myproject", directory="/tmp/proj", created_at="2026-01-01T00:00:00Z"),
+            PalRoot(tree_path="/tmp/proj:myproject", created_at="2026-01-01T00:00:00Z"),
         ]
 
         with patch("utils.palstore.list_trees", return_value=stores):
@@ -328,7 +328,7 @@ class TestContextForkChain:
 class TestResolveTreeContinuation:
     """Tests for _resolve_tree_continuation in server.py."""
 
-    def _make_store(self, tmp_path, monkeypatch, tree_path: str, directory: str):
+    def _make_store(self, tmp_path, monkeypatch, tree_name: str, directory: str):
         """Create, save, and index a PalRoot under tmp_path."""
         import os
 
@@ -342,13 +342,13 @@ class TestResolveTreeContinuation:
 
         from datetime import datetime, timezone
 
+        canonical = f"{directory}:{tree_name}"
         store = PalRoot(
-            tree_path=tree_path,
-            directory=directory,
+            tree_path=canonical,
             created_at=datetime.now(timezone.utc).isoformat(),
         )
         save_tree(store)
-        update_index(directory, tree_path)
+        update_index(canonical)
         return store
 
     def test_returns_none_for_uuid(self, tmp_path, monkeypatch):
@@ -389,14 +389,14 @@ class TestResolveTreeContinuation:
         result = _resolve_tree_continuation("thinkdeep", args)
 
         # Stubs nest under latest L node, not at root
-        assert result == "myproject.L0.C0"
+        assert result == "/tmp/proj:myproject.L0.C0"
         assert args.get("_tree_context_built") is True
 
         bridge = args["_tree_bridge"]
-        assert bridge["tool_path"] == "myproject.L0.C0"
+        assert bridge["tool_path"] == "L0.C0"
         assert bridge["tool_name"] == "thinkdeep"
         assert bridge["mode"] == "continue"
-        assert bridge["tree"].tree_path == "myproject"
+        assert bridge["tree"].tree_path == "/tmp/proj:myproject"
 
     def test_continue_from_existing_node(self, tmp_path, monkeypatch):
         from datetime import datetime, timezone
@@ -426,11 +426,11 @@ class TestResolveTreeContinuation:
         result = _resolve_tree_continuation("thinkdeep", args)
 
         # Creates sibling C1 under L0 (walks up past C-prefixed ancestors)
-        assert result == "myproject.L0.C1"
+        assert result == "/tmp/proj:myproject.L0.C1"
         assert args.get("_tree_context_built") is True
 
         bridge = args["_tree_bridge"]
-        assert bridge["tool_path"] == "myproject.L0.C1"
+        assert bridge["tool_path"] == "L0.C1"
         assert bridge["tool_name"] == "thinkdeep"
         assert bridge["mode"] == "continue"
 
@@ -462,11 +462,11 @@ class TestResolveTreeContinuation:
         result = _resolve_tree_continuation("analyze", args)
 
         # Different tool creates sibling under same L node
-        assert result == "myproject.L0.C1"
+        assert result == "/tmp/proj:myproject.L0.C1"
         assert args.get("_tree_context_built") is True
 
         bridge = args["_tree_bridge"]
-        assert bridge["tool_path"] == "myproject.L0.C1"
+        assert bridge["tool_path"] == "L0.C1"
         assert bridge["tool_name"] == "analyze"
         assert bridge["mode"] == "continue"
 
@@ -497,10 +497,10 @@ class TestResolveTreeContinuation:
         result = _resolve_tree_continuation("thinkdeep", args)
 
         # Q0 is not numeric — stub created as child of Q0
-        assert result == "myproject.L0.Q0.C0"
+        assert result == "/tmp/proj:myproject.L0.Q0.C0"
 
         bridge = args["_tree_bridge"]
-        assert bridge["tool_path"] == "myproject.L0.Q0.C0"
+        assert bridge["tool_path"] == "L0.Q0.C0"
         assert bridge["mode"] == "continue"
 
     def test_child_index_increments(self, tmp_path, monkeypatch):
@@ -523,12 +523,12 @@ class TestResolveTreeContinuation:
         # First call — creates C0 under L0
         args1 = {"continuation_id": "myproject"}
         result1 = _resolve_tree_continuation("thinkdeep", args1)
-        assert result1 == "myproject.L0.C0"
+        assert result1 == "/tmp/proj:myproject.L0.C0"
 
         # Second call: C0 exists under L0, creates C1
         args2 = {"continuation_id": "myproject"}
         result2 = _resolve_tree_continuation("thinkdeep", args2)
-        assert result2 == "myproject.L0.C1"
+        assert result2 == "/tmp/proj:myproject.L0.C1"
 
 
 class TestInjectTreePathContinuation:
@@ -822,17 +822,16 @@ class TestPalUpsertTool:
         os.environ["PAL_STORAGE_DIR"] = str(tmp_path)
 
         store = PalRoot(
-            tree_path="test-upsert",
-            directory=str(tmp_path),
+            tree_path=f"{tmp_path}:test-upsert",
             created_at="2024-01-01T00:00:00Z",
             children={"0": PalNode(label="original", input="old input", output="old output")},
         )
         save_tree(store)
-        update_index(str(tmp_path), "test-upsert")
+        update_index(f"{tmp_path}:test-upsert")
 
         result = await self.tool.execute(
             {
-                "tree_path": "test-upsert.0",
+                "tree_path": f"{tmp_path}:test-upsert.0",
                 "label": "updated",
                 "output": "new output",
                 "metadata": {"key": "value"},
@@ -856,14 +855,13 @@ class TestPalUpsertTool:
         os.environ["PAL_STORAGE_DIR"] = str(tmp_path)
 
         store = PalRoot(
-            tree_path="test-root",
-            directory=str(tmp_path),
+            tree_path=f"{tmp_path}:test-root",
             created_at="2024-01-01T00:00:00Z",
         )
         save_tree(store)
-        update_index(str(tmp_path), "test-root")
+        update_index(f"{tmp_path}:test-root")
 
-        result = await self.tool.execute({"tree_path": "test-root"})
+        result = await self.tool.execute({"tree_path": f"{tmp_path}:test-root"})
         import json
 
         data = json.loads(result[0].text)
@@ -879,17 +877,16 @@ class TestPalUpsertTool:
         os.environ["PAL_STORAGE_DIR"] = str(tmp_path)
 
         store = PalRoot(
-            tree_path="test-child",
-            directory=str(tmp_path),
+            tree_path=f"{tmp_path}:test-child",
             created_at="2024-01-01T00:00:00Z",
             children={"L0": PalNode(label="layer")},
         )
         save_tree(store)
-        update_index(str(tmp_path), "test-child")
+        update_index(f"{tmp_path}:test-child")
 
         result = await self.tool.execute(
             {
-                "tree_path": "test-child.L0",
+                "tree_path": f"{tmp_path}:test-child.L0",
                 "insert": True,
                 "label": "manual query",
                 "input": "test input",
@@ -900,7 +897,7 @@ class TestPalUpsertTool:
 
         data = json.loads(result[0].text)
         assert data["status"] == "success"
-        assert "test-child.L0." in data["content"]
+        assert "L0." in data["content"]
 
     @pytest.mark.asyncio
     async def test_update_mode_metadata_merge(self, tmp_path):
@@ -910,18 +907,18 @@ class TestPalUpsertTool:
 
         os.environ["PAL_STORAGE_DIR"] = str(tmp_path)
 
+        canonical = f"{tmp_path}:test-merge"
         store = PalRoot(
-            tree_path="test-merge",
-            directory=str(tmp_path),
+            tree_path=canonical,
             created_at="2024-01-01T00:00:00Z",
             children={"0": PalNode(label="layer", metadata={"existing": "keep"})},
         )
         save_tree(store)
-        update_index(str(tmp_path), "test-merge")
+        update_index(canonical)
 
         result = await self.tool.execute(
             {
-                "tree_path": "test-merge.0",
+                "tree_path": f"{tmp_path}:test-merge.0",
                 "metadata": {"new_key": "new_value"},
             }
         )
@@ -932,7 +929,7 @@ class TestPalUpsertTool:
         assert data["status"] == "success"
 
         # Reload and verify merge
-        reloaded = load_tree(str(tmp_path), "test-merge")
+        reloaded = load_tree(canonical)
         node = reloaded.children["0"]
         assert node.metadata["existing"] == "keep"
         assert node.metadata["new_key"] == "new_value"
@@ -946,8 +943,7 @@ class TestPalUpsertTool:
         os.environ["PAL_STORAGE_DIR"] = str(tmp_path)
 
         store = PalRoot(
-            tree_path="test-dup",
-            directory=str(tmp_path),
+            tree_path=f"{tmp_path}:test-dup",
             created_at="2024-01-01T00:00:00Z",
             children={
                 "0": PalNode(
@@ -957,11 +953,11 @@ class TestPalUpsertTool:
             },
         )
         save_tree(store)
-        update_index(str(tmp_path), "test-dup")
+        update_index(f"{tmp_path}:test-dup")
 
         result = await self.tool.execute(
             {
-                "tree_path": "test-dup.0",
+                "tree_path": f"{tmp_path}:test-dup.0",
                 "insert": True,
                 "child_key": "0",
                 "label": "duplicate",

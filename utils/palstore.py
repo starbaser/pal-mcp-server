@@ -84,19 +84,47 @@ class PalNode(BaseModel):
 
 
 class PalRoot(BaseModel):
-    """Root of a PALTree JSON file."""
+    """Root of a PALTree JSON file.
+
+    tree_path is canonical: '{directory}:{tree_name}'
+    e.g. '/home/eigenmage/dev/projects/clearcode:clearcode-legacy'
+    """
 
     tree_path: str
-    directory: str
     label: str | None = None
     created_at: str
     children: dict[str, PalNode] = {}
 
+    @property
+    def directory(self) -> str:
+        """Project directory extracted from canonical tree_path."""
+        return self.tree_path.rsplit(":", 1)[0]
+
+    @property
+    def tree_name(self) -> str:
+        """Tree name extracted from canonical tree_path."""
+        return self.tree_path.rsplit(":", 1)[1]
+
     @model_validator(mode="before")
     @classmethod
-    def _migrate_store_id(cls, data):
-        if isinstance(data, dict) and "store_id" in data and "tree_path" not in data:
-            data["tree_path"] = data.pop("store_id")
+    def _migrate_legacy(cls, data):
+        """Migrate legacy formats to canonical '{directory}:{tree_name}' tree_path."""
+        if isinstance(data, dict):
+            if "store_id" in data and "tree_path" not in data:
+                data["tree_path"] = data.pop("store_id")
+
+            directory = data.pop("directory", None)
+            tp = data.get("tree_path", "")
+
+            if tp and ":" not in tp:
+                if directory:
+                    data["tree_path"] = f"{directory}:{tp}"
+
+            final_tp = data.get("tree_path", "")
+            if ":" in final_tp:
+                tree_name = final_tp.rsplit(":", 1)[1]
+                if "." in tree_name:
+                    raise ValueError(f"tree_name cannot contain periods: {tree_name!r}")
         return data
 
 
@@ -129,10 +157,35 @@ class TraversalLog:
         self.total_tokens += count_tokens(content) if content else 0
 
     def to_dict(self) -> dict:
-        """Serialize to dict for inclusion in ToolOutput metadata."""
+        """Serialize to dict for inclusion in ToolOutput metadata.
+
+        traversal_order is compact: ['tree_name:L1-L2-L3-L12.F0-L12.Q0']
+        One entry per tree. Nodes joined by '-', segments within by '.'.
+        """
+        tree_chains: dict[str, list[str]] = {}
+        for full_path in self.nodes_visited:
+            if ":" in full_path:
+                after_colon = full_path.rsplit(":", 1)[1]
+                if "." in after_colon:
+                    tree_name, node_path = after_colon.split(".", 1)
+                else:
+                    tree_name, node_path = after_colon, ""
+            else:
+                parts = full_path.split(".", 1)
+                tree_name = parts[0]
+                node_path = parts[1] if len(parts) > 1 else ""
+            if tree_name not in tree_chains:
+                tree_chains[tree_name] = []
+            if node_path:
+                tree_chains[tree_name].append(node_path)
+
+        traversal_order = [
+            f"{name}:{'-'.join(nodes)}" if nodes else name for name, nodes in tree_chains.items()
+        ]
+
         return {
             "traversal_type": self.traversal_type,
-            "traversal_order": self.nodes_visited,
+            "traversal_order": traversal_order,
             "node_count": len(self.nodes_visited),
             "content_chars": self.total_content_chars,
             "tokens": self.total_tokens,
@@ -165,9 +218,10 @@ def get_tree_dir(directory: str) -> str:
     return os.path.join(_CTX_DIR, encode_directory(directory))
 
 
-def get_tree_file_path(directory: str, tree_path: str) -> str:
-    """Return the full path to a tree's JSON file."""
-    return os.path.join(get_tree_dir(directory), f"{tree_path}.json")
+def get_tree_file_path(canonical: str) -> str:
+    """Return the full path to a tree's JSON file from a canonical tree_path."""
+    directory, tree_name = canonical.rsplit(":", 1)
+    return os.path.join(get_tree_dir(directory), f"{tree_name}.json")
 
 
 # ---------------------------------------------------------------------------
@@ -190,9 +244,9 @@ def _atomic_write(path: str, data: dict | BaseModel) -> None:
 # ---------------------------------------------------------------------------
 
 
-def load_tree(directory: str, tree_path: str) -> PalRoot | None:
-    """Load a PALTree JSON file. Return None if the file does not exist or is corrupt."""
-    path = get_tree_file_path(directory, tree_path)
+def load_tree(canonical: str) -> PalRoot | None:
+    """Load a PALTree JSON file from a canonical tree_path. Return None if not found or corrupt."""
+    path = get_tree_file_path(canonical)
     if not os.path.exists(path):
         return None
     try:
@@ -204,34 +258,36 @@ def load_tree(directory: str, tree_path: str) -> PalRoot | None:
 
 def save_tree(tree: PalRoot) -> None:
     """Atomically persist a PalRoot to disk."""
-    path = get_tree_file_path(tree.directory, tree.tree_path)
+    path = get_tree_file_path(tree.tree_path)
     _atomic_write(path, tree)
 
 
-def rename_tree(directory: str, old_id: str, new_id: str) -> None:
+def rename_tree(canonical: str, new_name: str) -> None:
     """Rename a root PALTree: update tree_path, rename file on disk, update index and armed state."""
-    tree = load_tree(directory, old_id)
+    tree = load_tree(canonical)
     if tree is None:
-        raise KeyError(f"PALTree not found: {old_id}")
-    if "." in new_id:
+        raise KeyError(f"PALTree not found: {canonical}")
+    if "." in new_name:
         raise ValueError("Tree names cannot contain dots.")
 
-    tree.tree_path = new_id
+    directory = tree.directory
+    new_canonical = f"{directory}:{new_name}"
+    tree.tree_path = new_canonical
     save_tree(tree)
 
-    old_path = get_tree_file_path(directory, old_id)
+    old_path = get_tree_file_path(canonical)
     if os.path.exists(old_path):
         os.remove(old_path)
 
     index = load_index()
-    index["trees"].pop(old_id, None)
+    index["trees"].pop(canonical, None)
     encoded = encode_directory(directory)
-    index["trees"][new_id] = encoded
+    index["trees"][new_canonical] = encoded
     save_index(index)
 
     armed = load_armed()
-    if armed.get(directory) == old_id:
-        armed[directory] = new_id
+    if armed.get(directory) == canonical:
+        armed[directory] = new_canonical
         save_armed(armed)
 
 
@@ -240,16 +296,16 @@ def rename_tree(directory: str, old_id: str, new_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def resolve_palnode(tree: PalRoot, tree_path: str) -> PalNode | None:
-    """Walk a dot-delimited tree_path to a node.
+def resolve_node(tree: PalRoot, node_path: str) -> PalNode | None:
+    """Walk a dot-delimited node_path to a PalNode within a tree.
 
-    The root tree_path prefix is stripped before traversal. Returns None for
-    a path that resolves to the root itself (no segments after root).
+    node_path is pure segments (e.g. 'L1.Q0'), no tree prefix.
+    Returns None for empty node_path (root) or not found.
     """
-    _, segments = parse_tree_path(tree_path)
-    if not segments:
+    if not node_path:
         return None
 
+    segments = node_path.split(".")
     current: dict[str, PalNode] = tree.children
     node: PalNode | None = None
     for seg in segments:
@@ -258,6 +314,18 @@ def resolve_palnode(tree: PalRoot, tree_path: str) -> PalNode | None:
             return None
         current = node.children
     return node
+
+
+def resolve_palnode(tree: PalRoot, combined_path: str) -> PalNode | None:
+    """DEPRECATED: Use resolve_node(tree, node_path) instead.
+
+    Accepts a combined path (tree_name.L1.Q0) and strips the tree prefix.
+    Kept for backward compatibility during migration.
+    """
+    _, segments = parse_tree_path(combined_path)
+    if not segments:
+        return None
+    return resolve_node(tree, ".".join(segments))
 
 
 def _classify_key(key: str) -> str:
@@ -287,58 +355,55 @@ _VALID_CHILDREN: dict[str, set[str]] = {
 }
 
 
-def add_palnode(tree: PalRoot, parent_path: str, child_key: str, node: PalNode) -> str:
-    """Insert a child node at parent_path and return the full path to the new node.
+def add_palnode(tree: PalRoot, parent_node_path: str, child_key: str, node: PalNode) -> str:
+    """Insert a child node and return the full canonical path to the new node.
 
-    Validates the insertion against the PALTree grammar before inserting.
-    When parent_path equals the tree root id, the node is added directly to
-    tree.children. Otherwise the parent is resolved and the node is appended to
-    its children dict.
+    parent_node_path is pure node segments (e.g. 'L1', 'L1.Q0'). Empty string
+    means the tree root. Validates the insertion against the PALTree grammar.
     """
     child_type = _classify_key(child_key)
 
-    if parent_path == tree.tree_path:
+    if not parent_node_path:
         parent_type = "ρ"
     else:
-        _, segments = parse_tree_path(parent_path)
-        parent_type = _classify_key(segments[-1]) if segments else "ρ"
+        segments = parent_node_path.split(".")
+        parent_type = _classify_key(segments[-1])
 
     allowed = _VALID_CHILDREN.get(parent_type, set())
     if child_type not in allowed:
         raise ValueError(
             f"PALTree grammar violation: {parent_type}→{child_type} "
-            f"(key '{child_key}' cannot be a child of '{parent_path}'). "
+            f"(key '{child_key}' cannot be a child of '{parent_node_path or 'root'}'). "
             f"Allowed child types for {parent_type}: {sorted(allowed)}"
         )
 
-    if parent_path == tree.tree_path:
+    if not parent_node_path:
         tree.children[child_key] = node
+        return f"{tree.tree_path}.{child_key}"
     else:
-        parent = resolve_palnode(tree, parent_path)
+        parent = resolve_node(tree, parent_node_path)
         if parent is None:
-            raise KeyError(f"parent path not found in tree: {parent_path}")
+            raise KeyError(f"parent path not found in tree: {parent_node_path}")
         parent.children[child_key] = node
-    return f"{parent_path}.{child_key}"
+        return f"{tree.tree_path}.{parent_node_path}.{child_key}"
 
 
-def walk_palnode_ancestry(tree: PalRoot, tree_path: str) -> list[PalNode]:
+def walk_palnode_ancestry(tree: PalRoot, node_path: str) -> list[PalNode]:
     """Return nodes from the root down to (and including) the target.
 
-    Pure parent-chain traversal: only direct ancestors are included.
-    Returns an empty list when tree_path resolves to the root.
-    Delegates to iter_ancestry().
+    node_path is pure segments (e.g. 'L1.Q0'). Returns an empty list for
+    empty node_path (root). Delegates to iter_ancestry().
     """
-    return [node for _, node in iter_ancestry(tree, tree_path)]
+    return [node for _, node in iter_ancestry(tree, node_path)]
 
 
-def walk_palnode_range(tree: PalRoot, start_path: str, end_path: str) -> list[PalNode]:
-    """Return the ancestor chain from start_path through end_path (inclusive).
+def walk_palnode_range(tree: PalRoot, start_node_path: str, end_node_path: str) -> list[PalNode]:
+    """Return the ancestor chain from start through end (inclusive).
 
-    The start node must appear in the ancestry of end_path as a direct tree
-    ancestor. Raises ValueError when start is not reachable from end's ancestry.
+    Both paths are pure node segments. The start must be an ancestor of end.
     Delegates to iter_range().
     """
-    return [node for _, node in iter_range(tree, start_path, end_path)]
+    return [node for _, node in iter_range(tree, start_node_path, end_node_path)]
 
 
 # ---------------------------------------------------------------------------
@@ -346,15 +411,15 @@ def walk_palnode_range(tree: PalRoot, start_path: str, end_path: str) -> list[Pa
 # ---------------------------------------------------------------------------
 
 
-def iter_ancestry(tree: PalRoot, tree_path: str) -> Generator[tuple[str, PalNode], None, None]:
+def iter_ancestry(tree: PalRoot, node_path: str) -> Generator[tuple[str, PalNode], None, None]:
     """Yield (full_path, node) pairs from root down to the target node.
 
-    The shared traversal primitive for ancestry walks. Consumers use
-    collect_traversal() or iterate directly.
+    node_path is pure segments (e.g. 'L1.Q0'). full_path includes the
+    canonical tree prefix for display/logging.
     """
-    _, segments = parse_tree_path(tree_path)
-    if not segments:
+    if not node_path:
         return
+    segments = node_path.split(".")
     current: dict[str, PalNode] = tree.children
     for i, seg in enumerate(segments):
         node = current.get(seg)
@@ -379,19 +444,19 @@ def iter_dfs(root_path: str, children: dict[str, PalNode]) -> Generator[tuple[st
             yield from iter_dfs(full_path, node.children)
 
 
-def iter_range(tree: PalRoot, start_path: str, end_path: str) -> Generator[tuple[str, PalNode], None, None]:
-    """Yield (full_path, node) pairs from start_path through end_path in ancestry.
+def iter_range(tree: PalRoot, start_node_path: str, end_node_path: str) -> Generator[tuple[str, PalNode], None, None]:
+    """Yield (full_path, node) pairs from start through end in ancestry.
 
-    start_path must be an ancestor of end_path. Raises ValueError otherwise.
+    Both are pure node segments. start must be an ancestor of end.
     """
-    start_node = resolve_palnode(tree, start_path)
+    start_node = resolve_node(tree, start_node_path)
     if start_node is None:
-        raise ValueError(f"Start node not found: {start_path}")
-    end_node = resolve_palnode(tree, end_path)
+        raise ValueError(f"Start node not found: {start_node_path}")
+    end_node = resolve_node(tree, end_node_path)
     if end_node is None:
-        raise ValueError(f"End node not found: {end_path}")
+        raise ValueError(f"End node not found: {end_node_path}")
 
-    ancestry_pairs = list(iter_ancestry(tree, end_path))
+    ancestry_pairs = list(iter_ancestry(tree, end_node_path))
 
     start_idx = None
     for i, (_path, node) in enumerate(ancestry_pairs):
@@ -400,7 +465,7 @@ def iter_range(tree: PalRoot, start_path: str, end_path: str) -> Generator[tuple
             break
 
     if start_idx is None:
-        raise ValueError(f"Start node '{start_path}' is not an ancestor of end node '{end_path}'")
+        raise ValueError(f"Start node '{start_node_path}' is not an ancestor of end node '{end_node_path}'")
 
     yield from ancestry_pairs[start_idx:]
 
@@ -528,16 +593,16 @@ def calc_traversal(
                 current_node = child
 
 
-def get_next_key(tree: PalRoot, parent_path: str, prefix: str = "") -> str:
-    """Compute the next available child key for a given prefix at parent_path.
+def get_next_key(tree: PalRoot, parent_node_path: str, prefix: str = "") -> str:
+    """Compute the next available child key for a given prefix.
 
+    parent_node_path is pure segments ('' for root).
     Any string prefix is accepted. Keys are auto-incremented from 0.
-    Empty prefix produces pure numeric keys (0, 1, 2, ...).
     """
-    if parent_path == tree.tree_path:
+    if not parent_node_path:
         siblings = tree.children
     else:
-        parent = resolve_palnode(tree, parent_path)
+        parent = resolve_node(tree, parent_node_path)
         siblings = parent.children if parent is not None else {}
 
     if prefix:
@@ -557,22 +622,21 @@ def get_next_key(tree: PalRoot, parent_path: str, prefix: str = "") -> str:
 def detach_palnode(tree: PalRoot, node_path: str) -> PalNode:
     """Remove a node from its parent and return it. Siblings are not renumbered.
 
-    The detached node retains its full subtree intact. Raises ValueError if
-    node_path resolves to the root (no segments). Raises KeyError if not found.
+    node_path is pure segments (e.g. 'L1.Q0'). Raises ValueError if empty.
     """
-    _, segments = parse_tree_path(node_path)
-    if not segments:
-        raise ValueError(f"Cannot detach root tree: {node_path}")
+    if not node_path:
+        raise ValueError("Cannot detach root tree")
 
+    segments = node_path.split(".")
     target_key = segments[-1]
 
     if len(segments) == 1:
         parent_container = tree.children
     else:
-        parent_path_str = f"{tree.tree_path}.{'.'.join(segments[:-1])}"
-        parent_node = resolve_palnode(tree, parent_path_str)
+        parent_node_path = ".".join(segments[:-1])
+        parent_node = resolve_node(tree, parent_node_path)
         if parent_node is None:
-            raise KeyError(f"Parent path not found: {parent_path_str}")
+            raise KeyError(f"Parent path not found: {parent_node_path}")
         parent_container = parent_node.children
 
     if target_key not in parent_container:
@@ -581,55 +645,54 @@ def detach_palnode(tree: PalRoot, node_path: str) -> PalNode:
     return parent_container.pop(target_key)
 
 
-def move_palnode(tree: PalRoot, source_path: str, dest_parent: str, dest_key: str) -> str:
-    """Detach a node and reattach at a new location. Returns the new dot-path.
+def move_palnode(tree: PalRoot, source_node_path: str, dest_node_path: str, dest_key: str) -> str:
+    """Detach a node and reattach at a new location. Returns the new full canonical path.
 
-    If add_palnode raises (validation failure), the node is reinserted at its
-    original location and the exception is re-raised.
+    Both paths are pure node segments. dest_node_path is '' for root.
+    Rollback on failure.
     """
-    _, src_segments = parse_tree_path(source_path)
-    if not src_segments:
-        raise ValueError(f"Cannot move root tree: {source_path}")
+    if not source_node_path:
+        raise ValueError("Cannot move root tree")
 
-    original_key = src_segments[-1]
-    if len(src_segments) == 1:
+    segments = source_node_path.split(".")
+    original_key = segments[-1]
+    if len(segments) == 1:
         original_parent_container = tree.children
     else:
-        orig_parent_path = f"{tree.tree_path}.{'.'.join(src_segments[:-1])}"
-        orig_parent_node = resolve_palnode(tree, orig_parent_path)
+        parent_node_path = ".".join(segments[:-1])
+        orig_parent_node = resolve_node(tree, parent_node_path)
         if orig_parent_node is None:
-            raise KeyError(f"Source parent not found: {orig_parent_path}")
+            raise KeyError(f"Source parent not found: {parent_node_path}")
         original_parent_container = orig_parent_node.children
 
-    node = detach_palnode(tree, source_path)
+    node = detach_palnode(tree, source_node_path)
     try:
-        return add_palnode(tree, dest_parent, dest_key, node)
+        return add_palnode(tree, dest_node_path, dest_key, node)
     except Exception:
         original_parent_container[original_key] = node
         raise
 
 
-def copy_palnode(tree: PalRoot, source_path: str, dest_parent: str, dest_key: str) -> str:
-    """Deep copy a node to a new location. Returns the new dot-path.
+def copy_palnode(tree: PalRoot, source_node_path: str, dest_node_path: str, dest_key: str) -> str:
+    """Deep copy a node to a new location. Returns the new full canonical path.
 
-    The original node is unchanged. Raises KeyError if source_path is not found.
-    Raises ValueError if the destination is structurally invalid.
+    Both paths are pure node segments. dest_node_path is '' for root.
     """
-    source = resolve_palnode(tree, source_path)
+    source = resolve_node(tree, source_node_path)
     if source is None:
-        raise KeyError(f"Source node not found: {source_path}")
+        raise KeyError(f"Source node not found: {source_node_path}")
     clone = source.model_copy(deep=True)
-    return add_palnode(tree, dest_parent, dest_key, clone)
+    return add_palnode(tree, dest_node_path, dest_key, clone)
 
 
-def fold_palnode_range(tree: PalRoot, start_path: str, end_path: str) -> tuple[PalNode, TraversalLog]:
+def fold_palnode_range(tree: PalRoot, start_node_path: str, end_node_path: str) -> tuple[PalNode, TraversalLog]:
     """Aggregate a range of ancestor nodes into a single new PalNode.
 
-    Does NOT insert the result — returns (folded_node, traversal_log).
+    Both paths are pure node segments. Does NOT insert the result.
     """
     from utils.palstore_builder import build_context_from_ancestry
 
-    nodes, tlog = collect_traversal(iter_range(tree, start_path, end_path), "range")
+    nodes, tlog = collect_traversal(iter_range(tree, start_node_path, end_node_path), "range")
     folded_history = build_context_from_ancestry(nodes)
 
     seen: set[str] = set()
@@ -649,14 +712,13 @@ def find_palnode_ancestor(
 ) -> tuple[str, PalNode] | None:
     """Walk from root toward node_path, returning the deepest ancestor matching predicate.
 
-    The predicate receives (segment_key, node) for each ancestor in the path.
-    Returns (path, node) for the deepest match, or None if no match is found.
-    The target node itself is not checked — only its ancestors.
+    node_path is pure segments. The predicate receives (segment_key, node).
+    Returns (full_path, node) for the deepest match, or None. Target itself is not checked.
     """
-    _, segments = parse_tree_path(node_path)
-    if not segments:
+    if not node_path:
         return None
 
+    segments = node_path.split(".")
     last_match: tuple[str, PalNode] | None = None
     current: dict[str, PalNode] = tree.children
 
@@ -710,31 +772,28 @@ def _get_key_index(key: str) -> int:
 def delete_palnode_with_shift(tree: PalRoot, node_path: str) -> dict:
     """Delete a node and shift subsequent same-prefix siblings down by one.
 
-    Accepts a full dot-path like 'myproject.L5' or 'myproject.L2.F1'.
+    node_path is pure segments (e.g. 'L5', 'L2.F1').
     Returns a dict with:
-      - deleted: the full path that was removed
-      - shifted: list of (old_path, new_path) tuples
+      - deleted: the node_path that was removed
+      - shifted: list of (old_node_path, new_node_path) tuples
       - had_children: bool
-
-    Raises KeyError if the node does not exist.
-    Raises ValueError if the path resolves to a root (no segments).
     """
-    _, segments = parse_tree_path(node_path)
-    if not segments:
-        raise ValueError(f"Cannot delete root tree: {node_path}")
+    if not node_path:
+        raise ValueError("Cannot delete root tree")
 
+    segments = node_path.split(".")
     target_key = segments[-1]
 
     if len(segments) == 1:
         parent_container = tree.children
-        parent_path = tree.tree_path
+        parent_path = ""
     else:
-        parent_path_str = f"{tree.tree_path}.{'.'.join(segments[:-1])}"
-        parent_node = resolve_palnode(tree, parent_path_str)
+        parent_node_path = ".".join(segments[:-1])
+        parent_node = resolve_node(tree, parent_node_path)
         if parent_node is None:
-            raise KeyError(f"Parent path not found: {parent_path_str}")
+            raise KeyError(f"Parent path not found: {parent_node_path}")
         parent_container = parent_node.children
-        parent_path = parent_path_str
+        parent_path = parent_node_path
 
     if target_key not in parent_container:
         raise KeyError(f"Node not found: {node_path}")
@@ -758,7 +817,9 @@ def delete_palnode_with_shift(tree: PalRoot, node_path: str) -> dict:
         new_key = f"{prefix}{old_index - 1}"
         node = parent_container.pop(old_key)
         parent_container[new_key] = node
-        shifted.append((f"{parent_path}.{old_key}", f"{parent_path}.{new_key}"))
+        old_np = f"{parent_path}.{old_key}" if parent_path else old_key
+        new_np = f"{parent_path}.{new_key}" if parent_path else new_key
+        shifted.append((old_np, new_np))
 
     return {"deleted": node_path, "shifted": shifted, "had_children": had_children}
 
@@ -788,12 +849,13 @@ def save_index(data: dict) -> None:
     _atomic_write(_INDEX_PATH, data)
 
 
-def update_index(directory: str, tree_path: str) -> None:
-    """Add or update an entry in the tree index."""
+def update_index(canonical: str) -> None:
+    """Add or update an entry in the tree index from a canonical tree_path."""
+    directory, _ = canonical.rsplit(":", 1)
     index = load_index()
     encoded = encode_directory(directory)
     index["directories"][directory] = encoded
-    index["trees"][tree_path] = encoded
+    index["trees"][canonical] = encoded
     save_index(index)
 
 
@@ -810,55 +872,84 @@ def rebuild_index() -> dict:
         for file_entry in os.scandir(entry.path):
             if not file_entry.name.endswith(".json"):
                 continue
-            tree_path = file_entry.name[:-5]
             try:
                 with open(file_entry.path) as f:
                     data = json.load(f)
-                directory = data.get("directory", "")
-            except (json.JSONDecodeError, OSError):
+                tree = PalRoot.model_validate(data)
+                canonical = tree.tree_path
+                directory = tree.directory
+            except (json.JSONDecodeError, OSError, ValueError):
                 continue
             if directory:
                 index["directories"][directory] = encoded
-            index["trees"][tree_path] = encoded
+            index["trees"][canonical] = encoded
 
     save_index(index)
     return index
 
 
-def resolve_tree_location(tree_path: str) -> tuple[str, str] | None:
-    """Look up a tree_path in the index and return (directory, root_tree_path).
+def resolve_tree_path(raw: str) -> str:
+    """Resolve a raw tree identifier to a canonical tree_path.
 
-    Parses the root segment from tree_path, resolves via index, falls back to
-    scanning if not found. Returns None when the PALTree does not exist.
+    Accepts:
+      '/abs/path:name'  -> canonical, returned as-is (validated to exist)
+      'name'            -> shorthand, resolved via index scan (must be unique)
+
+    Raises KeyError if not found. Raises ValueError if ambiguous.
     """
-    root, _ = parse_tree_path(tree_path)
-    index = load_index()
-    encoded = index["trees"].get(root)
+    if ":" in raw:
+        if os.path.exists(get_tree_file_path(raw)):
+            return raw
+        raise KeyError(f"PALTree not found: {raw}")
 
-    if encoded:
-        # Reverse-lookup directory from encoded
-        directory = next((d for d, e in index["directories"].items() if e == encoded), None)
-        if directory and os.path.exists(get_tree_file_path(directory, root)):
-            return directory, root
+    # Shorthand: scan index for matching tree_name
+    index = load_index()
+    matches = []
+    for canonical in index["trees"]:
+        if ":" in canonical:
+            tree_name = canonical.rsplit(":", 1)[1]
+            if tree_name == raw:
+                matches.append(canonical)
+        elif canonical == raw:
+            matches.append(canonical)
+
+    if len(matches) == 1:
+        return matches[0]
+    elif len(matches) > 1:
+        raise ValueError(f"Ambiguous tree name '{raw}' matches {len(matches)} trees: " + ", ".join(matches))
 
     # Fall back to scanning all per-directory folders
     if not os.path.isdir(_CTX_DIR):
-        return None
+        raise KeyError(f"PALTree not found: {raw}")
+
     for entry in os.scandir(_CTX_DIR):
         if not entry.is_dir():
             continue
-        candidate = os.path.join(entry.path, f"{root}.json")
+        candidate = os.path.join(entry.path, f"{raw}.json")
         if os.path.exists(candidate):
             try:
                 with open(candidate) as f:
                     data = json.load(f)
-                directory = data.get("directory", "")
-                if directory:
-                    update_index(directory, root)
-                    return directory, root
-            except (json.JSONDecodeError, OSError):
+                tree = PalRoot.model_validate(data)
+                update_index(tree.tree_path)
+                return tree.tree_path
+            except (json.JSONDecodeError, OSError, ValueError):
                 continue
-    return None
+
+    raise KeyError(f"PALTree not found: {raw}")
+
+
+def resolve_tree_location(tree_path: str) -> tuple[str, str] | None:
+    """DEPRECATED: Use resolve_tree_path() instead.
+
+    Returns (directory, tree_name) for backward compatibility, or None if not found.
+    """
+    try:
+        canonical = resolve_tree_path(tree_path)
+        directory, tree_name = canonical.rsplit(":", 1)
+        return directory, tree_name
+    except (KeyError, ValueError):
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -866,25 +957,41 @@ def resolve_tree_location(tree_path: str) -> tuple[str, str] | None:
 # ---------------------------------------------------------------------------
 
 
-def parse_tree_path(tree_path: str) -> tuple[str, list[str]]:
-    """Split a dotted tree_path into (root, [segments]).
+def parse_tree_path(raw: str) -> tuple[str, list[str]]:
+    """Split a combined path into (canonical_tree_path, node_segments).
 
-    Looks up the root in the index first for an exact match. Fallback: first
-    dot-split segment is taken as the root.
+    Accepts:
+      '/abs/path:name.L1.Q0' -> ('/abs/path:name', ['L1', 'Q0'])
+      '/abs/path:name'       -> ('/abs/path:name', [])
+      'name.L1.Q0'           -> (resolve_tree_path('name'), ['L1', 'Q0'])
+      'name'                 -> (resolve_tree_path('name'), [])
+
+    Since periods are forbidden in tree_name, the first '.' after the
+    tree identifier always starts the node segments.
     """
-    if "." not in tree_path:
-        return tree_path, []
+    if not raw:
+        return "", []
 
-    index = load_index()
-    parts = tree_path.split(".")
-    # Greedily find the longest root that exists in the index
-    for i in range(len(parts), 0, -1):
-        candidate = ".".join(parts[:i])
-        if candidate in index["trees"]:
-            return candidate, parts[i:]
-
-    # Default: first segment is root
-    return parts[0], parts[1:]
+    if ":" in raw:
+        colon_idx = raw.rindex(":")
+        after_colon = raw[colon_idx + 1 :]
+        if "." in after_colon:
+            dot_idx = after_colon.index(".")
+            tree_path = raw[: colon_idx + 1 + dot_idx]
+            node_str = after_colon[dot_idx + 1 :]
+            return tree_path, node_str.split(".") if node_str else []
+        else:
+            return raw, []
+    else:
+        if "." in raw:
+            dot_idx = raw.index(".")
+            tree_name = raw[:dot_idx]
+            node_str = raw[dot_idx + 1 :]
+            canonical = resolve_tree_path(tree_name)
+            return canonical, node_str.split(".") if node_str else []
+        else:
+            canonical = resolve_tree_path(raw)
+            return canonical, []
 
 
 # ---------------------------------------------------------------------------
@@ -947,10 +1054,12 @@ def list_trees(directory: str | None = None) -> list[PalRoot]:
         roots: list[PalRoot] = []
         for entry in os.scandir(folder):
             if entry.name.endswith(".json"):
-                tree_path = entry.name[:-5]
-                tree = load_tree(directory, tree_path)
-                if tree is not None:
+                try:
+                    with open(entry.path) as f:
+                        tree = PalRoot.model_validate(json.load(f))
                     roots.append(tree)
+                except (json.JSONDecodeError, OSError, ValueError):
+                    continue
         return roots
 
     results: list[PalRoot] = []
@@ -985,10 +1094,11 @@ def list_all_directories() -> list[str]:
                         try:
                             with open(file_entry.path) as f:
                                 data = json.load(f)
-                            directory = data.get("directory", "")
+                            tree = PalRoot.model_validate(data)
+                            directory = tree.directory
                             if directory:
                                 dirs.add(directory)
-                        except (json.JSONDecodeError, OSError):
+                        except (json.JSONDecodeError, OSError, ValueError):
                             continue
 
     return sorted(dirs)

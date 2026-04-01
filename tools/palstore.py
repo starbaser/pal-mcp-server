@@ -19,9 +19,13 @@ from .simple.base import SimpleTool
 logger = logging.getLogger(__name__)
 
 TREE_PATH_DESCRIPTION = (
-    "Dot-path to a PALNode in a PALTree. Root trees use a plain name (e.g. 'myproject'). "
-    "Child nodes extend with dot notation (e.g. 'myproject.L0', 'myproject.L0.Q0'). "
-    "Use treelist to discover tree paths. Returned by newtree, addtreelayer, querynode, and forknode."
+    "Identifies a PALTree. Canonical: '/abs/path:tree-name'. "
+    "Shorthand: 'tree-name' (resolved if unique). Use treelist to discover trees."
+)
+
+NODE_PATH_DESCRIPTION = (
+    "Dot-path to a node within the tree (e.g. 'L0', 'L0.Q0', 'L3.F1.Q2'). "
+    "Use 'L' (no number) as shorthand for the last layer."
 )
 
 
@@ -132,20 +136,17 @@ class PalTreeBaseTool(SimpleTool):
         return tool_output
 
     def _resolve_tree(self, tree_path: str):
-        """Load tree for a given tree_path. Returns (tree, root_id).
+        """Load tree for a given tree_path. Returns (tree, canonical).
 
-        Raises KeyError if tree not found.
+        tree_path can be canonical or shorthand. Raises KeyError if not found.
         """
-        from utils.palstore import load_tree, resolve_tree_location
+        from utils.palstore import load_tree, resolve_tree_path
 
-        location = resolve_tree_location(tree_path)
-        if location is None:
-            raise KeyError(f'PALTree "{tree_path}" not found.')
-        directory, root_id = location
-        tree = load_tree(directory, root_id)
+        canonical = resolve_tree_path(tree_path)
+        tree = load_tree(canonical)
         if tree is None:
-            raise KeyError(f'PALTree file not found: "{root_id}".')
-        return tree, root_id
+            raise KeyError(f'PALTree file not found: "{canonical}".')
+        return tree, canonical
 
 
 # ---------------------------------------------------------------------------
@@ -168,20 +169,15 @@ class PalInitTool(BaseTool):
         return {
             "type": "object",
             "properties": {
-                "tree_name": {
+                "tree_path": {
                     "type": "string",
                     "description": (
-                        "Unique name for the PALTree (e.g. 'myproject'). "
-                        "No dots allowed — dots are reserved for dot-path child notation. "
-                        "Becomes the root tree_path."
+                        "Canonical tree_path: '/abs/path/to/project:tree-name'. "
+                        "Colon separates directory from tree name. Periods forbidden in tree name."
                     ),
                 },
-                "directory": {
-                    "type": "string",
-                    "description": "Absolute path to the project directory this tree is associated with.",
-                },
             },
-            "required": ["tree_name", "directory"],
+            "required": ["tree_path"],
             "additionalProperties": False,
         }
 
@@ -212,47 +208,54 @@ class PalInitTool(BaseTool):
         from tools.models import ToolOutput
         from utils.palstore import PalRoot, TraversalLog, save_tree, update_index
 
-        tree_name = arguments.get("tree_name", "")
-        directory = arguments.get("directory", "")
+        tree_path = arguments.get("tree_path", "")
 
-        if "." in tree_name:
+        if ":" not in tree_path:
             error = ToolOutput(
                 status="error",
-                content="tree_name must not contain dots. Dots are reserved for path notation.",
+                content="tree_path must be canonical: '/abs/path:tree-name' (colon required).",
                 content_type="text",
             )
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        from utils.palstore import resolve_tree_location
+        directory, tree_name = tree_path.rsplit(":", 1)
 
-        existing = resolve_tree_location(tree_name)
-        if existing is not None:
+        if "." in tree_name:
             error = ToolOutput(
                 status="error",
-                content=f'PALTree "{tree_name}" already exists.',
+                content="tree_name must not contain dots. Dots are reserved for node path notation.",
+                content_type="text",
+            )
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        from utils.palstore import get_tree_file_path
+
+        if os.path.exists(get_tree_file_path(tree_path)):
+            error = ToolOutput(
+                status="error",
+                content=f'PALTree "{tree_name}" already exists at {directory}.',
                 content_type="text",
             )
             return [TextContent(type="text", text=error.model_dump_json())]
 
         tree = PalRoot(
-            tree_path=tree_name,
-            directory=directory,
+            tree_path=tree_path,
             created_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         )
         save_tree(tree)
-        update_index(directory, tree_name)
+        update_index(tree_path)
 
         tlog = TraversalLog(traversal_type="none")
         tool_output = ToolOutput(
             status="success",
             content=(
                 f"PALTree created.\n\n"
-                f"tree_path: {tree_name}\n"
+                f"tree_path: {tree_path}\n"
                 f"directory: {directory}\n\n"
                 f'Use addtreelayer(tree_path="{tree_name}", ...) to add context layers.'
             ),
             content_type="text",
-            metadata={"tree_path": tree_name, "directory": directory, **tlog.to_dict()},
+            metadata={"tree_path": tree_path, "directory": directory, **tlog.to_dict()},
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]
 
@@ -355,22 +358,28 @@ class PalAddTreeLayerTool(PalTreeBaseTool):
             return [TextContent(type="text", text=error.model_dump_json())]
 
         try:
-            tree, _ = self._resolve_tree(tree_path)
+            tree, canonical = self._resolve_tree(tree_path)
         except KeyError as exc:
             error = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
+
+        # Extract node_path from combined form if present
+        from utils.palstore import parse_tree_path
+
+        _, node_segments = parse_tree_path(tree_path)
+        node_path = ".".join(node_segments)
 
         from utils.file_diff import build_file_state_from_ancestry
         from utils.palstore import collect_traversal, iter_ancestry
         from utils.palstore_builder import build_context_from_ancestry
 
-        ancestors, tlog = collect_traversal(iter_ancestry(tree, tree_path), "ancestry")
+        ancestors, tlog = collect_traversal(iter_ancestry(tree, node_path), "ancestry")
         self._tlog = tlog
         self._ancestors = ancestors
         self._prior_file_state = build_file_state_from_ancestry(ancestors)
         self._injected_history = build_context_from_ancestry(ancestors)
         self._tree = tree
-        self._tree_path = tree_path
+        self._node_path = node_path
 
         arguments["_context_used"] = tlog.total_tokens
 
@@ -450,26 +459,28 @@ class PalAddTreeLayerTool(PalTreeBaseTool):
         from utils.palstore import get_next_key
 
         tree = getattr(self, "_tree", None)
-        tree_path = getattr(self, "_tree_path", None)
-        if tree is None or tree_path is None:
+        node_path = getattr(self, "_node_path", None)
+        if tree is None or node_path is None:
             return None
 
-        # Walk up past L-prefixed ancestors to prevent L→L nesting
-        parts = tree_path.split(".")
-        while len(parts) > 1 and re.match(r"^L\d+$", parts[-1]):
+        # Walk up past L-prefixed ancestors to prevent L->L nesting
+        parts = node_path.split(".") if node_path else []
+        while parts and re.match(r"^L\d+$", parts[-1]):
             parts.pop()
         insertion_parent = ".".join(parts)
 
         self._insertion_parent = insertion_parent
         self._next_key = get_next_key(tree, insertion_parent, "L")
-        self._new_tree_path = f"{insertion_parent}.{self._next_key}"
+        new_node_path = f"{insertion_parent}.{self._next_key}" if insertion_parent else self._next_key
+        self._new_node_path = new_node_path
+        continuation_id = f"{tree.tree_name}.{new_node_path}"
 
         context_window, context_used = self._get_context_token_info()
         return {
-            "continuation_id": self._new_tree_path,
+            "continuation_id": continuation_id,
             "context_window": context_window,
             "context_used": context_used,
-            "note": f"Layer stored at {self._new_tree_path}.",
+            "note": f"Layer stored at {tree.tree_name}.{new_node_path}.",
         }
 
     def _record_assistant_turn(
@@ -493,7 +504,7 @@ class PalAddTreeLayerTool(PalTreeBaseTool):
         input_dict = {
             "tool_name": self.get_name(),
             "model": model_name,
-            "tree_path": getattr(self, "_tree_path", None),
+            "node_path": getattr(self, "_node_path", None),
             "context_label": getattr(request, "context_label", None),
             "prompt": getattr(self, "_last_base_prompt", ""),
         }
@@ -604,44 +615,45 @@ class PalUpsertTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
-        from utils.palstore import load_tree, resolve_tree_location
+        from utils.palstore import load_tree, parse_tree_path
 
         tree_path = arguments.get("tree_path", "")
         if not tree_path:
             error = ToolOutput(status="error", content="tree_path is required.", content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        location = resolve_tree_location(tree_path)
-        if location is None:
-            error = ToolOutput(status="error", content=f'PALTree "{tree_path}" not found.', content_type="text")
+        try:
+            canonical, node_segments = parse_tree_path(tree_path)
+        except (KeyError, ValueError) as exc:
+            error = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        directory, root_id = location
-        tree = load_tree(directory, root_id)
+        tree = load_tree(canonical)
         if tree is None:
-            error = ToolOutput(status="error", content=f'PALTree file not found: "{root_id}".', content_type="text")
+            error = ToolOutput(status="error", content=f'PALTree file not found: "{canonical}".', content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
+        node_path = ".".join(node_segments)
         insert_mode = arguments.get("insert", False)
 
         if insert_mode:
-            return await self._handle_insert(tree, tree_path, arguments)
+            return await self._handle_insert(tree, node_path, arguments)
         else:
-            return await self._handle_update(tree, tree_path, arguments)
+            return await self._handle_update(tree, node_path, arguments)
 
-    async def _handle_update(self, tree, tree_path: str, arguments: dict[str, Any]) -> list[TextContent]:
+    async def _handle_update(self, tree, node_path: str, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
-        from utils.palstore import resolve_palnode, save_tree
+        from utils.palstore import resolve_node, save_tree
 
-        if tree_path == tree.tree_path:
+        if not node_path:
             error = ToolOutput(
                 status="error", content="Cannot upsert the root node. Target a child node.", content_type="text"
             )
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        node = resolve_palnode(tree, tree_path)
+        node = resolve_node(tree, node_path)
         if node is None:
-            error = ToolOutput(status="error", content=f'Node not found: "{tree_path}".', content_type="text")
+            error = ToolOutput(status="error", content=f'Node not found: "{node_path}".', content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
         updated_fields = []
@@ -670,25 +682,31 @@ class PalUpsertTool(BaseTool):
         from utils.palstore import TraversalLog
 
         tlog = TraversalLog(traversal_type="resolve")
-        tlog.record(tree_path, node)
+        full_path = f"{tree.tree_path}.{node_path}"
+        tlog.record(full_path, node)
         result = ToolOutput(
             status="success",
-            content=f"Updated {', '.join(updated_fields)} on {tree_path}.",
+            content=f"Updated {', '.join(updated_fields)} on {node_path}.",
             content_type="text",
-            metadata={"tree_path": tree_path, "updated_fields": updated_fields, **tlog.to_dict()},
+            metadata={
+                "tree_path": tree.tree_path,
+                "node_path": node_path,
+                "updated_fields": updated_fields,
+                **tlog.to_dict(),
+            },
         )
         return [TextContent(type="text", text=result.model_dump_json())]
 
-    async def _handle_insert(self, tree, tree_path: str, arguments: dict[str, Any]) -> list[TextContent]:
+    async def _handle_insert(self, tree, node_path: str, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
-        from utils.palstore import PalNode, add_palnode, get_next_key, resolve_palnode, save_tree
+        from utils.palstore import PalNode, add_palnode, get_next_key, resolve_node, save_tree
 
         # Verify parent exists (root or node)
-        if tree_path != tree.tree_path:
-            parent = resolve_palnode(tree, tree_path)
+        if node_path:
+            parent = resolve_node(tree, node_path)
             if parent is None:
                 error = ToolOutput(
-                    status="error", content=f'Parent node not found: "{tree_path}".', content_type="text"
+                    status="error", content=f'Parent node not found: "{node_path}".', content_type="text"
                 )
                 return [TextContent(type="text", text=error.model_dump_json())]
 
@@ -696,18 +714,18 @@ class PalUpsertTool(BaseTool):
         child_key = arguments.get("child_key")
         if not child_key:
             child_prefix = arguments.get("child_prefix", "")
-            child_key = get_next_key(tree, tree_path, child_prefix)
+            child_key = get_next_key(tree, node_path, child_prefix)
 
         # Check for duplicate key
-        if tree_path == tree.tree_path:
+        if not node_path:
             siblings = tree.children
         else:
-            parent_node = resolve_palnode(tree, tree_path)
+            parent_node = resolve_node(tree, node_path)
             siblings = parent_node.children if parent_node else {}
         if child_key in siblings:
             error = ToolOutput(
                 status="error",
-                content=f'Key "{child_key}" already exists under "{tree_path}". Use update mode or choose a different key.',
+                content=f'Key "{child_key}" already exists under "{node_path or "root"}". Use update mode or choose a different key.',
                 content_type="text",
             )
             return [TextContent(type="text", text=error.model_dump_json())]
@@ -722,7 +740,7 @@ class PalUpsertTool(BaseTool):
         )
 
         try:
-            new_path = add_palnode(tree, tree_path, child_key, node)
+            full_path = add_palnode(tree, node_path, child_key, node)
         except ValueError as exc:
             error = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
@@ -732,12 +750,18 @@ class PalUpsertTool(BaseTool):
         from utils.palstore import TraversalLog
 
         tlog = TraversalLog(traversal_type="resolve")
-        tlog.record(new_path, node)
+        tlog.record(full_path, node)
+        new_node_path = f"{node_path}.{child_key}" if node_path else child_key
         result = ToolOutput(
             status="success",
-            content=f"Inserted node at {new_path}.",
+            content=f"Inserted node at {new_node_path}.",
             content_type="text",
-            metadata={"tree_path": new_path, "child_key": child_key, **tlog.to_dict()},
+            metadata={
+                "tree_path": tree.tree_path,
+                "node_path": new_node_path,
+                "child_key": child_key,
+                **tlog.to_dict(),
+            },
         )
         return [TextContent(type="text", text=result.model_dump_json())]
 
@@ -827,33 +851,35 @@ class PalQueryTool(PalTreeBaseTool):
             return [TextContent(type="text", text=error.model_dump_json())]
 
         try:
-            tree, _ = self._resolve_tree(tree_path)
+            tree, canonical = self._resolve_tree(tree_path)
         except KeyError as exc:
             error = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        from utils.palstore import collect_traversal, iter_ancestry, resolve_palnode
+        from utils.palstore import collect_traversal, iter_ancestry, parse_tree_path, resolve_node
         from utils.palstore_builder import build_context_from_ancestry
 
-        node = resolve_palnode(tree, tree_path)
+        _, node_segments = parse_tree_path(tree_path)
+        node_path = ".".join(node_segments)
 
-        if node is None and tree_path != tree.tree_path:
-            error = ToolOutput(
-                status="error",
-                content=f"Node not found: {tree_path}",
-                content_type="text",
-            )
-            return [TextContent(type="text", text=error.model_dump_json())]
+        if node_path:
+            node = resolve_node(tree, node_path)
+            if node is None:
+                error = ToolOutput(
+                    status="error",
+                    content=f"Node not found: {node_path}",
+                    content_type="text",
+                )
+                return [TextContent(type="text", text=error.model_dump_json())]
 
-        self._parent_path = tree_path
+        self._parent_node_path = node_path
         self._child_prefix = "Q"
 
-        ancestors, tlog = collect_traversal(iter_ancestry(tree, tree_path), "ancestry")
+        ancestors, tlog = collect_traversal(iter_ancestry(tree, node_path), "ancestry")
         self._tlog = tlog
 
         self._injected_history = build_context_from_ancestry(ancestors)
         self._tree = tree
-        self._tree_path = tree_path
 
         arguments["_context_used"] = tlog.total_tokens
 
@@ -897,20 +923,22 @@ class PalQueryTool(PalTreeBaseTool):
         from utils.palstore import get_next_key
 
         tree = getattr(self, "_tree", None)
-        parent_path = getattr(self, "_parent_path", None)
+        parent_node_path = getattr(self, "_parent_node_path", None)
         child_prefix = getattr(self, "_child_prefix", "Q")
-        if tree is None or parent_path is None:
+        if tree is None or parent_node_path is None:
             return None
 
-        self._next_key = get_next_key(tree, parent_path, child_prefix)
-        self._new_tree_path = f"{parent_path}.{self._next_key}"
+        self._next_key = get_next_key(tree, parent_node_path, child_prefix)
+        new_node_path = f"{parent_node_path}.{self._next_key}" if parent_node_path else self._next_key
+        self._new_node_path = new_node_path
+        continuation_id = f"{tree.tree_name}.{new_node_path}"
 
         context_window, context_used = self._get_context_token_info()
         return {
-            "continuation_id": self._new_tree_path,
+            "continuation_id": continuation_id,
             "context_window": context_window,
             "context_used": context_used,
-            "note": f"Query recorded at {self._new_tree_path}.",
+            "note": f"Query recorded at {tree.tree_name}.{new_node_path}.",
         }
 
     def _record_assistant_turn(
@@ -920,10 +948,10 @@ class PalQueryTool(PalTreeBaseTool):
         from utils.response_formatter import render_markdown_output
 
         tree = getattr(self, "_tree", None)
-        parent_path = getattr(self, "_parent_path", None)
+        parent_node_path = getattr(self, "_parent_node_path", None)
         next_key = getattr(self, "_next_key", None)
 
-        if tree is None or parent_path is None or next_key is None:
+        if tree is None or parent_node_path is None or next_key is None:
             logger.warning("querynode: missing tree state in _record_assistant_turn, skipping write")
             return
 
@@ -936,7 +964,7 @@ class PalQueryTool(PalTreeBaseTool):
         input_dict = {
             "tool_name": self.get_name(),
             "model": model_name,
-            "tree_path": getattr(self, "_tree_path", None),
+            "node_path": parent_node_path,
             "prompt": getattr(self, "_last_base_prompt", ""),
         }
         output_dict = {
@@ -954,7 +982,7 @@ class PalQueryTool(PalTreeBaseTool):
             output=render_markdown_output(output_dict),
         )
 
-        add_palnode(tree, parent_path, next_key, node)
+        add_palnode(tree, parent_node_path, next_key, node)
         save_tree(tree)
 
 
@@ -1021,30 +1049,31 @@ class PalForkTool(BaseTool):
             add_palnode,
             get_next_key,
             load_tree,
-            resolve_tree_location,
+            parse_tree_path,
             save_tree,
         )
 
         tree_path = arguments.get("tree_path", "")
         label = arguments.get("label")
 
-        location = resolve_tree_location(tree_path)
-        if location is None:
-            error = ToolOutput(status="error", content=f'PALTree "{tree_path}" not found.', content_type="text")
+        try:
+            canonical, node_segments = parse_tree_path(tree_path)
+        except (KeyError, ValueError) as exc:
+            error = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        directory, root_id = location
-        tree = load_tree(directory, root_id)
+        tree = load_tree(canonical)
         if tree is None:
-            error = ToolOutput(status="error", content=f'PALTree file not found: "{root_id}".', content_type="text")
+            error = ToolOutput(status="error", content=f'PALTree file not found: "{canonical}".', content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        next_key = get_next_key(tree, tree_path, "F")
+        node_path = ".".join(node_segments)
+        next_key = get_next_key(tree, node_path, "F")
         fork_node = PalNode(
             label=label,
             timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         )
-        new_path = add_palnode(tree, tree_path, next_key, fork_node)
+        new_path = add_palnode(tree, node_path, next_key, fork_node)
         save_tree(tree)
 
         from utils.palstore import TraversalLog
@@ -1125,7 +1154,7 @@ class PalListTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
-        from utils.palstore import TraversalLog, list_trees, load_tree, resolve_palnode, resolve_tree_location
+        from utils.palstore import TraversalLog, list_trees, load_tree, parse_tree_path, resolve_node
 
         directory = arguments.get("directory", os.getcwd())
         tree_path = arguments.get("tree_path")
@@ -1133,27 +1162,32 @@ class PalListTool(BaseTool):
         tlog = TraversalLog(traversal_type="dfs")
 
         if tree_path:
-            location = resolve_tree_location(tree_path)
-            if location is None:
-                error = ToolOutput(status="error", content=f'PALTree "{tree_path}" not found.', content_type="text")
+            try:
+                canonical, node_segments = parse_tree_path(tree_path)
+            except (KeyError, ValueError) as exc:
+                error = ToolOutput(status="error", content=str(exc), content_type="text")
                 return [TextContent(type="text", text=error.model_dump_json())]
 
-            dir_, root_id = location
-            tree = load_tree(dir_, root_id)
+            tree = load_tree(canonical)
             if tree is None:
-                error = ToolOutput(status="error", content=f'PALTree file not found: "{root_id}".', content_type="text")
+                error = ToolOutput(
+                    status="error", content=f'PALTree file not found: "{canonical}".', content_type="text"
+                )
                 return [TextContent(type="text", text=error.model_dump_json())]
 
-            node = resolve_palnode(tree, tree_path)
-            if node is None and tree_path == tree.tree_path:
+            node_path = ".".join(node_segments)
+            if not node_path:
                 n_nodes = len(tree.children)
                 lines = [f"{tree.tree_path}  ({n_nodes} nodes)"]
                 lines.extend(_render_tree(tree, indent=1, tlog=tlog))
-            elif node is not None:
-                lines = [f"{tree_path}"]
-                lines.extend(_render_tree(node.children, root_path=tree_path, indent=1, tlog=tlog))
             else:
-                lines = [f"Node not found: {tree_path}"]
+                node = resolve_node(tree, node_path)
+                if node is not None:
+                    full_node_path = f"{canonical}.{node_path}"
+                    lines = [f"{full_node_path}"]
+                    lines.extend(_render_tree(node.children, root_path=full_node_path, indent=1, tlog=tlog))
+                else:
+                    lines = [f"Node not found: {node_path}"]
 
             content = "\n".join(lines)
         else:
@@ -1202,8 +1236,12 @@ class PalReadTool(BaseTool):
                     "type": "string",
                     "description": TREE_PATH_DESCRIPTION,
                 },
+                "node_path": {
+                    "type": "string",
+                    "description": NODE_PATH_DESCRIPTION,
+                },
             },
-            "required": ["tree_path"],
+            "required": ["tree_path", "node_path"],
             "additionalProperties": False,
         }
 
@@ -1232,52 +1270,52 @@ class PalReadTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
-        from utils.palstore import load_tree, resolve_palnode, resolve_tree_location
+        from utils.palstore import TraversalLog, load_tree, resolve_node, resolve_tree_path
 
         tree_path = arguments.get("tree_path", "")
+        node_path = arguments.get("node_path", "")
 
-        location = resolve_tree_location(tree_path)
-        if location is None:
-            error = ToolOutput(status="error", content=f'PALTree "{tree_path}" not found.', content_type="text")
+        try:
+            canonical = resolve_tree_path(tree_path)
+        except (KeyError, ValueError) as exc:
+            error = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        directory, root_id = location
-        tree = load_tree(directory, root_id)
+        tree = load_tree(canonical)
         if tree is None:
-            error = ToolOutput(status="error", content=f'PALTree file not found: "{root_id}".', content_type="text")
+            error = ToolOutput(status="error", content=f'PALTree file not found: "{canonical}".', content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        from utils.palstore import TraversalLog
-
-        node = resolve_palnode(tree, tree_path)
+        node = resolve_node(tree, node_path)
 
         if node is None:
             error = ToolOutput(
                 status="error",
-                content=f"Node not found: {tree_path}",
+                content=f"Node not found: {node_path}",
                 content_type="text",
             )
             return [TextContent(type="text", text=error.model_dump_json())]
-        else:
-            from utils.response_formatter import format_layer_markdown
 
-            content = format_layer_markdown(
-                tree_path,
-                label=node.label,
-                model=node.model,
-                timestamp=node.timestamp,
-                files=node.files,
-                input_text=node.input,
-                output_text=node.output,
-            )
+        from utils.response_formatter import format_layer_markdown
+
+        full_path = f"{canonical}.{node_path}" if node_path else canonical
+        content = format_layer_markdown(
+            full_path,
+            label=node.label,
+            model=node.model,
+            timestamp=node.timestamp,
+            files=node.files,
+            input_text=node.input,
+            output_text=node.output,
+        )
 
         tlog = TraversalLog(traversal_type="resolve")
-        tlog.record(tree_path, node)
+        tlog.record(full_path, node)
         tool_output = ToolOutput(
             status="success",
             content=content,
             content_type="text",
-            metadata={"tree_path": tree_path, **tlog.to_dict()},
+            metadata={"tree_path": canonical, "node_path": node_path, **tlog.to_dict()},
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]
 
@@ -1303,18 +1341,14 @@ class PalRenameTool(BaseTool):
             "properties": {
                 "tree_path": {
                     "type": "string",
-                    "description": "Current root tree_path to rename (e.g. 'myproject'). Use treelist to confirm it exists.",
+                    "description": TREE_PATH_DESCRIPTION,
                 },
                 "new_name": {
                     "type": "string",
                     "description": "New name for the tree (e.g. 'myproject-v2'). No dots allowed.",
                 },
-                "directory": {
-                    "type": "string",
-                    "description": "Absolute path to the project directory the tree is associated with.",
-                },
             },
-            "required": ["tree_path", "new_name", "directory"],
+            "required": ["tree_path", "new_name"],
             "additionalProperties": False,
         }
 
@@ -1343,37 +1377,41 @@ class PalRenameTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
-        from utils.palstore import rename_tree
+        from utils.palstore import rename_tree, resolve_tree_path
 
         tree_path = arguments.get("tree_path", "")
         new_name = arguments.get("new_name", "")
-        directory = arguments.get("directory", "")
 
-        if not tree_path or not new_name or not directory:
+        if not tree_path or not new_name:
             tool_output = ToolOutput(
                 status="error",
-                content="tree_path, new_name, and directory are all required.",
+                content="tree_path and new_name are required.",
                 content_type="text",
             )
             return [TextContent(type="text", text=tool_output.model_dump_json())]
 
         try:
-            rename_tree(directory, tree_path, new_name)
-        except KeyError as e:
-            tool_output = ToolOutput(status="error", content=str(e), content_type="text")
+            canonical = resolve_tree_path(tree_path)
+        except (KeyError, ValueError) as exc:
+            tool_output = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=tool_output.model_dump_json())]
-        except ValueError as e:
-            tool_output = ToolOutput(status="error", content=str(e), content_type="text")
+
+        try:
+            rename_tree(canonical, new_name)
+        except (KeyError, ValueError) as exc:
+            tool_output = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=tool_output.model_dump_json())]
 
         from utils.palstore import TraversalLog
 
+        directory = canonical.rsplit(":", 1)[0]
+        new_canonical = f"{directory}:{new_name}"
         tlog = TraversalLog(traversal_type="none")
         tool_output = ToolOutput(
             status="success",
-            content=(f"Tree renamed.\n\nold tree_path: {tree_path}\nnew tree_path: {new_name}\ndirectory: {directory}"),
+            content=(f"Tree renamed.\n\nold tree_path: {canonical}\nnew tree_path: {new_canonical}"),
             content_type="text",
-            metadata={"tree_path": new_name, "old_tree_path": tree_path, "directory": directory, **tlog.to_dict()},
+            metadata={"tree_path": new_canonical, "old_tree_path": canonical, **tlog.to_dict()},
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]
 
@@ -1501,7 +1539,7 @@ class PalExportTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
-        from utils.palstore import TraversalLog, load_tree, resolve_tree_location
+        from utils.palstore import TraversalLog, load_tree, resolve_tree_path
 
         tree_path = arguments.get("tree_path", "")
         output_path = arguments.get("output_path", "")
@@ -1519,15 +1557,15 @@ class PalExportTool(BaseTool):
             )
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        location = resolve_tree_location(tree_path)
-        if location is None:
-            error = ToolOutput(status="error", content=f'PALTree "{tree_path}" not found.', content_type="text")
+        try:
+            canonical = resolve_tree_path(tree_path)
+        except (KeyError, ValueError) as exc:
+            error = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        directory, root_id = location
-        tree = load_tree(directory, root_id)
+        tree = load_tree(canonical)
         if tree is None:
-            error = ToolOutput(status="error", content=f'PALTree file not found: "{root_id}".', content_type="text")
+            error = ToolOutput(status="error", content=f'PALTree file not found: "{canonical}".', content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
         tlog = TraversalLog(traversal_type="dfs")
@@ -1605,6 +1643,10 @@ class PalFileListTool(BaseTool):
                     "type": "string",
                     "description": TREE_PATH_DESCRIPTION,
                 },
+                "node_path": {
+                    "type": "string",
+                    "description": NODE_PATH_DESCRIPTION + " Omit to list files across the entire tree.",
+                },
             },
             "required": ["tree_path"],
             "additionalProperties": False,
@@ -1647,42 +1689,46 @@ class PalFileListTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
-        from utils.palstore import TraversalLog, load_tree, resolve_palnode, resolve_tree_location
+        from utils.palstore import TraversalLog, load_tree, resolve_node, resolve_tree_path
 
         tree_path = arguments.get("tree_path", "")
+        node_path = arguments.get("node_path", "")
 
-        location = resolve_tree_location(tree_path)
-        if location is None:
-            error = ToolOutput(status="error", content=f'PALTree "{tree_path}" not found.', content_type="text")
+        try:
+            canonical = resolve_tree_path(tree_path)
+        except (KeyError, ValueError) as exc:
+            error = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        directory, root_id = location
-        tree = load_tree(directory, root_id)
+        tree = load_tree(canonical)
         if tree is None:
-            error = ToolOutput(status="error", content=f'PALTree file not found: "{root_id}".', content_type="text")
+            error = ToolOutput(status="error", content=f'PALTree file not found: "{canonical}".', content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
         tlog = TraversalLog(traversal_type="dfs")
-        node = resolve_palnode(tree, tree_path)
-        if node is None and tree_path == tree.tree_path:
-            collected = self._collect_files(tree.children, tree.tree_path, tlog=tlog)
-        elif node is not None:
-            collected = self._collect_files(node.children, tree_path, tlog=tlog)
-            if node.files:
-                collected.insert(0, (tree_path, node.timestamp or "", node.label or "", list(node.files)))
+        if not node_path:
+            collected = self._collect_files(tree.children, canonical, tlog=tlog)
+            scope = canonical
         else:
-            error = ToolOutput(status="error", content=f"Node not found: {tree_path}", content_type="text")
-            return [TextContent(type="text", text=error.model_dump_json())]
+            node = resolve_node(tree, node_path)
+            if node is None:
+                error = ToolOutput(status="error", content=f"Node not found: {node_path}", content_type="text")
+                return [TextContent(type="text", text=error.model_dump_json())]
+            full_node_path = f"{canonical}.{node_path}"
+            collected = self._collect_files(node.children, full_node_path, tlog=tlog)
+            if node.files:
+                collected.insert(0, (full_node_path, node.timestamp or "", node.label or "", list(node.files)))
+            scope = full_node_path
 
         if not collected:
-            content = f"No files attached to any node in '{tree_path}'."
+            content = f"No files attached to any node in '{scope}'."
         else:
             total_files = sum(len(files) for _, _, _, files in collected)
-            lines = [f"**{total_files} files across {len(collected)} nodes in '{tree_path}':**", ""]
-            for node_path, timestamp, label, files in collected:
+            lines = [f"**{total_files} files across {len(collected)} nodes in '{scope}':**", ""]
+            for npath, timestamp, label, files in collected:
                 date = timestamp[:10] if timestamp else "unknown"
                 label_part = f' — "{_truncate_label(label, 60)}"' if label else ""
-                lines.append(f"**{node_path}**{label_part} — {date}")
+                lines.append(f"**{npath}**{label_part} — {date}")
                 for f in files:
                     lines.append(f"  {f}")
                 lines.append("")
@@ -1720,6 +1766,10 @@ class PalFileReadTool(BaseTool):
                 "tree_path": {
                     "type": "string",
                     "description": TREE_PATH_DESCRIPTION,
+                },
+                "node_path": {
+                    "type": "string",
+                    "description": NODE_PATH_DESCRIPTION + " Omit to search the entire tree.",
                 },
                 "file_path": {
                     "type": "string",
@@ -1780,50 +1830,52 @@ class PalFileReadTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
-        from utils.palstore import TraversalLog, load_tree, resolve_palnode, resolve_tree_location
+        from utils.palstore import TraversalLog, load_tree, resolve_node, resolve_tree_path
 
         tree_path = arguments.get("tree_path", "")
+        node_path = arguments.get("node_path", "")
         file_path = arguments.get("file_path", "")
 
         if not file_path:
             error = ToolOutput(status="error", content="file_path is required.", content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        location = resolve_tree_location(tree_path)
-        if location is None:
-            error = ToolOutput(status="error", content=f'PALTree "{tree_path}" not found.', content_type="text")
+        try:
+            canonical = resolve_tree_path(tree_path)
+        except (KeyError, ValueError) as exc:
+            error = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        directory, root_id = location
-        tree = load_tree(directory, root_id)
+        tree = load_tree(canonical)
         if tree is None:
-            error = ToolOutput(status="error", content=f'PALTree file not found: "{root_id}".', content_type="text")
+            error = ToolOutput(status="error", content=f'PALTree file not found: "{canonical}".', content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
         tlog = TraversalLog(traversal_type="dfs")
-        # Search from root or subtree
-        node = resolve_palnode(tree, tree_path)
-        if node is None and tree_path == tree.tree_path:
-            matches = self._find_nodes_with_file(tree.children, tree.tree_path, file_path, tlog=tlog)
-        elif node is not None:
-            matches = self._find_nodes_with_file(node.children, tree_path, file_path, tlog=tlog)
-            if node.files and file_path in node.files:
-                matches.insert(0, (tree_path, node.timestamp or "", node))
+        if not node_path:
+            matches = self._find_nodes_with_file(tree.children, canonical, file_path, tlog=tlog)
         else:
-            error = ToolOutput(status="error", content=f"Node not found: {tree_path}", content_type="text")
-            return [TextContent(type="text", text=error.model_dump_json())]
+            node = resolve_node(tree, node_path)
+            if node is None:
+                error = ToolOutput(status="error", content=f"Node not found: {node_path}", content_type="text")
+                return [TextContent(type="text", text=error.model_dump_json())]
+            full_node_path = f"{canonical}.{node_path}"
+            matches = self._find_nodes_with_file(node.children, full_node_path, file_path, tlog=tlog)
+            if node.files and file_path in node.files:
+                matches.insert(0, (full_node_path, node.timestamp or "", node))
 
         if not matches:
+            scope = f"{canonical}.{node_path}" if node_path else canonical
             error = ToolOutput(
                 status="error",
-                content=f"File '{file_path}' not found in any node under '{tree_path}'. Use listnodefiles to discover attached files.",
+                content=f"File '{file_path}' not found in any node under '{scope}'. Use listnodefiles to discover attached files.",
                 content_type="text",
             )
             return [TextContent(type="text", text=error.model_dump_json())]
 
         # Use most recent node
         matches.sort(key=lambda m: m[1], reverse=True)
-        node_path, timestamp, target_node = matches[0]
+        matched_path, timestamp, target_node = matches[0]
 
         # Try extracting from input blob (file content is embedded in the input field)
         extracted = None
@@ -1846,7 +1898,7 @@ class PalFileReadTool(BaseTool):
                 return [TextContent(type="text", text=error.model_dump_json())]
 
         header = f"# {os.path.basename(file_path)}\n\n"
-        header += f"**Source:** {source} (node {node_path}, {timestamp[:10] if timestamp else 'unknown'})\n"
+        header += f"**Source:** {source} (node {matched_path}, {timestamp[:10] if timestamp else 'unknown'})\n"
         header += f"**Path:** {file_path}\n"
         if len(matches) > 1:
             other_nodes = ", ".join(m[0] for m in matches[1:])
@@ -1860,10 +1912,10 @@ class PalFileReadTool(BaseTool):
             content=content,
             content_type="text",
             metadata={
-                "tree_path": tree_path,
+                "tree_path": canonical,
                 "file_path": file_path,
                 "source": source,
-                "node_path": node_path,
+                "node_path": matched_path,
                 **tlog.to_dict(),
             },
         )
@@ -1894,12 +1946,16 @@ class PalFileWriteTool(BaseTool):
                     "type": "string",
                     "description": TREE_PATH_DESCRIPTION,
                 },
+                "node_path": {
+                    "type": "string",
+                    "description": NODE_PATH_DESCRIPTION,
+                },
                 "file_path": {
                     "type": "string",
                     "description": "Absolute path of the file to attach to the node. Must exist on disk.",
                 },
             },
-            "required": ["tree_path", "file_path"],
+            "required": ["tree_path", "node_path", "file_path"],
             "additionalProperties": False,
         }
 
@@ -1928,9 +1984,10 @@ class PalFileWriteTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
-        from utils.palstore import load_tree, resolve_palnode, resolve_tree_location, save_tree
+        from utils.palstore import load_tree, resolve_node, resolve_tree_path, save_tree
 
         tree_path = arguments.get("tree_path", "")
+        node_path = arguments.get("node_path", "")
         file_path = arguments.get("file_path", "")
 
         if not file_path:
@@ -1945,34 +2002,36 @@ class PalFileWriteTool(BaseTool):
             error = ToolOutput(status="error", content=f"File does not exist: {file_path}", content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        location = resolve_tree_location(tree_path)
-        if location is None:
-            error = ToolOutput(status="error", content=f'PALTree "{tree_path}" not found.', content_type="text")
+        try:
+            canonical = resolve_tree_path(tree_path)
+        except (KeyError, ValueError) as exc:
+            error = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        directory, root_id = location
-        tree = load_tree(directory, root_id)
+        tree = load_tree(canonical)
         if tree is None:
-            error = ToolOutput(status="error", content=f'PALTree file not found: "{root_id}".', content_type="text")
+            error = ToolOutput(status="error", content=f'PALTree file not found: "{canonical}".', content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        node = resolve_palnode(tree, tree_path)
+        node = resolve_node(tree, node_path)
         if node is None:
-            error = ToolOutput(status="error", content=f"Node not found: {tree_path}", content_type="text")
+            error = ToolOutput(status="error", content=f"Node not found: {node_path}", content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
         from utils.palstore import TraversalLog
 
+        full_path = f"{canonical}.{node_path}"
         tlog = TraversalLog(traversal_type="resolve")
-        tlog.record(tree_path, node)
+        tlog.record(full_path, node)
 
         if file_path in node.files:
             tool_output = ToolOutput(
                 status="success",
-                content=f"File already attached to node {tree_path}: {file_path}",
+                content=f"File already attached to node {node_path}: {file_path}",
                 content_type="text",
                 metadata={
-                    "tree_path": tree_path,
+                    "tree_path": canonical,
+                    "node_path": node_path,
                     "file_path": file_path,
                     "action": "already_present",
                     **tlog.to_dict(),
@@ -1985,10 +2044,11 @@ class PalFileWriteTool(BaseTool):
 
         tool_output = ToolOutput(
             status="success",
-            content=f"File attached to node {tree_path}: {file_path}\n\nTotal files on node: {len(node.files)}",
+            content=f"File attached to node {node_path}: {file_path}\n\nTotal files on node: {len(node.files)}",
             content_type="text",
             metadata={
-                "tree_path": tree_path,
+                "tree_path": canonical,
+                "node_path": node_path,
                 "file_path": file_path,
                 "action": "added",
                 "total_files": len(node.files),
@@ -2069,7 +2129,7 @@ class PalTraverseTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
-        from utils.palstore import calc_traversal, collect_traversal, load_tree, resolve_tree_location
+        from utils.palstore import calc_traversal, collect_traversal, load_tree, resolve_tree_path
         from utils.palstore_builder import build_context_from_ancestry
 
         tree_path = arguments.get("tree_path", "")
@@ -2082,15 +2142,15 @@ class PalTraverseTool(BaseTool):
             )
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        location = resolve_tree_location(tree_path)
-        if location is None:
-            error = ToolOutput(status="error", content=f'PALTree "{tree_path}" not found.', content_type="text")
+        try:
+            canonical = resolve_tree_path(tree_path)
+        except (KeyError, ValueError) as exc:
+            error = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        directory, root_id = location
-        tree = load_tree(directory, root_id)
+        tree = load_tree(canonical)
         if tree is None:
-            error = ToolOutput(status="error", content=f'PALTree file not found: "{root_id}".', content_type="text")
+            error = ToolOutput(status="error", content=f'PALTree file not found: "{canonical}".', content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
         try:
@@ -2108,7 +2168,7 @@ class PalTraverseTool(BaseTool):
             content=content,
             content_type="text",
             metadata={
-                "tree_path": tree_path,
+                "tree_path": canonical,
                 "start_node": start_node,
                 "end_node": end_node,
                 **tlog.to_dict(),
@@ -2136,20 +2196,24 @@ class PalMoveTool(BaseTool):
         return {
             "type": "object",
             "properties": {
-                "source_path": {
+                "tree_path": {
                     "type": "string",
-                    "description": "Full dot-path of the node to move (e.g. 'myproject.0.1.2').",
+                    "description": TREE_PATH_DESCRIPTION,
                 },
-                "dest_parent": {
+                "source_node_path": {
                     "type": "string",
-                    "description": "Full dot-path of the destination parent (e.g. 'myproject' for root level).",
+                    "description": "Dot-path of the node to move within the tree (e.g. 'L0.Q1').",
+                },
+                "dest_node_path": {
+                    "type": "string",
+                    "description": "Dot-path of the destination parent within the tree (e.g. 'L2'). Empty string for root.",
                 },
                 "dest_key": {
                     "type": "string",
-                    "description": "Key name at destination (e.g. '3'). If omitted, auto-generates the next available key using the source node's key prefix.",
+                    "description": "Key name at destination (e.g. 'Q3'). If omitted, auto-generates the next available key using the source node's key prefix.",
                 },
             },
-            "required": ["source_path", "dest_parent"],
+            "required": ["tree_path", "source_node_path", "dest_node_path"],
             "additionalProperties": False,
         }
 
@@ -2183,53 +2247,58 @@ class PalMoveTool(BaseTool):
             get_next_key,
             load_tree,
             move_palnode,
-            parse_tree_path,
-            resolve_tree_location,
+            resolve_node,
+            resolve_tree_path,
             save_tree,
         )
 
-        source_path = arguments.get("source_path", "")
-        dest_parent = arguments.get("dest_parent", "")
+        tree_path = arguments.get("tree_path", "")
+        source_node_path = arguments.get("source_node_path", "")
+        dest_node_path = arguments.get("dest_node_path", "")
         dest_key = arguments.get("dest_key")
 
-        root_id, _ = parse_tree_path(source_path)
-
-        location = resolve_tree_location(root_id)
-        if location is None:
-            error = ToolOutput(status="error", content=f'PALTree "{root_id}" not found.', content_type="text")
+        try:
+            canonical = resolve_tree_path(tree_path)
+        except (KeyError, ValueError) as exc:
+            error = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        directory, root_id = location
-        tree = load_tree(directory, root_id)
+        tree = load_tree(canonical)
         if tree is None:
-            error = ToolOutput(status="error", content=f'PALTree file not found: "{root_id}".', content_type="text")
+            error = ToolOutput(status="error", content=f'PALTree file not found: "{canonical}".', content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
         if dest_key is None:
-            _, src_segments = parse_tree_path(source_path)
-            src_last_key = src_segments[-1] if src_segments else ""
+            src_last_key = source_node_path.rsplit(".", 1)[-1] if source_node_path else ""
             prefix = _get_key_prefix(src_last_key) or ""
-            dest_key = get_next_key(tree, dest_parent, prefix)
+            dest_key = get_next_key(tree, dest_node_path, prefix)
 
         try:
-            new_path = move_palnode(tree, source_path, dest_parent, dest_key)
+            new_path = move_palnode(tree, source_node_path, dest_node_path, dest_key)
         except (KeyError, ValueError) as exc:
             error = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
         save_tree(tree)
 
-        from utils.palstore import TraversalLog, resolve_palnode
+        from utils.palstore import TraversalLog
 
+        new_node_path = f"{dest_node_path}.{dest_key}" if dest_node_path else dest_key
         tlog = TraversalLog(traversal_type="resolve")
-        moved_node = resolve_palnode(tree, new_path)
+        moved_node = resolve_node(tree, new_node_path)
         if moved_node is not None:
             tlog.record(new_path, moved_node)
         tool_output = ToolOutput(
             status="success",
-            content=f"Moved {source_path} to {new_path}.",
+            content=f"Moved {source_node_path} to {new_node_path}.",
             content_type="text",
-            metadata={"source_path": source_path, "new_path": new_path, "dest_parent": dest_parent, **tlog.to_dict()},
+            metadata={
+                "tree_path": canonical,
+                "source_node_path": source_node_path,
+                "new_node_path": new_node_path,
+                "dest_node_path": dest_node_path,
+                **tlog.to_dict(),
+            },
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]
 
@@ -2252,20 +2321,24 @@ class PalCopyTool(BaseTool):
         return {
             "type": "object",
             "properties": {
-                "source_path": {
+                "tree_path": {
                     "type": "string",
-                    "description": "Full dot-path of the node to copy (e.g. 'myproject.0.1.2').",
+                    "description": TREE_PATH_DESCRIPTION,
                 },
-                "dest_parent": {
+                "source_node_path": {
                     "type": "string",
-                    "description": "Full dot-path of the destination parent (e.g. 'myproject' for root level).",
+                    "description": "Dot-path of the node to copy within the tree (e.g. 'L0.Q1').",
+                },
+                "dest_node_path": {
+                    "type": "string",
+                    "description": "Dot-path of the destination parent within the tree (e.g. 'L2'). Empty string for root.",
                 },
                 "dest_key": {
                     "type": "string",
-                    "description": "Key name at destination (e.g. '3'). If omitted, auto-generates the next available key using the source node's key prefix.",
+                    "description": "Key name at destination (e.g. 'Q3'). If omitted, auto-generates the next available key using the source node's key prefix.",
                 },
             },
-            "required": ["source_path", "dest_parent"],
+            "required": ["tree_path", "source_node_path", "dest_node_path"],
             "additionalProperties": False,
         }
 
@@ -2299,53 +2372,58 @@ class PalCopyTool(BaseTool):
             copy_palnode,
             get_next_key,
             load_tree,
-            parse_tree_path,
-            resolve_tree_location,
+            resolve_node,
+            resolve_tree_path,
             save_tree,
         )
 
-        source_path = arguments.get("source_path", "")
-        dest_parent = arguments.get("dest_parent", "")
+        tree_path = arguments.get("tree_path", "")
+        source_node_path = arguments.get("source_node_path", "")
+        dest_node_path = arguments.get("dest_node_path", "")
         dest_key = arguments.get("dest_key")
 
-        root_id, _ = parse_tree_path(source_path)
-
-        location = resolve_tree_location(root_id)
-        if location is None:
-            error = ToolOutput(status="error", content=f'PALTree "{root_id}" not found.', content_type="text")
+        try:
+            canonical = resolve_tree_path(tree_path)
+        except (KeyError, ValueError) as exc:
+            error = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        directory, root_id = location
-        tree = load_tree(directory, root_id)
+        tree = load_tree(canonical)
         if tree is None:
-            error = ToolOutput(status="error", content=f'PALTree file not found: "{root_id}".', content_type="text")
+            error = ToolOutput(status="error", content=f'PALTree file not found: "{canonical}".', content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
         if dest_key is None:
-            _, src_segments = parse_tree_path(source_path)
-            src_last_key = src_segments[-1] if src_segments else ""
+            src_last_key = source_node_path.rsplit(".", 1)[-1] if source_node_path else ""
             prefix = _get_key_prefix(src_last_key) or ""
-            dest_key = get_next_key(tree, dest_parent, prefix)
+            dest_key = get_next_key(tree, dest_node_path, prefix)
 
         try:
-            new_path = copy_palnode(tree, source_path, dest_parent, dest_key)
+            new_path = copy_palnode(tree, source_node_path, dest_node_path, dest_key)
         except (KeyError, ValueError) as exc:
             error = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
         save_tree(tree)
 
-        from utils.palstore import TraversalLog, resolve_palnode
+        from utils.palstore import TraversalLog
 
+        new_node_path = f"{dest_node_path}.{dest_key}" if dest_node_path else dest_key
         tlog = TraversalLog(traversal_type="resolve")
-        copied_node = resolve_palnode(tree, new_path)
+        copied_node = resolve_node(tree, new_node_path)
         if copied_node is not None:
             tlog.record(new_path, copied_node)
         tool_output = ToolOutput(
             status="success",
-            content=f"Copied {source_path} to {new_path}.",
+            content=f"Copied {source_node_path} to {new_node_path}.",
             content_type="text",
-            metadata={"source_path": source_path, "new_path": new_path, "dest_parent": dest_parent, **tlog.to_dict()},
+            metadata={
+                "tree_path": canonical,
+                "source_node_path": source_node_path,
+                "new_node_path": new_node_path,
+                "dest_node_path": dest_node_path,
+                **tlog.to_dict(),
+            },
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]
 
@@ -2369,17 +2447,21 @@ class PalFoldTool(BaseTool):
         return {
             "type": "object",
             "properties": {
-                "start_path": {
+                "tree_path": {
                     "type": "string",
-                    "description": "Full dot-path of range start (e.g. 'myproject.0.1.analyze'). Inclusive.",
+                    "description": TREE_PATH_DESCRIPTION,
                 },
-                "end_path": {
+                "start_node_path": {
                     "type": "string",
-                    "description": "Full dot-path of range end (e.g. 'myproject.0.1.analyze.1.thinkdeep.1.planner'). Must be a descendant of start. Inclusive.",
+                    "description": "Dot-path of range start within the tree (e.g. 'L0.Q1'). Inclusive.",
                 },
-                "dest_parent": {
+                "end_node_path": {
                     "type": "string",
-                    "description": "Where to insert the folded node. Defaults to the root tree_path (promotes to layer).",
+                    "description": "Dot-path of range end within the tree (e.g. 'L0.Q1.F0.Q2'). Must be a descendant of start. Inclusive.",
+                },
+                "dest_node_path": {
+                    "type": "string",
+                    "description": "Dot-path of the destination parent within the tree. Defaults to root (promotes to layer).",
                 },
                 "dest_key": {
                     "type": "string",
@@ -2390,7 +2472,7 @@ class PalFoldTool(BaseTool):
                     "description": "Optional label for the folded node.",
                 },
             },
-            "required": ["start_path", "end_path"],
+            "required": ["tree_path", "start_node_path", "end_node_path"],
             "additionalProperties": False,
         }
 
@@ -2424,32 +2506,30 @@ class PalFoldTool(BaseTool):
             fold_palnode_range,
             get_next_key,
             load_tree,
-            parse_tree_path,
-            resolve_tree_location,
+            resolve_tree_path,
             save_tree,
         )
 
-        start_path = arguments.get("start_path", "")
-        end_path = arguments.get("end_path", "")
-        dest_parent = arguments.get("dest_parent")
+        tree_path = arguments.get("tree_path", "")
+        start_node_path = arguments.get("start_node_path", "")
+        end_node_path = arguments.get("end_node_path", "")
+        dest_node_path = arguments.get("dest_node_path")
         dest_key = arguments.get("dest_key")
         label = arguments.get("label")
 
-        root_id, _ = parse_tree_path(start_path)
-
-        location = resolve_tree_location(root_id)
-        if location is None:
-            error = ToolOutput(status="error", content=f'PALTree "{root_id}" not found.', content_type="text")
+        try:
+            canonical = resolve_tree_path(tree_path)
+        except (KeyError, ValueError) as exc:
+            error = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        directory, root_id = location
-        tree = load_tree(directory, root_id)
+        tree = load_tree(canonical)
         if tree is None:
-            error = ToolOutput(status="error", content=f'PALTree file not found: "{root_id}".', content_type="text")
+            error = ToolOutput(status="error", content=f'PALTree file not found: "{canonical}".', content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
         try:
-            folded, tlog = fold_palnode_range(tree, start_path, end_path)
+            folded, tlog = fold_palnode_range(tree, start_node_path, end_node_path)
         except (KeyError, ValueError) as exc:
             error = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
@@ -2457,30 +2537,32 @@ class PalFoldTool(BaseTool):
         if label is not None:
             folded.label = label
 
-        if dest_parent is None:
-            dest_parent = tree.tree_path
+        if dest_node_path is None:
+            dest_node_path = ""
 
         if dest_key is None:
-            dest_key = get_next_key(tree, dest_parent, "")
+            dest_key = get_next_key(tree, dest_node_path, "")
 
         try:
-            new_path = add_palnode(tree, dest_parent, dest_key, folded)
+            add_palnode(tree, dest_node_path, dest_key, folded)
         except (KeyError, ValueError) as exc:
             error = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
         save_tree(tree)
 
+        new_node_path = f"{dest_node_path}.{dest_key}" if dest_node_path else dest_key
         content_len = len(folded.input or "")
         file_count = len(folded.files)
         tool_output = ToolOutput(
             status="success",
-            content=f"Folded range {start_path}..{end_path} into {new_path} ({content_len} chars, {file_count} files).",
+            content=f"Folded range {start_node_path}..{end_node_path} into {new_node_path} ({content_len} chars, {file_count} files).",
             content_type="text",
             metadata={
-                "new_path": new_path,
-                "start_path": start_path,
-                "end_path": end_path,
+                "tree_path": canonical,
+                "new_node_path": new_node_path,
+                "start_node_path": start_node_path,
+                "end_node_path": end_node_path,
                 "content_length": content_len,
                 "file_count": file_count,
                 **tlog.to_dict(),
@@ -2508,12 +2590,16 @@ class PalDeleteTool(BaseTool):
         return {
             "type": "object",
             "properties": {
+                "tree_path": {
+                    "type": "string",
+                    "description": TREE_PATH_DESCRIPTION,
+                },
                 "node_path": {
                     "type": "string",
-                    "description": "Full dot-path of the node to delete (e.g. 'myproject.3').",
+                    "description": NODE_PATH_DESCRIPTION,
                 },
             },
-            "required": ["node_path"],
+            "required": ["tree_path", "node_path"],
             "additionalProperties": False,
         }
 
@@ -2545,24 +2631,22 @@ class PalDeleteTool(BaseTool):
         from utils.palstore import (
             delete_palnode_with_shift,
             load_tree,
-            parse_tree_path,
-            resolve_tree_location,
+            resolve_tree_path,
             save_tree,
         )
 
+        tree_path = arguments.get("tree_path", "")
         node_path = arguments.get("node_path", "")
 
-        root_id, _ = parse_tree_path(node_path)
-
-        location = resolve_tree_location(root_id)
-        if location is None:
-            error = ToolOutput(status="error", content=f'PALTree "{root_id}" not found.', content_type="text")
+        try:
+            canonical = resolve_tree_path(tree_path)
+        except (KeyError, ValueError) as exc:
+            error = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        directory, root_id = location
-        tree = load_tree(directory, root_id)
+        tree = load_tree(canonical)
         if tree is None:
-            error = ToolOutput(status="error", content=f'PALTree file not found: "{root_id}".', content_type="text")
+            error = ToolOutput(status="error", content=f'PALTree file not found: "{canonical}".', content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
         try:
@@ -2588,6 +2672,7 @@ class PalDeleteTool(BaseTool):
             content=" ".join(lines),
             content_type="text",
             metadata={
+                "tree_path": canonical,
                 "deleted": result["deleted"],
                 "shifted": shifted_summary,
                 "had_children": result["had_children"],
@@ -2610,7 +2695,7 @@ class PalDeleteTreeTool(BaseTool):
             "properties": {
                 "tree_path": {
                     "type": "string",
-                    "description": "Root name of the PALTree to delete (e.g. 'myproject').",
+                    "description": TREE_PATH_DESCRIPTION,
                 },
             },
             "required": ["tree_path"],
@@ -2645,7 +2730,7 @@ class PalDeleteTreeTool(BaseTool):
         from utils.palstore import (
             get_tree_file_path,
             load_index,
-            resolve_tree_location,
+            resolve_tree_path,
             save_index,
         )
 
@@ -2654,29 +2739,30 @@ class PalDeleteTreeTool(BaseTool):
             error = ToolOutput(status="error", content="tree_path is required.", content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        location = resolve_tree_location(tree_path)
-        if location is None:
-            error = ToolOutput(status="error", content=f'PALTree "{tree_path}" not found.', content_type="text")
+        try:
+            canonical = resolve_tree_path(tree_path)
+        except (KeyError, ValueError) as exc:
+            error = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        directory, root_id = location
-        tree_file = get_tree_file_path(directory, root_id)
+        tree_file = get_tree_file_path(canonical)
 
         if os.path.isfile(tree_file):
             os.remove(tree_file)
 
         # Remove from index
         index = load_index()
-        index["trees"].pop(tree_path, None)
+        index["trees"].pop(canonical, None)
         save_index(index)
 
         from utils.palstore import TraversalLog
 
+        directory = canonical.rsplit(":", 1)[0]
         tlog = TraversalLog(traversal_type="none")
         tool_output = ToolOutput(
             status="success",
-            content=f'PALTree "{tree_path}" deleted.',
+            content=f'PALTree "{canonical}" deleted.',
             content_type="text",
-            metadata={"tree_path": tree_path, "directory": directory, "file_removed": tree_file, **tlog.to_dict()},
+            metadata={"tree_path": canonical, "directory": directory, "file_removed": tree_file, **tlog.to_dict()},
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]

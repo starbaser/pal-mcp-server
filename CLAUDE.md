@@ -147,8 +147,11 @@ SimpleTool → PalTreeBaseTool ─── PalAddTreeLayerTool, PalQueryTool
 - `format_layer_markdown` (used by `readnode`/`treedump`) accepts `input_text`/`output_text` params
 
 **PalRoot model** (`utils/palstore.py`):
-- Fields: `tree_path: str`, `directory: str`, `label: str | None = None`, `created_at: str`, `children: dict[str, PalNode] = {}`
-- `model_validator(mode="before")` migrates legacy `store_id` → `tree_path` in JSON files
+- Fields: `tree_path: str`, `label: str | None = None`, `created_at: str`, `children: dict[str, PalNode] = {}`
+- `tree_path` is canonical: `{directory}:{tree_name}` (e.g. `/home/user/project:my-tree`)
+- `@property directory` and `@property tree_name` derived from `tree_path.rsplit(":", 1)`
+- Periods forbidden in `tree_name` — dots are reserved for node path notation
+- `model_validator(mode="before")` migrates legacy formats: `store_id` → `tree_path`, `directory` + bare `tree_path` → canonical
 
 **PALTree Grammar** (`utils/palstore.py`):
 
@@ -172,7 +175,14 @@ Nesting rules:
 - **C cascade**: Prevented. `_resolve_tree_continuation` walks up past C/numeric stubs to create flat siblings under the nearest non-stub ancestor. Stubs at root level redirect under the latest L node.
 - **F→F**: Allowed. Forks within forks are valid branching.
 
-**`utils/palstore_builder.py`** — `build_tree_context()` builds enhanced arguments directly from PalNode ancestry for a given tree path. Replaces the former `hydrate_thread_context` approach. Uses token-budgeted history building via `_build_budgeted_history()`.
+**Strata traversal** (`utils/palstore.py`):
+- L-nodes at root level are concentric strata (tree rings). `calc_traversal(tree, node_a, node_b)` walks layers chronologically, expanding both endpoints inward through sublayer paths. Intermediate layers yield L-node only (cross-section).
+- `_parse_node_point(node_path, tree)` decomposes into `(layer_num, sublayer_segments)`
+- `iter_ancestry`, `iter_dfs`, `iter_range`, `calc_traversal` — generator-based traversal primitives
+- `collect_traversal(gen, type)` — consumes any generator into `(nodes, TraversalLog)`
+- `TraversalLog` records nodes visited, content chars, and token counts
+
+**`utils/palstore_builder.py`** — `build_tree_context()` builds enhanced arguments directly from PalNode ancestry for a given node_path (pure segments). Uses token-budgeted history building via `_build_budgeted_history()`.
 
 ### MCP Transport Limits
 
@@ -221,9 +231,21 @@ Register in `server.py` TOOLS dict. Tools that bypass model resolution override 
 
 MCP tool names follow a scope convention: **node tools** (`*node`) operate on a single PALNode, **tree tools** (`tree*`/`*tree`) operate on a subtree or the whole tree. Source class names (e.g. `PalAddTreeLayerTool`) are unchanged.
 
-The MCP parameter `tree_path` identifies nodes using dot-path notation. The `PalRoot` model field is also `tree_path`. A `model_validator(mode="before")` on `PalRoot` transparently migrates legacy JSON files that still use the legacy `store_id` key.
+### Path Convention
 
-**PALTree path**: `ρ.S₁.S₂.⋯.Sₖ` where each segment `Sᵢ ∈ [LQFC]\d+` and parent→child type must satisfy the transition table above. Range notation `L[1:5]` is used in documentation to describe consecutive same-prefix siblings compactly.
+**`tree_path`** identifies a tree, never a node:
+- Canonical: `{directory}:{tree_name}` (e.g. `/home/user/project:my-tree`)
+- Shorthand: `tree_name` alone (resolved if unique across all `~/.claude/pal/context/`)
+- Periods forbidden in `tree_name` — first `.` always starts node segments
+
+**`node_path`** addresses a node within a tree:
+- Pure dot-separated segments: `L1.Q0`, `L3.F1.Q2`
+- `L` (no number) = last layer shorthand
+- Empty string = tree root
+
+Tools accept `tree_path` and `node_path` as separate parameters. Internal functions (`resolve_node`, `add_palnode`, `iter_ancestry`, etc.) take pure `node_path` segments.
+
+**Node path grammar**: `S₁.S₂.⋯.Sₖ` where each `Sᵢ ∈ [LQFC]\d+` and parent→child type must satisfy the transition table above. Range notation `L[1:5]` describes consecutive same-prefix siblings.
 
 | MCP tool name    | Source class         | Model required | Scope |
 |------------------|----------------------|----------------|-------|

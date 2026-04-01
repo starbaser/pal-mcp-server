@@ -861,7 +861,7 @@ def _resolve_tree_continuation(tool_name: str, arguments: dict) -> str | None:
         add_palnode,
         get_next_key,
         load_tree,
-        resolve_tree_location,
+        parse_tree_path,
         save_tree,
     )
     from utils.palstore_builder import build_tree_context
@@ -870,12 +870,12 @@ def _resolve_tree_continuation(tool_name: str, arguments: dict) -> str | None:
     if not continuation_id:
         return None
 
-    location = resolve_tree_location(continuation_id)
-    if not location:
+    try:
+        canonical, node_segments = parse_tree_path(continuation_id)
+    except (KeyError, ValueError):
         return None
 
-    directory, root_id = location
-    tree = load_tree(directory, root_id)
+    tree = load_tree(canonical)
     if not tree:
         return None
 
@@ -885,36 +885,39 @@ def _resolve_tree_continuation(tool_name: str, arguments: dict) -> str | None:
     # Then ensure stubs never land at root level (only L nodes belong there)
     import re
 
-    parts = continuation_id.split(".")
-    while len(parts) > 1 and re.match(r"^C?\d+$", parts[-1]):
-        parts.pop()
-    parent_path = ".".join(parts)
+    segments = list(node_segments)
+    while segments and re.match(r"^C?\d+$", segments[-1]):
+        segments.pop()
+    parent_node_path = ".".join(segments)
 
     # If parent is root, nest under the latest L node instead
-    if "." not in parent_path:
+    if not parent_node_path:
         l_keys = [k for k in tree.children if re.match(r"^L\d+$", k)]
         if l_keys:
             latest_l = max(l_keys, key=lambda k: int(k[1:]))
-            parent_path = f"{parent_path}.{latest_l}"
+            parent_node_path = latest_l
 
-    child_key = get_next_key(tree, parent_path, "C")
+    child_key = get_next_key(tree, parent_node_path, "C")
     turn_node = PalNode(tool_name=tool_name, timestamp=now)
-    tool_path = add_palnode(tree, parent_path, child_key, turn_node)
+    full_path = add_palnode(tree, parent_node_path, child_key, turn_node)
     save_tree(tree)
     mode = "continue"
 
+    # full_path is canonical (e.g. "/dir:name.L1.C0"); extract pure node segments
+    node_path = full_path.split(":", 1)[1].split(".", 1)[1] if "." in full_path.split(":", 1)[-1] else ""
+
     # Build context directly from PalNode ancestry — no ThreadContext needed
-    build_tree_context(tree, tool_path, arguments)
+    build_tree_context(tree, node_path, arguments)
 
     arguments["_tree_bridge"] = {
         "tree": tree,
-        "tool_path": tool_path,
+        "tool_path": node_path,
         "tool_name": tool_name,
         "mode": mode,
     }
 
-    logger.info(f"Tree continuation {mode.upper()}: {continuation_id} → {tool_path}")
-    return tool_path
+    logger.info(f"Tree continuation {mode.upper()}: {continuation_id} → {full_path}")
+    return full_path
 
 
 def _inject_tree_path_continuation(result: list, tree_path: str, arguments: dict | None = None) -> list:
@@ -982,11 +985,11 @@ def _inject_tree_path_continuation(result: list, tree_path: str, arguments: dict
 
     # Persist tool response back to PALTree
     if bridge and response_text is not None:
-        from utils.palstore import resolve_palnode, save_tree
+        from utils.palstore import resolve_node, save_tree
         from utils.response_formatter import render_markdown_output
 
         try:
-            tool_node = resolve_palnode(bridge["tree"], bridge["tool_path"])
+            tool_node = resolve_node(bridge["tree"], bridge["tool_path"])
             if tool_node is not None:
                 prompt = arguments.get("_original_user_prompt", arguments.get("prompt", "")) if arguments else ""
                 input_dict = {

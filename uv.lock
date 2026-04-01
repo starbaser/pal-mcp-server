@@ -584,12 +584,14 @@ dependencies = [
 requires-dist = [
     { name = "attrs" },
     { name = "pyprland", marker = "extra == 'pyprland'", specifier = ">=2.4.0" },
+    { name = "pytest", marker = "extra == 'test'" },
+    { name = "pytest-asyncio", marker = "extra == 'test'" },
     { name = "pyyaml" },
     { name = "rich" },
     { name = "tiktoken" },
     { name = "tyro" },
 ]
-provides-extras = ["pyprland"]
+provides-extras = ["pyprland", "test"]
 
 [[package]]
 name = "openai"

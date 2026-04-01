@@ -1,6 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
+export PYTHONDONTWRITEBYTECODE=1
+
 # ============================================================================
 # PAL MCP Server Setup Script
 #

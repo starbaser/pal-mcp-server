@@ -221,7 +221,7 @@ def _classify_key(key: str) -> str:
 # Valid parent→child transitions (the PALTree grammar)
 #   ρ → L only
 #   L → Q, F, C  (not L)
-#   Q → Q, F, C
+#   Q → Q, F, C  (Q→Q is intentional: follow-up queries nest for ancestry context)
 #   F → L, Q, F, C
 #   C → (leaf, no children)
 _VALID_CHILDREN: dict[str, set[str]] = {

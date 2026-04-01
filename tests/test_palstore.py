@@ -1448,10 +1448,10 @@ def ref_tree(ctx_env):
     add_palnode(store, "mystore.L1", "Q0", _make_node(input="what is X?", output="answer"))
     add_palnode(store, "mystore.L1", "F0", _make_node(input="", output=""))
 
-    # L1.Q0 subtree
+    # L1.Q0 subtree — Q→Q nesting is intentional (follow-up queries)
     add_palnode(store, "mystore.L1.Q0", "Q0", _make_node(input="sub-question", output="sub-answer"))
-    add_palnode(store, "mystore.L1.Q0", "1", _make_node(input="follow-up 1", output="fu-r1"))
-    add_palnode(store, "mystore.L1.Q0", "2", _make_node(input="follow-up 2", output="fu-r2"))
+    add_palnode(store, "mystore.L1.Q0", "C0", _make_node(input="follow-up 1", output="fu-r1"))
+    add_palnode(store, "mystore.L1.Q0", "C1", _make_node(input="follow-up 2", output="fu-r2"))
     add_palnode(store, "mystore.L1.Q0", "F0", _make_node(input="", output=""))
     add_palnode(store, "mystore.L1.Q0.F0", "C0", _make_node(input="td", output="td-r"))
 
@@ -1493,8 +1493,8 @@ class TestWalkAncestryComplex:
             ("mystore.L3", 1),
             ("mystore.L1.Q0", 2),
             ("mystore.L1.Q0.Q0", 3),
-            ("mystore.L1.Q0.1", 3),
-            ("mystore.L1.Q0.2", 3),
+            ("mystore.L1.Q0.C0", 3),
+            ("mystore.L1.Q0.C1", 3),
             ("mystore.L1.Q0.F0", 3),
             ("mystore.L1.Q0.F0.C0", 4),
             ("mystore.L1.F0", 2),
@@ -1531,7 +1531,7 @@ class TestWalkRangeComplex:
         [
             # Range is a slice of the direct ancestry chain from start to end
             ("mystore.L1", "mystore.L1.Q0.F0.C0", 4),
-            ("mystore.L1.Q0", "mystore.L1.Q0.2", 2),
+            ("mystore.L1.Q0", "mystore.L1.Q0.C1", 2),
             ("mystore.L1.Q0", "mystore.L1.Q0.F0.C0", 3),
             ("mystore.L1.F0", "mystore.L1.F0.L2", 2),
             ("mystore.L1.F0", "mystore.L1.F0.F0.L1", 3),

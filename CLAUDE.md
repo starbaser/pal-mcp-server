@@ -164,7 +164,13 @@ SimpleTool → PalTreeBaseTool ─── PalAddTreeLayerTool, PalQueryTool
    C   │ ·   ·   ·   ·
 ```
 
-Every path segment matches `[LQFC]\d+`. `addtreelayer` walks up past L-prefixed ancestors to prevent L→L nesting. `_resolve_tree_continuation` walks up past `C`/numeric stubs to create flat siblings.
+Every path segment matches `[LQFC]\d+`. Range notation `L[1:5]` is used in documentation to describe consecutive same-prefix siblings compactly.
+
+Nesting rules:
+- **Q→Q**: Intentional. `querynode(tree_path=L3.Q0)` → `L3.Q0.Q0` (follow-up inherits Q0 in ancestry). `querynode(tree_path=L3)` → `L3.Q1` (sibling, independent query).
+- **L→L**: Prevented. `addtreelayer` walks up past L-prefixed ancestors to create siblings (`L3.L0` never happens; `L4` is created instead).
+- **C cascade**: Prevented. `_resolve_tree_continuation` walks up past C/numeric stubs to create flat siblings under the nearest non-stub ancestor. Stubs at root level redirect under the latest L node.
+- **F→F**: Allowed. Forks within forks are valid branching.
 
 **`utils/palstore_builder.py`** — `build_tree_context()` builds enhanced arguments directly from PalNode ancestry for a given tree path. Replaces the former `hydrate_thread_context` approach. Uses token-budgeted history building via `_build_budgeted_history()`.
 

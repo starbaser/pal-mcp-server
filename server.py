@@ -881,9 +881,25 @@ def _resolve_tree_continuation(tool_name: str, arguments: dict) -> str | None:
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    child_key = get_next_key(tree, continuation_id, "")
+    # Walk up past continuation stubs (C\d+ or legacy \d+) to prevent cascading
+    # Then ensure stubs never land at root level (only L nodes belong there)
+    import re
+
+    parts = continuation_id.split(".")
+    while len(parts) > 1 and re.match(r"^C?\d+$", parts[-1]):
+        parts.pop()
+    parent_path = ".".join(parts)
+
+    # If parent is root, nest under the latest L node instead
+    if "." not in parent_path:
+        l_keys = [k for k in tree.children if re.match(r"^L\d+$", k)]
+        if l_keys:
+            latest_l = max(l_keys, key=lambda k: int(k[1:]))
+            parent_path = f"{parent_path}.{latest_l}"
+
+    child_key = get_next_key(tree, parent_path, "C")
     turn_node = PalNode(tool_name=tool_name, timestamp=now)
-    tool_path = add_palnode(tree, continuation_id, child_key, turn_node)
+    tool_path = add_palnode(tree, parent_path, child_key, turn_node)
     save_tree(tree)
     mode = "continue"
 

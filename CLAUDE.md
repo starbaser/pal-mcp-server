@@ -64,7 +64,7 @@ CLI Client (Claude/Gemini/Codex)
 - `handle_call_tool()` routes requests, resolves models, reconstructs conversation context
 - `configure_providers()` registers providers based on API keys
 - `parse_model_option()` splits `"model:option"` format (e.g. `"gemini-pro:for"` → model + option), preserving OpenRouter suffixes (`:free`, `:beta`, `:preview`)
-- PALTree continuation: `_resolve_tree_continuation()` calls `build_tree_context()` directly from PALTree paths (not just UUIDs). Creates a numeric child node under the target for each continuation turn. PALTree paths skip `reconstruct_thread_context` — dispatch in `handle_call_tool` is bifurcated.
+- PALTree continuation: `_resolve_tree_continuation()` calls `build_tree_context()` directly from PALTree paths (not just UUIDs). Creates a `C`-prefixed continuation stub (e.g. `C0`, `C1`) as a flat sibling under the nearest non-stub ancestor. Stubs at root level are redirected under the latest L node. PALTree paths skip `reconstruct_thread_context` — dispatch in `handle_call_tool` is bifurcated.
 - Response post-processing pipeline: `_inject_tree_path_continuation()` → `_save_response_content()` → `_inject_saved_content_path()` → `_extract_gen_files()` → `_apply_output_format()`
 - `_extract_gen_files()`: universal `#!/>` sigil extraction from model responses — saves complete files to `CODE_STORAGE_DIR/{encoded_cwd}/{call_id}/`, strips sigil blocks from response content, adds `gen_files` metadata
 
@@ -150,9 +150,21 @@ SimpleTool → PalTreeBaseTool ─── PalAddTreeLayerTool, PalQueryTool
 - Fields: `tree_path: str`, `directory: str`, `label: str | None = None`, `created_at: str`, `children: dict[str, PalNode] = {}`
 - `model_validator(mode="before")` migrates legacy `store_id` → `tree_path` in JSON files
 
-**PALTree Node Rules** (`utils/palstore.py`):
+**PALTree Grammar** (`utils/palstore.py`):
 
-`add_palnode()` inserts a child node with no structural restrictions. Any node can have any child with any key.
+`add_palnode()` enforces a tree grammar via transition table. Node key types: `L` (layer), `Q` (query), `F` (fork), `C` (continuation), `N` (legacy numeric). Valid parent→child transitions:
+
+```
+       │ L   Q   F   C
+───────┼────────────────
+   ρ   │ ✓   ·   ·   ·
+   L   │ ·   ✓   ✓   ✓
+   Q   │ ·   ✓   ✓   ✓
+   F   │ ✓   ✓   ✓   ✓
+   C   │ ·   ·   ·   ·
+```
+
+Every path segment matches `[LQFC]\d+`. `addtreelayer` walks up past L-prefixed ancestors to prevent L→L nesting. `_resolve_tree_continuation` walks up past `C`/numeric stubs to create flat siblings.
 
 **`utils/palstore_builder.py`** — `build_tree_context()` builds enhanced arguments directly from PalNode ancestry for a given tree path. Replaces the former `hydrate_thread_context` approach. Uses token-budgeted history building via `_build_budgeted_history()`.
 
@@ -205,7 +217,7 @@ MCP tool names follow a scope convention: **node tools** (`*node`) operate on a 
 
 The MCP parameter `tree_path` identifies nodes using dot-path notation. The `PalRoot` model field is also `tree_path`. A `model_validator(mode="before")` on `PalRoot` transparently migrates legacy JSON files that still use the legacy `store_id` key.
 
-**PALTree path** formal definition: `𝒫 = { r · s₁ · s₂ · ⋯ · sₖ  |  r ∈ 𝒩,  sᵢ = (tᵢ, nᵢ),  ρ → t₁,  ∀i: tᵢ → tᵢ₊₁ }`
+**PALTree path**: `ρ.S₁.S₂.⋯.Sₖ` where each segment `Sᵢ ∈ [LQFC]\d+` and parent→child type must satisfy the transition table above. Treelist compresses 3+ consecutive same-prefix leaf nodes into range notation: `L[1:5]`.
 
 | MCP tool name    | Source class         | Model required | Scope |
 |------------------|----------------------|----------------|-------|

@@ -208,13 +208,57 @@ def resolve_palnode(tree: PalRoot, tree_path: str) -> PalNode | None:
     return node
 
 
+def _classify_key(key: str) -> str:
+    """Classify a node key into its type: L, Q, F, C, N, or X (unknown)."""
+    for prefix in ("L", "Q", "F", "C"):
+        if key.startswith(prefix) and key[len(prefix) :].isdigit():
+            return prefix
+    if key.isdigit():
+        return "N"
+    return "X"
+
+
+# Valid parent→child transitions (the PALTree grammar)
+#   ρ → L only
+#   L → Q, F, C  (not L)
+#   Q → Q, F, C
+#   F → L, Q, F, C
+#   C → (leaf, no children)
+_VALID_CHILDREN: dict[str, set[str]] = {
+    "ρ": {"L"},
+    "L": {"Q", "F", "C", "N"},
+    "Q": {"Q", "F", "C", "N"},
+    "F": {"L", "Q", "F", "C", "N"},
+    "C": set(),
+    "N": set(),
+    "X": {"L", "Q", "F", "C", "N", "X"},
+}
+
+
 def add_palnode(tree: PalRoot, parent_path: str, child_key: str, node: PalNode) -> str:
     """Insert a child node at parent_path and return the full path to the new node.
 
+    Validates the insertion against the PALTree grammar before inserting.
     When parent_path equals the tree root id, the node is added directly to
     tree.children. Otherwise the parent is resolved and the node is appended to
     its children dict.
     """
+    child_type = _classify_key(child_key)
+
+    if parent_path == tree.tree_path:
+        parent_type = "ρ"
+    else:
+        _, segments = parse_tree_path(parent_path)
+        parent_type = _classify_key(segments[-1]) if segments else "ρ"
+
+    allowed = _VALID_CHILDREN.get(parent_type, set())
+    if child_type not in allowed:
+        raise ValueError(
+            f"PALTree grammar violation: {parent_type}→{child_type} "
+            f"(key '{child_key}' cannot be a child of '{parent_path}'). "
+            f"Allowed child types for {parent_type}: {sorted(allowed)}"
+        )
+
     if parent_path == tree.tree_path:
         tree.children[child_key] = node
     else:

@@ -369,19 +369,31 @@ class TestResolveTreeContinuation:
         assert args["continuation_id"] == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 
     def test_continue_from_store_root(self, tmp_path, monkeypatch):
-        from server import _resolve_tree_continuation
+        from datetime import datetime, timezone
 
-        self._make_store(tmp_path, monkeypatch, "myproject", "/tmp/proj")
+        from server import _resolve_tree_continuation
+        from utils.palstore import PalNode, save_tree
+
+        store = self._make_store(tmp_path, monkeypatch, "myproject", "/tmp/proj")
+
+        # Root must have L nodes — stubs nest under the latest one
+        store.children["L0"] = PalNode(
+            tool_name="addtreelayer",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            input="context layer",
+            output="stored",
+        )
+        save_tree(store)
 
         args = {"continuation_id": "myproject"}
         result = _resolve_tree_continuation("thinkdeep", args)
 
-        # Creates numeric child "0" under root
-        assert result == "myproject.0"
+        # Stubs nest under latest L node, not at root
+        assert result == "myproject.L0.C0"
         assert args.get("_tree_context_built") is True
 
         bridge = args["_tree_bridge"]
-        assert bridge["tool_path"] == "myproject.0"
+        assert bridge["tool_path"] == "myproject.L0.C0"
         assert bridge["tool_name"] == "thinkdeep"
         assert bridge["mode"] == "continue"
         assert bridge["tree"].tree_path == "myproject"
@@ -394,24 +406,31 @@ class TestResolveTreeContinuation:
 
         store = self._make_store(tmp_path, monkeypatch, "myproject", "/tmp/proj")
 
-        existing_node = PalNode(
+        # Valid structure: L0 with a C-prefixed continuation stub
+        l0_node = PalNode(
+            tool_name="addtreelayer",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            input="context layer",
+            output="stored",
+        )
+        l0_node.children["C0"] = PalNode(
             tool_name="thinkdeep",
             timestamp=datetime.now(timezone.utc).isoformat(),
             input="initial prompt",
             output="initial response",
         )
-        store.children["0"] = existing_node
+        store.children["L0"] = l0_node
         save_tree(store)
 
-        args = {"continuation_id": "myproject.0"}
+        args = {"continuation_id": "myproject.L0.C0"}
         result = _resolve_tree_continuation("thinkdeep", args)
 
-        # Creates numeric child "0" under the existing node
-        assert result == "myproject.0.0"
+        # Creates sibling C1 under L0 (walks up past C-prefixed ancestors)
+        assert result == "myproject.L0.C1"
         assert args.get("_tree_context_built") is True
 
         bridge = args["_tree_bridge"]
-        assert bridge["tool_path"] == "myproject.0.0"
+        assert bridge["tool_path"] == "myproject.L0.C1"
         assert bridge["tool_name"] == "thinkdeep"
         assert bridge["mode"] == "continue"
 
@@ -423,24 +442,31 @@ class TestResolveTreeContinuation:
 
         store = self._make_store(tmp_path, monkeypatch, "myproject", "/tmp/proj")
 
-        existing_node = PalNode(
+        # Valid structure: L0 with a C-prefixed continuation stub
+        l0_node = PalNode(
+            tool_name="addtreelayer",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            input="context layer",
+            output="stored",
+        )
+        l0_node.children["C0"] = PalNode(
             tool_name="thinkdeep",
             timestamp=datetime.now(timezone.utc).isoformat(),
             input="initial prompt",
             output="initial response",
         )
-        store.children["0"] = existing_node
+        store.children["L0"] = l0_node
         save_tree(store)
 
-        args = {"continuation_id": "myproject.0"}
+        args = {"continuation_id": "myproject.L0.C0"}
         result = _resolve_tree_continuation("analyze", args)
 
-        # Any tool targeting any node creates a numeric child — no FORK mode
-        assert result == "myproject.0.0"
+        # Different tool creates sibling under same L node
+        assert result == "myproject.L0.C1"
         assert args.get("_tree_context_built") is True
 
         bridge = args["_tree_bridge"]
-        assert bridge["tool_path"] == "myproject.0.0"
+        assert bridge["tool_path"] == "myproject.L0.C1"
         assert bridge["tool_name"] == "analyze"
         assert bridge["mode"] == "continue"
 
@@ -452,37 +478,57 @@ class TestResolveTreeContinuation:
 
         store = self._make_store(tmp_path, monkeypatch, "myproject", "/tmp/proj")
 
-        query_node = PalNode(
+        # Valid structure: L0 with Q0 child
+        l0_node = PalNode(
+            tool_name="addtreelayer",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            input="context layer",
+            output="stored",
+        )
+        l0_node.children["Q0"] = PalNode(
             timestamp=datetime.now(timezone.utc).isoformat(),
             input="query prompt",
             output="query response",
         )
-        store.children["0"] = query_node
+        store.children["L0"] = l0_node
         save_tree(store)
 
-        args = {"continuation_id": "myproject.0"}
+        args = {"continuation_id": "myproject.L0.Q0"}
         result = _resolve_tree_continuation("thinkdeep", args)
 
-        assert result == "myproject.0.0"
+        # Q0 is not numeric — stub created as child of Q0
+        assert result == "myproject.L0.Q0.C0"
 
         bridge = args["_tree_bridge"]
-        assert bridge["tool_path"] == "myproject.0.0"
+        assert bridge["tool_path"] == "myproject.L0.Q0.C0"
         assert bridge["mode"] == "continue"
 
     def test_child_index_increments(self, tmp_path, monkeypatch):
+        from datetime import datetime, timezone
+
         from server import _resolve_tree_continuation
+        from utils.palstore import PalNode, save_tree
 
-        self._make_store(tmp_path, monkeypatch, "myproject", "/tmp/proj")
+        store = self._make_store(tmp_path, monkeypatch, "myproject", "/tmp/proj")
 
-        # First call — no children; creates "0"
+        # Root must have L nodes for stubs to nest under
+        store.children["L0"] = PalNode(
+            tool_name="addtreelayer",
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            input="context layer",
+            output="stored",
+        )
+        save_tree(store)
+
+        # First call — creates C0 under L0
         args1 = {"continuation_id": "myproject"}
         result1 = _resolve_tree_continuation("thinkdeep", args1)
-        assert result1 == "myproject.0"
+        assert result1 == "myproject.L0.C0"
 
-        # Second call: reload from disk so "0" is visible, then creates "1"
+        # Second call: C0 exists under L0, creates C1
         args2 = {"continuation_id": "myproject"}
         result2 = _resolve_tree_continuation("thinkdeep", args2)
-        assert result2 == "myproject.1"
+        assert result2 == "myproject.L0.C1"
 
 
 class TestInjectTreePathContinuation:
@@ -836,14 +882,14 @@ class TestPalUpsertTool:
             tree_path="test-child",
             directory=str(tmp_path),
             created_at="2024-01-01T00:00:00Z",
-            children={"0": PalNode(label="layer")},
+            children={"L0": PalNode(label="layer")},
         )
         save_tree(store)
         update_index(str(tmp_path), "test-child")
 
         result = await self.tool.execute(
             {
-                "tree_path": "test-child.0",
+                "tree_path": "test-child.L0",
                 "insert": True,
                 "label": "manual query",
                 "input": "test input",
@@ -854,7 +900,7 @@ class TestPalUpsertTool:
 
         data = json.loads(result[0].text)
         assert data["status"] == "success"
-        assert "test-child.0.0" in data["content"]
+        assert "test-child.L0." in data["content"]
 
     @pytest.mark.asyncio
     async def test_update_mode_metadata_merge(self, tmp_path):

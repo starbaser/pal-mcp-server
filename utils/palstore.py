@@ -421,6 +421,113 @@ def collect_traversal(
     return nodes, tlog
 
 
+# ---------------------------------------------------------------------------
+# Strata traversal — L-nodes as concentric tree rings
+# ---------------------------------------------------------------------------
+
+
+def _parse_node_point(node_path: str, tree: PalRoot) -> tuple[int, list[str]]:
+    """Parse a node_path into (layer_number, sublayer_segments).
+
+    'L24.Q7.F0.thinkdeep' → (24, ['Q7', 'F0', 'thinkdeep'])
+    'L3'                   → (3, [])
+    'L'                    → (max_layer, [])   # shorthand for last layer
+    ''                     → (1, [])           # empty = first layer
+    """
+    if not node_path:
+        # Empty means first layer
+        l_keys = sorted(
+            [k for k in tree.children if re.match(r"^L\d+$", k)],
+            key=lambda k: int(k[1:]),
+        )
+        if not l_keys:
+            raise ValueError("Tree has no L-nodes")
+        return int(l_keys[0][1:]), []
+
+    parts = node_path.split(".")
+    layer_key = parts[0]
+    sublayer = parts[1:]
+
+    if layer_key == "L":
+        # Shorthand: last layer
+        l_keys = sorted(
+            [k for k in tree.children if re.match(r"^L\d+$", k)],
+            key=lambda k: int(k[1:]),
+        )
+        if not l_keys:
+            raise ValueError("Tree has no L-nodes")
+        return int(l_keys[-1][1:]), sublayer
+
+    m = re.match(r"^L(\d+)$", layer_key)
+    if not m:
+        raise ValueError(f"node_path must start with an L-key, got: {layer_key!r}")
+
+    return int(m.group(1)), sublayer
+
+
+def calc_traversal(
+    tree: PalRoot,
+    node_a: str,
+    node_b: str,
+) -> Generator[tuple[str, PalNode], None, None]:
+    """Yield (full_path, node) pairs for a strata traversal between two nodes.
+
+    L-nodes at root level are concentric strata (tree rings). This generator
+    walks through consecutive layers in chronological order, expanding both
+    endpoints inward through their sublayer paths.
+
+    Algorithm:
+    1. Parse both nodes into (layer_num, sublayer_path)
+    2. Sort chronologically (lower layer first)
+    3. For each layer in the range:
+       - At the earlier endpoint's layer: yield L-node, then expand sublayer
+       - At intermediate layers: yield L-node only (cross-section)
+       - At the later endpoint's layer: yield L-node, then expand sublayer
+    """
+    layer_a, sublayer_a = _parse_node_point(node_a, tree)
+    layer_b, sublayer_b = _parse_node_point(node_b, tree)
+
+    # Sort chronologically — earlier layer first
+    if layer_a <= layer_b:
+        earlier_layer, earlier_sub = layer_a, sublayer_a
+        later_layer, later_sub = layer_b, sublayer_b
+    else:
+        earlier_layer, earlier_sub = layer_b, sublayer_b
+        later_layer, later_sub = layer_a, sublayer_a
+
+    # Collect all L-keys at root level, sorted
+    l_keys = sorted(
+        [(int(k[1:]), k) for k in tree.children if re.match(r"^L\d+$", k)],
+        key=lambda t: t[0],
+    )
+
+    for layer_num, l_key in l_keys:
+        if layer_num < earlier_layer or layer_num > later_layer:
+            continue
+
+        l_node = tree.children[l_key]
+        l_path = f"{tree.tree_path}.{l_key}"
+        yield l_path, l_node
+
+        # Expand sublayer at endpoints
+        sublayer: list[str] | None = None
+        if layer_num == earlier_layer and earlier_sub:
+            sublayer = earlier_sub
+        elif layer_num == later_layer and later_sub:
+            sublayer = later_sub
+
+        if sublayer:
+            current_node = l_node
+            current_path = l_path
+            for seg in sublayer:
+                child = current_node.children.get(seg)
+                if child is None:
+                    break
+                current_path = f"{current_path}.{seg}"
+                yield current_path, child
+                current_node = child
+
+
 def get_next_key(tree: PalRoot, parent_path: str, prefix: str = "") -> str:
     """Compute the next available child key for a given prefix at parent_path.
 

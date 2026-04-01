@@ -2009,10 +2009,12 @@ class PalTraverseTool(BaseTool):
 
     def get_description(self) -> str:
         return (
-            "Traverse a PALTree path from start_node to end_node and render the exact "
-            "conversation history content that would be sent to the PAL model — full thread "
-            "rehydration with all turns and file blobs. "
-            "The end_node must be a descendant of start_node."
+            "Traverse a PALTree between two nodes and render the conversation history.\n"
+            "Supports two modes:\n"
+            "  Strata traversal: when start/end are in different L-layers, walks through all\n"
+            "  intermediate layers chronologically (tree rings). Both endpoints expand inward.\n"
+            "  Ancestry traversal: when start is an ancestor of end, walks the parent→child chain.\n"
+            "Use 'L' (no number) as shorthand for the last layer."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -2026,14 +2028,15 @@ class PalTraverseTool(BaseTool):
                 "start_node": {
                     "type": "string",
                     "description": (
-                        "Segment path relative to tree root for the start of the range(e.g. '0', '2.1'). Inclusive."
+                        "Node path for the start of the range (e.g. 'L1', 'L2.Q3'). "
+                        "Use 'L' for the last layer. Inclusive."
                     ),
                 },
                 "end_node": {
                     "type": "string",
                     "description": (
-                        "Segment path relative to tree root for the end of the range"
-                        "(e.g. '4', '2.1.0'). Must be a descendant of start_node. Inclusive."
+                        "Node path for the end of the range (e.g. 'L43', 'L24.Q7.F0.thinkdeep'). "
+                        "Use 'L' for the last layer. Inclusive."
                     ),
                 },
             },
@@ -2066,7 +2069,7 @@ class PalTraverseTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         from tools.models import ToolOutput
-        from utils.palstore import collect_traversal, iter_range, load_tree, resolve_tree_location
+        from utils.palstore import calc_traversal, collect_traversal, load_tree, resolve_tree_location
         from utils.palstore_builder import build_context_from_ancestry
 
         tree_path = arguments.get("tree_path", "")
@@ -2090,11 +2093,8 @@ class PalTraverseTool(BaseTool):
             error = ToolOutput(status="error", content=f'PALTree file not found: "{root_id}".', content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        start_full = f"{root_id}.{start_node}"
-        end_full = f"{root_id}.{end_node}"
-
         try:
-            range_nodes, tlog = collect_traversal(iter_range(tree, start_full, end_full), "range")
+            range_nodes, tlog = collect_traversal(calc_traversal(tree, start_node, end_node), "strata")
         except ValueError as exc:
             error = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
@@ -2111,7 +2111,6 @@ class PalTraverseTool(BaseTool):
                 "tree_path": tree_path,
                 "start_node": start_node,
                 "end_node": end_node,
-                "traversed_path": f"{start_full} → {end_full}",
                 **tlog.to_dict(),
             },
         )

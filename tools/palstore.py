@@ -43,75 +43,28 @@ def _natural_sort_key(key: str) -> tuple:
 
 
 def _render_tree(tree, root_path: str = "", indent: int = 0) -> list[str]:
-    """Render a tree's node dict as indented markdown link lines.
-
-    Consecutive same-prefix leaf nodes (3+) are collapsed into ranges:
-      L[1:5] instead of L1, L2, L3, L4, L5
-    Nodes with children or non-consecutive indices are rendered individually.
-    """
-    import re
-
+    """Render a tree's node dict as indented markdown link lines."""
     from utils.palstore import PalNode
 
     lines: list[str] = []
 
-    def _render_single(key: str, node: PalNode, parent_path: str, depth: int) -> None:
-        p = "  " * depth
-        full_path = f"{parent_path}.{key}"
-        ts = (node.timestamp or "")[:10]
-        if node.label:
-            label_part = node.label if node.label.startswith(f"{key}:") else f"{key}. {node.label}"
-        else:
-            label_part = key
-        date_part = f" — {ts}" if ts else ""
-        files_part = ""
-        if node.files:
-            basenames = ", ".join(os.path.basename(f) for f in node.files)
-            files_part = f" — {basenames}"
-        lines.append(f"{p}- [{label_part}](#{full_path}){date_part}{files_part}")
-        if node.children:
-            _render_nodes(node.children, full_path, depth + 1)
-
     def _render_nodes(nodes: dict[str, PalNode], parent_path: str, depth: int) -> None:
         p = "  " * depth
-        sorted_items = sorted(nodes.items(), key=lambda kv: _natural_sort_key(kv[0]))
-
-        # Group consecutive same-prefix leaf nodes for range compression
-        i = 0
-        while i < len(sorted_items):
-            key, node = sorted_items[i]
-            m = re.match(r"^([A-Z])(\d+)$", key)
-
-            if not m or node.children:
-                _render_single(key, node, parent_path, depth)
-                i += 1
-                continue
-
-            # Typed leaf node — try to extend a consecutive range
-            prefix, idx = m.group(1), int(m.group(2))
-            run_start = i
-            run_end_idx = idx
-            j = i + 1
-            while j < len(sorted_items):
-                nk, nn = sorted_items[j]
-                nm = re.match(r"^([A-Z])(\d+)$", nk)
-                if not nm or nm.group(1) != prefix or nn.children:
-                    break
-                next_idx = int(nm.group(2))
-                if next_idx != run_end_idx + 1:
-                    break
-                run_end_idx = next_idx
-                j += 1
-
-            run_len = j - run_start
-            if run_len >= 3:
-                lines.append(f"{p}- {prefix}[{idx}:{run_end_idx}]")
-                # Render first and last individually for context
-                i = j
+        for key, node in sorted(nodes.items(), key=lambda kv: _natural_sort_key(kv[0])):
+            full_path = f"{parent_path}.{key}"
+            ts = (node.timestamp or "")[:10]
+            if node.label:
+                label_part = node.label if node.label.startswith(f"{key}:") else f"{key}. {node.label}"
             else:
-                for k in range(run_start, j):
-                    _render_single(*sorted_items[k], parent_path, depth)
-                i = j
+                label_part = key
+            date_part = f" — {ts}" if ts else ""
+            files_part = ""
+            if node.files:
+                basenames = ", ".join(os.path.basename(f) for f in node.files)
+                files_part = f" — {basenames}"
+            lines.append(f"{p}- [{label_part}](#{full_path}){date_part}{files_part}")
+            if node.children:
+                _render_nodes(node.children, full_path, depth + 1)
 
     if isinstance(tree, dict):
         _render_nodes(tree, root_path, indent)

@@ -217,7 +217,7 @@ MCP tool names follow a scope convention: **node tools** (`*node`) operate on a 
 
 The MCP parameter `tree_path` identifies nodes using dot-path notation. The `PalRoot` model field is also `tree_path`. A `model_validator(mode="before")` on `PalRoot` transparently migrates legacy JSON files that still use the legacy `store_id` key.
 
-**PALTree path**: `ρ.S₁.S₂.⋯.Sₖ` where each segment `Sᵢ ∈ [LQFC]\d+` and parent→child type must satisfy the transition table above. Treelist compresses 3+ consecutive same-prefix leaf nodes into range notation: `L[1:5]`.
+**PALTree path**: `ρ.S₁.S₂.⋯.Sₖ` where each segment `Sᵢ ∈ [LQFC]\d+` and parent→child type must satisfy the transition table above. Range notation `L[1:5]` is used in documentation to describe consecutive same-prefix siblings compactly.
 
 | MCP tool name    | Source class         | Model required | Scope |
 |------------------|----------------------|----------------|-------|

@@ -179,9 +179,7 @@ class TraversalLog:
             if node_path:
                 tree_chains[tree_name].append(node_path)
 
-        traversal_order = [
-            f"{name}:{'-'.join(nodes)}" if nodes else name for name, nodes in tree_chains.items()
-        ]
+        traversal_order = [f"{name}:{'-'.join(nodes)}" if nodes else name for name, nodes in tree_chains.items()]
 
         return {
             "traversal_type": self.traversal_type,
@@ -428,6 +426,37 @@ def iter_ancestry(tree: PalRoot, node_path: str) -> Generator[tuple[str, PalNode
         full_path = f"{tree.tree_path}.{'.'.join(segments[: i + 1])}"
         yield full_path, node
         current = node.children
+
+
+def iter_context(tree: PalRoot, node_path: str) -> Generator[tuple[str, PalNode], None, None]:
+    """Yield (full_path, node) pairs for model context building.
+
+    Strata-aware: if node_path targets an L-node (or descends from one),
+    walks all L-strata from L1 to the target via calc_traversal.
+    Empty node_path defaults to a full strata walk through the last layer.
+    Non-L paths fall back to iter_ancestry.
+
+    This is the correct traversal for model-calling tools (addtreelayer,
+    querynode) where the model needs full strata context.
+    """
+    if not node_path:
+        # Default: walk all layers (L1 through last)
+        l_keys = sorted(
+            [k for k in tree.children if re.match(r"^L\d+$", k)],
+            key=lambda k: int(k[1:]),
+        )
+        if not l_keys:
+            return
+        node_path = l_keys[-1]
+
+    first_seg = node_path.split(".")[0]
+    is_l_rooted = bool(re.match(r"^L\d*$", first_seg))
+
+    if is_l_rooted:
+        # Strata walk: L1 through the target node
+        yield from calc_traversal(tree, "", node_path)
+    else:
+        yield from iter_ancestry(tree, node_path)
 
 
 def iter_dfs(root_path: str, children: dict[str, PalNode]) -> Generator[tuple[str, PalNode], None, None]:
@@ -905,13 +934,27 @@ def resolve_tree_path(raw: str) -> str:
     # Shorthand: scan index for matching tree_name
     index = load_index()
     matches = []
-    for canonical in index["trees"]:
-        if ":" in canonical:
-            tree_name = canonical.rsplit(":", 1)[1]
+    for key in index["trees"]:
+        if ":" in key:
+            tree_name = key.rsplit(":", 1)[1]
             if tree_name == raw:
-                matches.append(canonical)
-        elif canonical == raw:
-            matches.append(canonical)
+                matches.append(key)
+        elif key == raw:
+            # Legacy index entry (pre-migration) — resolve by loading the tree file
+            encoded = index["trees"][key]
+            candidate = os.path.join(_CTX_DIR, encoded, f"{raw}.json")
+            if os.path.exists(candidate):
+                try:
+                    with open(candidate) as f:
+                        data = json.load(f)
+                    tree = PalRoot.model_validate(data)
+                    # Migrate index entry
+                    index["trees"].pop(key, None)
+                    index["trees"][tree.tree_path] = encoded
+                    save_index(index)
+                    return tree.tree_path
+                except (json.JSONDecodeError, OSError, ValueError):
+                    pass
 
     if len(matches) == 1:
         return matches[0]

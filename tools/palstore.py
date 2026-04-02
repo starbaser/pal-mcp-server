@@ -138,11 +138,12 @@ class PalTreeBaseTool(SimpleTool):
     def _resolve_tree(self, tree_path: str):
         """Load tree for a given tree_path. Returns (tree, canonical).
 
-        tree_path can be canonical or shorthand. Raises KeyError if not found.
+        tree_path can be canonical, shorthand, or combined form with node segments.
+        Raises KeyError if not found.
         """
-        from utils.palstore import load_tree, resolve_tree_path
+        from utils.palstore import load_tree, parse_tree_path
 
-        canonical = resolve_tree_path(tree_path)
+        canonical, _ = parse_tree_path(tree_path)
         tree = load_tree(canonical)
         if tree is None:
             raise KeyError(f'PALTree file not found: "{canonical}".')
@@ -370,10 +371,10 @@ class PalAddTreeLayerTool(PalTreeBaseTool):
         node_path = ".".join(node_segments)
 
         from utils.file_diff import build_file_state_from_ancestry
-        from utils.palstore import collect_traversal, iter_ancestry
+        from utils.palstore import collect_traversal, iter_context
         from utils.palstore_builder import build_context_from_ancestry
 
-        ancestors, tlog = collect_traversal(iter_ancestry(tree, node_path), "ancestry")
+        ancestors, tlog = collect_traversal(iter_context(tree, node_path), "strata")
         self._tlog = tlog
         self._ancestors = ancestors
         self._prior_file_state = build_file_state_from_ancestry(ancestors)
@@ -856,7 +857,7 @@ class PalQueryTool(PalTreeBaseTool):
             error = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        from utils.palstore import collect_traversal, iter_ancestry, parse_tree_path, resolve_node
+        from utils.palstore import collect_traversal, parse_tree_path, resolve_node
         from utils.palstore_builder import build_context_from_ancestry
 
         _, node_segments = parse_tree_path(tree_path)
@@ -875,7 +876,9 @@ class PalQueryTool(PalTreeBaseTool):
         self._parent_node_path = node_path
         self._child_prefix = "Q"
 
-        ancestors, tlog = collect_traversal(iter_ancestry(tree, node_path), "ancestry")
+        from utils.palstore import iter_context
+
+        ancestors, tlog = collect_traversal(iter_context(tree, node_path), "strata")
         self._tlog = tlog
 
         self._injected_history = build_context_from_ancestry(ancestors)

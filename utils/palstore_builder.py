@@ -37,9 +37,9 @@ def build_tree_context(
     Returns the mutated arguments dict with injected history and metadata.
     Stores a TraversalLog in arguments["_traversal_log"].
     """
-    from utils.palstore import collect_traversal, iter_ancestry
+    from utils.palstore import collect_traversal, iter_context
 
-    ancestors, tlog = collect_traversal(iter_ancestry(tree, node_path), "ancestry")
+    ancestors, tlog = collect_traversal(iter_context(tree, node_path), "strata")
     arguments["_traversal_log"] = tlog
 
     # Filter to content nodes (skip empty nodes)

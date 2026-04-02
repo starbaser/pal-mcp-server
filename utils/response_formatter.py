@@ -1,3 +1,4 @@
+import json
 import logging
 
 from oboros import tome
@@ -57,10 +58,33 @@ def format_layer_markdown(
     return "\n".join(lines)
 
 
+def _deep_parse_json_strings(obj):
+    """Recursively parse string values that contain JSON dicts or lists.
+
+    Ensures TOME sees structured data instead of stringified JSON blobs.
+    Only replaces strings that decode to dict or list — scalar JSON values
+    ("true", "123", "null") are left as-is.
+    """
+    if isinstance(obj, dict):
+        return {k: _deep_parse_json_strings(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_deep_parse_json_strings(v) for v in obj]
+    if isinstance(obj, str):
+        try:
+            parsed = json.loads(obj)
+            if isinstance(parsed, (dict, list)):
+                return _deep_parse_json_strings(parsed)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return obj
+
+
 def render_markdown_output(data: dict) -> str:
     """Transform a tool output dict into TOME format (BFS-linearized markdown).
 
     Uses oboros.tome for token-optimized serialization. Multi-line text fields
     are extracted as markdown sections, scalar metadata stays in YAML frontmatter.
+    String values containing serialized JSON dicts/lists are parsed before
+    rendering so TOME can structure them properly.
     """
-    return tome.dumps(data)
+    return tome.dumps(_deep_parse_json_strings(data))

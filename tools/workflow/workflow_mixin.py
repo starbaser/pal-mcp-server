@@ -1167,11 +1167,16 @@ class BaseWorkflowMixin(ABC):
                 context_window = arguments.get("_context_window")
                 context_used = arguments.get("_context_used")
                 if context_window is not None or context_used is not None:
+                    from tools.models import ContextUsage
+
                     _window = context_window or 0
                     _used = context_used or 0
-                    metadata["context_window"] = _window
-                    metadata["context_used"] = _used
-                    metadata["context_remaining"] = _window - _used
+                    ctx = ContextUsage(
+                        context_window=_window,
+                        context_used=_used,
+                        context_remaining=_window - _used,
+                    )
+                    metadata.update(ctx.model_dump())
 
                 # Preserve existing metadata and add workflow metadata
                 if "metadata" not in response_data:
@@ -1197,8 +1202,7 @@ class BaseWorkflowMixin(ABC):
                 response_data["metadata"].update(metadata)
 
                 logger.debug(
-                    f"[WORKFLOW_METADATA] {self.get_name()}: Added fallback metadata - "
-                    f"model: {model_name or '(none)'}"
+                    f"[WORKFLOW_METADATA] {self.get_name()}: Added fallback metadata - model: {model_name or '(none)'}"
                 )
 
         except Exception as e:

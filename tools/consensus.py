@@ -552,23 +552,9 @@ of the evidence, even when it strongly points in one direction.""",
         try:
             from tools.models import ContinuationOffer
 
-            context_window = 0
-            context_used = 0
-
-            if arguments:
-                context_window = arguments.get("_context_window", 0)
-                context_used = arguments.get("_context_used", 0)
-                if not context_window:
-                    model_ctx = arguments.get("_model_context")
-                    if model_ctx and hasattr(model_ctx, "capabilities"):
-                        context_window = model_ctx.capabilities.context_window or 0
-
             continuation_offer = ContinuationOffer(
                 continuation_id=continuation_id,
                 note="Consensus workflow is active and can be continued.",
-                context_window=context_window,
-                context_used=context_used,
-                context_remaining=max(0, context_window - context_used),
             )
             return continuation_offer.model_dump()
         except Exception:

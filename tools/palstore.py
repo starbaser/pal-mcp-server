@@ -476,11 +476,8 @@ class PalAddTreeLayerTool(PalTreeBaseTool):
         self._new_node_path = new_node_path
         continuation_id = f"{tree.tree_name}.{new_node_path}"
 
-        context_window, context_used = self._get_context_token_info()
         return {
             "continuation_id": continuation_id,
-            "context_window": context_window,
-            "context_used": context_used,
             "note": f"Layer stored at {tree.tree_name}.{new_node_path}.",
         }
 
@@ -936,11 +933,8 @@ class PalQueryTool(PalTreeBaseTool):
         self._new_node_path = new_node_path
         continuation_id = f"{tree.tree_name}.{new_node_path}"
 
-        context_window, context_used = self._get_context_token_info()
         return {
             "continuation_id": continuation_id,
-            "context_window": context_window,
-            "context_used": context_used,
             "note": f"Query recorded at {tree.tree_name}.{new_node_path}.",
         }
 

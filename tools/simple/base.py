@@ -728,25 +728,20 @@ class SimpleTool(BaseTool):
         return context_window, context_used
 
     def _create_continuation_offer(self, request, _model_info: Optional[dict] = None):
-        """Create continuation offer with context usage information."""
+        """Create continuation offer."""
         continuation_id = self.get_request_continuation_id(request)
-        context_window, context_used = self._get_context_token_info()
 
         try:
             from utils.conversation_memory import create_thread, get_thread
 
             if continuation_id:
-                # Existing conversation
                 thread_context = get_thread(continuation_id)
                 if thread_context and thread_context.turns:
                     return {
                         "continuation_id": continuation_id,
-                        "context_window": context_window,
-                        "context_used": context_used,
                         "note": "Conversation is active and can be continued.",
                     }
             else:
-                # New conversation - create thread and offer continuation
                 initial_request_dict = self.get_request_as_dict(request)
                 resolved_model = (
                     self._current_arguments.get("_resolved_model_name")
@@ -769,8 +764,6 @@ class SimpleTool(BaseTool):
 
                 return {
                     "continuation_id": new_thread_id,
-                    "context_window": context_window,
-                    "context_used": context_used,
                     "note": "Conversation is active and can be continued.",
                 }
         except Exception:
@@ -780,7 +773,7 @@ class SimpleTool(BaseTool):
         self, content: str, continuation_data: dict, request, model_info: Optional[dict] = None
     ):
         """Create response with continuation offer following old base.py pattern"""
-        from tools.models import ContinuationOffer, ToolOutput
+        from tools.models import ContextUsage, ContinuationOffer, ToolOutput
 
         try:
             if not self.get_request_continuation_id(request):
@@ -791,14 +784,9 @@ class SimpleTool(BaseTool):
                     model_info,
                 )
 
-            ctx_window = continuation_data.get("context_window", 0)
-            ctx_used = continuation_data.get("context_used", 0)
             continuation_offer = ContinuationOffer(
                 continuation_id=continuation_data["continuation_id"],
                 note=continuation_data["note"],
-                context_window=ctx_window,
-                context_used=ctx_used,
-                context_remaining=max(0, ctx_window - ctx_used),
             )
 
             # Build metadata with model and provider info
@@ -809,15 +797,23 @@ class SimpleTool(BaseTool):
                     metadata["model_used"] = model_name
                 provider = model_info.get("provider")
                 if provider:
-                    # Handle both provider objects and string values
                     if isinstance(provider, str):
                         metadata["provider_used"] = provider
                     else:
                         try:
                             metadata["provider_used"] = provider.get_provider_type().value
                         except AttributeError:
-                            # Fallback if provider doesn't have get_provider_type method
                             metadata["provider_used"] = str(provider)
+
+            # Add context usage metrics
+            ctx_window, ctx_used = self._get_context_token_info()
+            if ctx_window or ctx_used:
+                ctx = ContextUsage(
+                    context_window=ctx_window,
+                    context_used=ctx_used,
+                    context_remaining=max(0, ctx_window - ctx_used),
+                )
+                metadata.update(ctx.model_dump())
 
             return ToolOutput(
                 status="continuation_available",

@@ -17,6 +17,14 @@ class ToolModelCategory(Enum):
     IMAGE_GENERATION = "image_generation"  # Native image generation capability
 
 
+class ContextUsage(BaseModel):
+    """Token budget metrics for a model-calling tool invocation."""
+
+    context_window: int = Field(0, description="Total model context window in tokens")
+    context_used: int = Field(0, description="Tokens consumed by conversation history")
+    context_remaining: int = Field(0, description="Tokens remaining in context window")
+
+
 class ContinuationOffer(BaseModel):
     """Offer for CLI agent to continue conversation"""
 
@@ -24,9 +32,6 @@ class ContinuationOffer(BaseModel):
         ..., description="Thread continuation ID for multi-turn conversations across different tools"
     )
     note: str = Field(..., description="Message explaining continuation opportunity to CLI agent")
-    context_window: int = Field(..., description="Total model context window in tokens")
-    context_used: int = Field(..., description="Tokens consumed by conversation history")
-    context_remaining: int = Field(..., description="Tokens remaining in context window")
 
 
 class ToolOutput(BaseModel):

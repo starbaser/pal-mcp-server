@@ -546,9 +546,6 @@ class TestInjectTreePathContinuation:
                 "continuation_offer": {
                     "continuation_id": "some-uuid-value",
                     "note": "Conversation active.",
-                    "context_window": 100000,
-                    "context_used": 5000,
-                    "context_remaining": 95000,
                 },
             }
         )

@@ -40,14 +40,11 @@ def test_render_continuation_offer():
         "continuation_offer": {
             "continuation_id": "abc-123",
             "note": "Continue the conversation.",
-            "context_window": 200000,
-            "context_used": 5000,
         },
     }
     md = render_markdown_output(data)
 
     assert "continuation_id: abc-123" in md
-    assert "context_window: 200000" in md
 
 
 def test_render_empty_content():

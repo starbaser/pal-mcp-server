@@ -504,6 +504,7 @@ def configure_providers():
     from providers.shared import ProviderType
     from providers.xai import XAIModelProvider
     from providers.zai import ZAIModelProvider
+    from providers.zai_anthropic import ZAIAnthropicProvider
     from utils.model_restrictions import get_restriction_service
 
     valid_providers = []
@@ -558,12 +559,17 @@ def configure_providers():
         valid_providers.append("X.AI (GROK)")
         has_native_apis = True
 
-    # Check for ZAI API key
+    # Check for ZAI API key (OpenAI-compat endpoint)
     zai_key = get_env("ZAI_API_KEY")
     if zai_key and zai_key != "your_zai_api_key_here":
         valid_providers.append("ZAI (GLM)")
         has_native_apis = True
-        logger.info("X.AI API key found - GROK models available")
+
+    # Check for ZAI Anthropic API key (Anthropic-compat endpoint)
+    zai_anthropic_key = get_env("ZAI_ANTHROPIC_API_KEY")
+    if zai_anthropic_key and zai_anthropic_key != "your_zai_api_key_here":
+        valid_providers.append("ZAI Anthropic (GLM)")
+        has_native_apis = True
 
     # Check for DIAL API key
     dial_key = get_env("DIAL_API_KEY")
@@ -627,6 +633,10 @@ def configure_providers():
             ModelProviderRegistry.register_provider(ProviderType.ZAI, ZAIModelProvider)
             registered_providers.append(ProviderType.ZAI.value)
             logger.debug(f"Registered provider: {ProviderType.ZAI.value}")
+        if zai_anthropic_key and zai_anthropic_key != "your_zai_api_key_here":
+            ModelProviderRegistry.register_provider(ProviderType.ZAI_ANTHROPIC, ZAIAnthropicProvider)
+            registered_providers.append(ProviderType.ZAI_ANTHROPIC.value)
+            logger.debug(f"Registered provider: {ProviderType.ZAI_ANTHROPIC.value}")
         if dial_key and dial_key != "your_dial_api_key_here":
             ModelProviderRegistry.register_provider(ProviderType.DIAL, DIALModelProvider)
             registered_providers.append(ProviderType.DIAL.value)

@@ -40,7 +40,8 @@ class ModelProviderRegistry:
         ProviderType.OPENAI,  # Direct OpenAI access
         ProviderType.AZURE,  # Azure-hosted OpenAI deployments
         ProviderType.XAI,  # Direct X.AI GROK access
-        ProviderType.ZAI,  # Direct ZAI GLM access
+        ProviderType.ZAI,  # Direct ZAI GLM access (OpenAI-compat)
+        ProviderType.ZAI_ANTHROPIC,  # Direct ZAI GLM access (Anthropic-compat)
         ProviderType.DIAL,  # DIAL unified API access
         ProviderType.CUSTOM,  # Local/self-hosted models
         ProviderType.OPENROUTER,  # Catch-all for cloud models
@@ -143,8 +144,14 @@ class ModelProviderRegistry:
         else:
             if not api_key:
                 return None
-            # Initialize non-custom provider with just API key
-            provider = provider_class(api_key=api_key)
+            # Check for provider-specific base URL override
+            provider_kwargs: dict = {"api_key": api_key}
+            base_url_env = f"{provider_type.value.upper()}_BASE_URL"
+            custom_base_url = get_env(base_url_env)
+            if custom_base_url:
+                provider_kwargs["base_url"] = custom_base_url
+                logging.info(f"Initialized {provider_type.value} provider with custom endpoint: {custom_base_url}")
+            provider = provider_class(**provider_kwargs)
 
         # Cache the instance
         instance._initialized_providers[provider_type] = provider
@@ -338,6 +345,7 @@ class ModelProviderRegistry:
             ProviderType.AZURE: "AZURE_OPENAI_API_KEY",
             ProviderType.XAI: "XAI_API_KEY",
             ProviderType.ZAI: "ZAI_API_KEY",
+            ProviderType.ZAI_ANTHROPIC: "ZAI_ANTHROPIC_API_KEY",
             ProviderType.OPENROUTER: "OPENROUTER_API_KEY",
             ProviderType.CUSTOM: "CUSTOM_API_KEY",  # Can be empty for providers that don't need auth
             ProviderType.DIAL: "DIAL_API_KEY",

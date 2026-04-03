@@ -22,10 +22,30 @@
   },
   "models": [
     {
+      "model_name": "glm-5.1",
+      "friendly_name": "ZAI (GLM-5.1)",
+      "aliases": [
+        "glm",
+        "glm5.1"
+      ],
+      "intelligence_score": 18,
+      "description": "GLM-5.1 (200K context) - Latest flagship with extended thinking support",
+      "context_window": 200000,
+      "max_output_tokens": 128000,
+      "max_thinking_tokens": 32768,
+      "supports_extended_thinking": true,
+      "supports_system_prompts": true,
+      "supports_streaming": true,
+      "supports_function_calling": true,
+      "supports_json_mode": true,
+      "supports_images": false,
+      "supports_temperature": true,
+      "max_image_size_mb": 0.0
+    },
+    {
       "model_name": "glm-5",
       "friendly_name": "ZAI (GLM-5)",
       "aliases": [
-        "glm",
         "glm5"
       ],
       "intelligence_score": 17,
@@ -34,6 +54,68 @@
       "max_output_tokens": 128000,
       "max_thinking_tokens": 32768,
       "supports_extended_thinking": true,
+      "supports_system_prompts": true,
+      "supports_streaming": true,
+      "supports_function_calling": true,
+      "supports_json_mode": true,
+      "supports_images": false,
+      "supports_temperature": true,
+      "max_image_size_mb": 0.0
+    },
+    {
+      "model_name": "glm-5-turbo",
+      "friendly_name": "ZAI (GLM-5 Turbo)",
+      "aliases": [
+        "glm-turbo",
+        "glm5-turbo"
+      ],
+      "intelligence_score": 15,
+      "description": "GLM-5 Turbo (200K context) - Fast variant of GLM-5 with extended thinking",
+      "context_window": 200000,
+      "max_output_tokens": 64000,
+      "max_thinking_tokens": 16384,
+      "supports_extended_thinking": true,
+      "supports_system_prompts": true,
+      "supports_streaming": true,
+      "supports_function_calling": true,
+      "supports_json_mode": true,
+      "supports_images": false,
+      "supports_temperature": true,
+      "max_image_size_mb": 0.0
+    },
+    {
+      "model_name": "glm-4.7",
+      "friendly_name": "ZAI (GLM-4.7)",
+      "aliases": [
+        "glm4.7",
+        "glm4"
+      ],
+      "intelligence_score": 14,
+      "description": "GLM-4.7 (128K context) - Previous generation flagship with extended thinking",
+      "context_window": 128000,
+      "max_output_tokens": 64000,
+      "max_thinking_tokens": 16384,
+      "supports_extended_thinking": true,
+      "supports_system_prompts": true,
+      "supports_streaming": true,
+      "supports_function_calling": true,
+      "supports_json_mode": true,
+      "supports_images": false,
+      "supports_temperature": true,
+      "max_image_size_mb": 0.0
+    },
+    {
+      "model_name": "glm-4.7-flash",
+      "friendly_name": "ZAI (GLM-4.7 Flash)",
+      "aliases": [
+        "glm-flash",
+        "glm4.7-flash"
+      ],
+      "intelligence_score": 10,
+      "description": "GLM-4.7 Flash (128K context) - Lightweight fast model",
+      "context_window": 128000,
+      "max_output_tokens": 32000,
+      "supports_extended_thinking": false,
       "supports_system_prompts": true,
       "supports_streaming": true,
       "supports_function_calling": true,

@@ -213,16 +213,88 @@
       "max_image_size_mb": 20.0
     },
     {
+      "model_name": "gpt-5.4",
+      "friendly_name": "OpenAI (GPT-5.4)",
+      "aliases": [
+        "gpt5.4",
+        "5.4"
+      ],
+      "intelligence_score": 19,
+      "description": "GPT-5.4 (400K context, 128K output) - Flagship model with coding, reasoning, and computer use capabilities.",
+      "context_window": 400000,
+      "max_output_tokens": 128000,
+      "supports_extended_thinking": true,
+      "supports_system_prompts": true,
+      "supports_streaming": true,
+      "supports_function_calling": true,
+      "supports_json_mode": true,
+      "supports_images": true,
+      "supports_temperature": true,
+      "max_image_size_mb": 20.0,
+      "use_openai_response_api": true,
+      "default_reasoning_effort": "high",
+      "allow_code_generation": true,
+      "temperature_constraint": "fixed"
+    },
+    {
+      "model_name": "gpt-5.4-mini",
+      "friendly_name": "OpenAI (GPT-5.4 mini)",
+      "aliases": [
+        "gpt5.4-mini",
+        "gpt5.4mini",
+        "5.4-mini"
+      ],
+      "intelligence_score": 16,
+      "description": "GPT-5.4 mini (400K context, 128K output) - Fast, efficient variant with higher rate limits.",
+      "context_window": 400000,
+      "max_output_tokens": 128000,
+      "supports_extended_thinking": true,
+      "supports_system_prompts": true,
+      "supports_streaming": true,
+      "supports_function_calling": true,
+      "supports_json_mode": true,
+      "supports_images": true,
+      "supports_temperature": true,
+      "max_image_size_mb": 20.0,
+      "allow_code_generation": true,
+      "temperature_constraint": "fixed"
+    },
+    {
+      "model_name": "gpt-5.3-codex",
+      "friendly_name": "OpenAI (GPT-5.3 Codex)",
+      "aliases": [
+        "gpt5.3-codex",
+        "codex",
+        "gpt-5.3-code",
+        "codex-5.3"
+      ],
+      "intelligence_score": 19,
+      "description": "GPT-5.3 Codex (400K context, 128K output) - Industry-leading agentic coding model.",
+      "context_window": 400000,
+      "max_output_tokens": 128000,
+      "supports_extended_thinking": true,
+      "supports_system_prompts": true,
+      "supports_streaming": false,
+      "supports_function_calling": true,
+      "supports_json_mode": true,
+      "supports_images": true,
+      "supports_temperature": true,
+      "max_image_size_mb": 20.0,
+      "use_openai_response_api": true,
+      "default_reasoning_effort": "high",
+      "allow_code_generation": true,
+      "temperature_constraint": "fixed"
+    },
+    {
       "model_name": "gpt-5-codex",
       "friendly_name": "OpenAI (GPT-5 Codex)",
       "aliases": [
         "gpt5-codex",
-        "codex",
         "gpt-5-code",
         "gpt5-code"
       ],
       "intelligence_score": 17,
-      "description": "GPT-5 Codex (400K context) Specialized for coding, refactoring, and software architecture.",
+      "description": "GPT-5 Codex (400K context) - Legacy coding model, succeeded by GPT-5.3 Codex.",
       "context_window": 400000,
       "max_output_tokens": 128000,
       "supports_extended_thinking": true,
@@ -263,17 +335,41 @@
       "temperature_constraint": "fixed"
     },
     {
+      "model_name": "gpt-5.2-codex",
+      "friendly_name": "OpenAI (GPT-5.2 Codex)",
+      "aliases": [
+        "gpt5.2-codex",
+        "gpt-5.2-code",
+        "codex-5.2"
+      ],
+      "intelligence_score": 18,
+      "description": "GPT-5.2 Codex (400K context, 128K output) - Previous-gen agentic coding model.",
+      "context_window": 400000,
+      "max_output_tokens": 128000,
+      "supports_extended_thinking": true,
+      "supports_system_prompts": true,
+      "supports_streaming": false,
+      "supports_function_calling": true,
+      "supports_json_mode": true,
+      "supports_images": true,
+      "supports_temperature": true,
+      "max_image_size_mb": 20.0,
+      "use_openai_response_api": true,
+      "default_reasoning_effort": "high",
+      "allow_code_generation": true,
+      "temperature_constraint": "fixed"
+    },
+    {
       "model_name": "gpt-5.1-codex",
       "friendly_name": "OpenAI (GPT-5.1 Codex)",
       "aliases": [
         "gpt5.1-codex",
-        "gpt-5.1-codex",
         "gpt5.1code",
         "gpt-5.1-code",
         "codex-5.1"
       ],
-      "intelligence_score": 19,
-      "description": "GPT-5.1 Codex (400K context, 128K output) - Agentic coding specialization available through the Responses API.",
+      "intelligence_score": 17,
+      "description": "GPT-5.1 Codex (400K context, 128K output) - Legacy agentic coding model.",
       "context_window": 400000,
       "max_output_tokens": 128000,
       "supports_extended_thinking": true,
@@ -294,7 +390,6 @@
       "friendly_name": "OpenAI (GPT-5.1 Codex mini)",
       "aliases": [
         "gpt5.1-codex-mini",
-        "gpt-5.1-codex-mini",
         "codex-mini",
         "5.1-codex-mini"
       ],

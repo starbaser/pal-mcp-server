@@ -76,9 +76,11 @@ Both inherit from `BaseTool` (`tools/shared/base_tool.py`). Required methods: `g
 
 **`providers/`** — AI provider abstraction
 - `base.py`: Abstract `ModelProvider` interface with `generate_content()`, `get_capabilities()`, retry logic
-- `openai_compatible.py`: Shared base for all non-Gemini providers (OpenAI, Azure, XAI, ZAI, DIAL, Custom, OpenRouter)
+- `anthropic.py`: Anthropic provider using the `anthropic` Python SDK (Claude models)
+- `openai_compatible.py`: Shared base for all OpenAI-compat providers (OpenAI, Azure, XAI, ZAI, DIAL, Custom, OpenRouter)
 - `registry.py`: `ModelProviderRegistry` singleton — lazy-initializes providers, resolves models by priority
-- Priority order: GOOGLE → OPENAI → AZURE → XAI → ZAI → DIAL → CUSTOM → OPENROUTER
+- Priority order: GOOGLE → ANTHROPIC → OPENAI → AZURE → XAI → ZAI → DIAL → CUSTOM → OPENROUTER
+- Per-provider base URL override: any provider in the generic `else` branch reads `{PROVIDER}_BASE_URL` from env (e.g. `OPENAI_BASE_URL`, `XAI_BASE_URL`, `ZAI_BASE_URL`)
 
 **`utils/conversation_memory.py`** — Stateless MCP → Stateful conversations
 - `ThreadContext` storage with UUID keys, configurable backend: `"file"` (default, survives restarts) or `"memory"` (in-process)
@@ -91,7 +93,7 @@ Both inherit from `BaseTool` (`tools/shared/base_tool.py`). Required methods: `g
 
 **`config.py`** — Central configuration: version, model defaults, token limits, storage paths, timeouts
 
-**`conf/`** — JSON model catalogs per provider (e.g. `gemini_models.json`, `openai_models.json`). Each defines model capabilities, aliases, context windows, and intelligence scores.
+**`conf/`** — JSON model catalogs per provider (e.g. `gemini_models.json`, `openai_models.json`, `anthropic_models.json`). Each defines model capabilities, aliases, context windows, and intelligence scores.
 
 ### Model Resolution
 
@@ -271,7 +273,8 @@ Tools accept `tree_path` and `node_path` as separate parameters. Internal functi
 ## Environment Variables
 
 Key variables (see `.env.example` for full list):
-- `GEMINI_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, `OPENROUTER_API_KEY` — Provider credentials
+- `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, `OPENROUTER_API_KEY` — Provider credentials
+- `GEMINI_BASE_URL`, `ANTHROPIC_BASE_URL`, `ZAI_BASE_URL`, `OPENAI_BASE_URL`, etc. — Per-provider base URL overrides (for proxies like ccproxy)
 - `CUSTOM_API_URL` — Local models (Ollama, vLLM)
 - `DEFAULT_MODEL` — Default model (`"auto"` for intelligent selection)
 - `DISABLED_TOOLS` — Comma-separated list to disable tools (default: `analyze,refactor,testgen,secaudit,docgen,tracer`)

@@ -1,0 +1,129 @@
+{
+  "_README": {
+    "description": "Model metadata for Anthropic API access.",
+    "usage": "Models listed here are exposed through the Anthropic provider. Aliases are case-insensitive.",
+    "field_notes": "Matches providers/shared/model_capabilities.py."
+  },
+  "models": [
+    {
+      "model_name": "claude-opus-4-6",
+      "friendly_name": "Claude Opus 4.6",
+      "aliases": [
+        "opus",
+        "opus4.6"
+      ],
+      "intelligence_score": 20,
+      "description": "Claude Opus 4.6 (200K context) - Most capable Claude model",
+      "context_window": 200000,
+      "max_output_tokens": 32000,
+      "supports_extended_thinking": false,
+      "supports_system_prompts": true,
+      "supports_streaming": true,
+      "supports_function_calling": true,
+      "supports_json_mode": true,
+      "supports_images": true,
+      "supports_temperature": true,
+      "allow_code_generation": true,
+      "max_image_size_mb": 20.0
+    },
+    {
+      "model_name": "claude-sonnet-4-6",
+      "friendly_name": "Claude Sonnet 4.6",
+      "aliases": [
+        "sonnet",
+        "sonnet4.6"
+      ],
+      "intelligence_score": 17,
+      "description": "Claude Sonnet 4.6 (200K context) - Balanced performance and speed",
+      "context_window": 200000,
+      "max_output_tokens": 16000,
+      "supports_extended_thinking": false,
+      "supports_system_prompts": true,
+      "supports_streaming": true,
+      "supports_function_calling": true,
+      "supports_json_mode": true,
+      "supports_images": true,
+      "supports_temperature": true,
+      "allow_code_generation": true,
+      "max_image_size_mb": 20.0
+    },
+    {
+      "model_name": "claude-sonnet-4-5-20250929",
+      "friendly_name": "Claude Sonnet 4.5",
+      "aliases": [
+        "sonnet4.5"
+      ],
+      "intelligence_score": 16,
+      "description": "Claude Sonnet 4.5 (200K context)",
+      "context_window": 200000,
+      "max_output_tokens": 16000,
+      "supports_extended_thinking": false,
+      "supports_system_prompts": true,
+      "supports_streaming": true,
+      "supports_function_calling": true,
+      "supports_json_mode": true,
+      "supports_images": true,
+      "supports_temperature": true,
+      "max_image_size_mb": 20.0
+    },
+    {
+      "model_name": "claude-opus-4-5-20251101",
+      "friendly_name": "Claude Opus 4.5",
+      "aliases": [
+        "opus4.5"
+      ],
+      "intelligence_score": 18,
+      "description": "Claude Opus 4.5 (200K context)",
+      "context_window": 200000,
+      "max_output_tokens": 32000,
+      "supports_extended_thinking": false,
+      "supports_system_prompts": true,
+      "supports_streaming": true,
+      "supports_function_calling": true,
+      "supports_json_mode": true,
+      "supports_images": true,
+      "supports_temperature": true,
+      "allow_code_generation": true,
+      "max_image_size_mb": 20.0
+    },
+    {
+      "model_name": "claude-haiku-4-5-20251001",
+      "friendly_name": "Claude Haiku 4.5",
+      "aliases": [
+        "haiku",
+        "haiku4.5"
+      ],
+      "intelligence_score": 12,
+      "description": "Claude Haiku 4.5 (200K context) - Fast and cost-efficient",
+      "context_window": 200000,
+      "max_output_tokens": 8192,
+      "supports_extended_thinking": false,
+      "supports_system_prompts": true,
+      "supports_streaming": true,
+      "supports_function_calling": true,
+      "supports_json_mode": true,
+      "supports_images": true,
+      "supports_temperature": true,
+      "max_image_size_mb": 20.0
+    },
+    {
+      "model_name": "claude-3-5-haiku-20241022",
+      "friendly_name": "Claude 3.5 Haiku",
+      "aliases": [
+        "haiku3.5"
+      ],
+      "intelligence_score": 9,
+      "description": "Claude 3.5 Haiku (200K context) - Previous gen fast model",
+      "context_window": 200000,
+      "max_output_tokens": 8192,
+      "supports_extended_thinking": false,
+      "supports_system_prompts": true,
+      "supports_streaming": true,
+      "supports_function_calling": true,
+      "supports_json_mode": true,
+      "supports_images": true,
+      "supports_temperature": true,
+      "max_image_size_mb": 20.0
+    }
+  ]
+}

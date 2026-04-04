@@ -495,6 +495,7 @@ def configure_providers():
         value = get_env(key)
         logger.debug(f"  {key}: {'[PRESENT]' if value else '[MISSING]'}")
     from providers import ModelProviderRegistry
+    from providers.anthropic import AnthropicModelProvider
     from providers.azure_openai import AzureOpenAIProvider
     from providers.custom import CustomProvider
     from providers.dial import DIALModelProvider
@@ -517,6 +518,12 @@ def configure_providers():
         valid_providers.append("Gemini")
         has_native_apis = True
         logger.info("Gemini API key found - Gemini models available")
+
+    # Check for Anthropic API key
+    anthropic_key = get_env("ANTHROPIC_API_KEY")
+    if anthropic_key and anthropic_key != "your_anthropic_api_key_here":
+        valid_providers.append("Anthropic")
+        has_native_apis = True
 
     # Check for OpenAI API key
     openai_key = get_env("OPENAI_API_KEY")
@@ -610,6 +617,10 @@ def configure_providers():
             ModelProviderRegistry.register_provider(ProviderType.GOOGLE, GeminiModelProvider)
             registered_providers.append(ProviderType.GOOGLE.value)
             logger.debug(f"Registered provider: {ProviderType.GOOGLE.value}")
+        if anthropic_key and anthropic_key != "your_anthropic_api_key_here":
+            ModelProviderRegistry.register_provider(ProviderType.ANTHROPIC, AnthropicModelProvider)
+            registered_providers.append(ProviderType.ANTHROPIC.value)
+            logger.debug(f"Registered provider: {ProviderType.ANTHROPIC.value}")
         if openai_key and openai_key != "your_openai_api_key_here":
             ModelProviderRegistry.register_provider(ProviderType.OPENAI, OpenAIModelProvider)
             registered_providers.append(ProviderType.OPENAI.value)

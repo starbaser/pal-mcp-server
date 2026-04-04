@@ -9,6 +9,7 @@ class ProviderType(Enum):
     """Canonical identifiers for every supported provider backend."""
 
     GOOGLE = "google"
+    ANTHROPIC = "anthropic"
     OPENAI = "openai"
     AZURE = "azure"
     XAI = "xai"

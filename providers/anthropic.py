@@ -16,7 +16,65 @@ from .shared import ModelCapabilities, ModelResponse, ProviderType
 logger = logging.getLogger(__name__)
 
 
-class AnthropicModelProvider(RegistryBackedProviderMixin, ModelProvider):
+class AnthropicSDKProviderMixin:
+    """Shared Anthropic SDK logic for providers that speak the Anthropic Messages API."""
+
+    THINKING_BUDGETS = {
+        "minimal": 0.005,
+        "low": 0.08,
+        "medium": 0.33,
+        "high": 0.67,
+        "max": 1.0,
+    }
+
+    def _build_anthropic_kwargs(
+        self,
+        resolved_model: str,
+        prompt: str,
+        system_prompt: Optional[str],
+        effective_temperature: Optional[float],
+        max_output_tokens: Optional[int],
+        capabilities: Optional[ModelCapabilities],
+        thinking_mode: str = "medium",
+    ) -> dict:
+        msg_kwargs: dict = {
+            "model": resolved_model,
+            "max_tokens": max_output_tokens or (capabilities.max_output_tokens if capabilities else 8192),
+            "messages": [{"role": "user", "content": prompt}],
+        }
+        if system_prompt:
+            msg_kwargs["system"] = system_prompt
+
+        # Extended thinking
+        if capabilities and capabilities.supports_extended_thinking and capabilities.max_thinking_tokens > 0:
+            budget_pct = self.THINKING_BUDGETS.get(thinking_mode, self.THINKING_BUDGETS["medium"])
+            budget_tokens = int(capabilities.max_thinking_tokens * budget_pct)
+            if budget_tokens > 0:
+                msg_kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget_tokens}
+                # Anthropic API: temperature must be 1 when thinking is enabled
+                msg_kwargs["temperature"] = 1.0
+        elif effective_temperature is not None:
+            msg_kwargs["temperature"] = effective_temperature
+
+        return msg_kwargs
+
+    @staticmethod
+    def _extract_anthropic_response(response) -> tuple[str, dict]:
+        """Extract text content and usage from an Anthropic response."""
+        content = ""
+        for block in response.content:
+            if block.type == "text":
+                content = block.text
+                break
+        usage = {
+            "input_tokens": response.usage.input_tokens,
+            "output_tokens": response.usage.output_tokens,
+            "total_tokens": response.usage.input_tokens + response.usage.output_tokens,
+        }
+        return content, usage
+
+
+class AnthropicModelProvider(AnthropicSDKProviderMixin, RegistryBackedProviderMixin, ModelProvider):
     """Integration for Anthropic's Claude models via the Anthropic SDK."""
 
     FRIENDLY_NAME = "Anthropic"
@@ -53,6 +111,7 @@ class AnthropicModelProvider(RegistryBackedProviderMixin, ModelProvider):
         system_prompt: Optional[str] = None,
         temperature: float = 0.3,
         max_output_tokens: Optional[int] = None,
+        thinking_mode: str = "medium",
         **kwargs,
     ) -> ModelResponse:
         if not self.validate_model_name(model_name):
@@ -70,15 +129,10 @@ class AnthropicModelProvider(RegistryBackedProviderMixin, ModelProvider):
 
         resolved_model = self._resolve_model_name(model_name)
 
-        msg_kwargs: dict = {
-            "model": resolved_model,
-            "max_tokens": max_output_tokens or (capabilities.max_output_tokens if capabilities else 8192),
-            "messages": [{"role": "user", "content": prompt}],
-        }
-        if system_prompt:
-            msg_kwargs["system"] = system_prompt
-        if effective_temperature is not None:
-            msg_kwargs["temperature"] = effective_temperature
+        msg_kwargs = self._build_anthropic_kwargs(
+            resolved_model, prompt, system_prompt, effective_temperature,
+            max_output_tokens, capabilities, thinking_mode,
+        )
 
         max_retries = 4
         retry_delays = [1, 3, 5, 8]
@@ -88,12 +142,7 @@ class AnthropicModelProvider(RegistryBackedProviderMixin, ModelProvider):
             attempt_counter["value"] += 1
             response = self.client.messages.create(**msg_kwargs)
 
-            content = response.content[0].text if response.content else ""
-            usage = {
-                "input_tokens": response.usage.input_tokens,
-                "output_tokens": response.usage.output_tokens,
-                "total_tokens": response.usage.input_tokens + response.usage.output_tokens,
-            }
+            content, usage = self._extract_anthropic_response(response)
             return ModelResponse(
                 content=content,
                 usage=usage,
@@ -104,6 +153,7 @@ class AnthropicModelProvider(RegistryBackedProviderMixin, ModelProvider):
                     "finish_reason": response.stop_reason,
                     "model": response.model,
                     "id": response.id,
+                    "thinking_mode": thinking_mode if capabilities and capabilities.supports_extended_thinking else None,
                 },
             )
 

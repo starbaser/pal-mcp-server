@@ -115,7 +115,7 @@
       "description": "GLM-4.7 Flash (128K context) - Lightweight fast model",
       "context_window": 128000,
       "max_output_tokens": 32000,
-      "supports_extended_thinking": false,
+      "supports_extended_thinking": true,
       "supports_system_prompts": true,
       "supports_streaming": true,
       "supports_function_calling": true,

@@ -58,6 +58,11 @@ class AnthropicSDKProviderMixin:
 
         return msg_kwargs
 
+    def _create_message(self, msg_kwargs: dict):
+        """Create a message using streaming to satisfy the SDK's long-request requirement."""
+        with self.client.messages.stream(**msg_kwargs) as stream:
+            return stream.get_final_message()
+
     @staticmethod
     def _extract_anthropic_response(response) -> tuple[str, dict]:
         """Extract text content and usage from an Anthropic response."""
@@ -140,7 +145,7 @@ class AnthropicModelProvider(AnthropicSDKProviderMixin, RegistryBackedProviderMi
 
         def _attempt() -> ModelResponse:
             attempt_counter["value"] += 1
-            response = self.client.messages.create(**msg_kwargs)
+            response = self._create_message(msg_kwargs)
 
             content, usage = self._extract_anthropic_response(response)
             return ModelResponse(

@@ -83,7 +83,7 @@ class ZAIModelProvider(AnthropicSDKProviderMixin, RegistryBackedProviderMixin, M
 
         def _attempt() -> ModelResponse:
             attempt_counter["value"] += 1
-            response = self.client.messages.create(**msg_kwargs)
+            response = self._create_message(msg_kwargs)
 
             content, usage = self._extract_anthropic_response(response)
             return ModelResponse(

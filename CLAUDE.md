@@ -93,7 +93,17 @@ Both inherit from `BaseTool` (`tools/shared/base_tool.py`). Required methods: `g
 
 **`config.py`** — Central configuration: version, model defaults, token limits, storage paths, timeouts
 
-**`conf/`** — JSON model catalogs per provider (e.g. `gemini_models.json`, `openai_models.json`, `anthropic_models.json`). Each defines model capabilities, aliases, context windows, and intelligence scores.
+**`conf/`** — JSON model catalogs per provider (e.g. `gemini_models.json`, `openai_models.json`, `anthropic_models.json`). Each defines model capabilities, aliases, context windows, and intelligence scores. These serve as the **PAL overlay** — curated fields take precedence over the external baseline.
+
+**`utils/litellm_data.py`** — External model baseline from litellm's community-maintained JSON
+- Fetches `model_prices_and_context_window.json` (2600+ models, 107 providers) from GitHub
+- Caches locally to `$PAL_STORAGE_DIR/model_data/` with configurable TTL (default 24h)
+- Maps litellm fields → PAL `ModelCapabilities` with sensible defaults (`intelligence_score=10`, no aliases)
+- `get_models_for_provider(ProviderType)` returns filtered models for a single provider
+- Provider mapping: `gemini`→GOOGLE, `anthropic`→ANTHROPIC, `openai`→OPENAI, `xai`→XAI, `zai`→ZAI
+- Only `mode=chat` models are included; fine-tuned (`ft:`) placeholders are skipped
+- `CapabilityModelRegistry.reload()` calls `_merge_external_baseline()` after loading `conf/*.json`
+- Models in `conf/*.json` always take precedence; litellm fills gaps for unlisted models
 
 ### Model Resolution
 
@@ -282,6 +292,9 @@ Key variables (see `.env.example` for full list):
 - `PAL_STORAGE_DIR` — Persistent storage root (default: `~/.claude/pal`)
 - `CONVERSATION_STORAGE_BACKEND` — `"file"` (default) or `"memory"`
 - `MAX_MCP_OUTPUT_TOKENS` — Output token limit before file offload (default: 25000)
+- `LITELLM_MODEL_DATA_URL` — Override URL for litellm model JSON (default: GitHub raw)
+- `LITELLM_MODEL_DATA_CACHE_TTL` — Cache TTL in seconds (default: 86400 = 24h)
+- `PAL_DISABLE_EXTERNAL_MODELS` — Set `true` to disable litellm baseline (only use `conf/*.json`)
 
 ## Testing Strategy
 
@@ -293,7 +306,7 @@ Quick simulator mode covers: cross-tool continuation, conversation threading, co
 
 ### Test Configuration
 
-`conftest.py` sets `DEFAULT_MODEL=gemini-2.5-flash` for all tests and registers dummy API keys. Auto-mode tests are identified by filename/testname containing `"auto_mode"`, `"intelligent_fallback"`, or `"per_tool_model_defaults"` — all other tests have auto mode disabled via monkeypatch. Use `@pytest.mark.integration` for tests requiring real API calls.
+`conftest.py` sets `DEFAULT_MODEL=gemini-2.5-flash` and `PAL_DISABLE_EXTERNAL_MODELS=true` for all tests, and registers dummy API keys. External models are disabled in tests so assertions validate only against the curated `conf/*.json` catalogs. Auto-mode tests are identified by filename/testname containing `"auto_mode"`, `"intelligent_fallback"`, or `"per_tool_model_defaults"` — all other tests have auto mode disabled via monkeypatch. Use `@pytest.mark.integration` for tests requiring real API calls.
 
 ## Code Style
 

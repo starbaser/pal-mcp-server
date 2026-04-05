@@ -233,6 +233,31 @@ class CapabilityModelRegistry(CustomModelRegistryBase):
         )
         self.reload()
 
+    def reload(self) -> None:
+        super().reload()
+        self._merge_external_baseline()
+
+    def _merge_external_baseline(self) -> None:
+        """Merge litellm-sourced models that aren't already in the conf/*.json overlay."""
+        from utils.litellm_data import get_models_for_provider
+
+        external = get_models_for_provider(self._provider)
+        if not external:
+            return
+
+        added = 0
+        for model_name, cap in external.items():
+            if model_name in self.model_map:
+                continue
+            if model_name.lower() in self.alias_map:
+                continue
+            self.model_map[model_name] = cap
+            self.alias_map[model_name.lower()] = model_name
+            added += 1
+
+        if added:
+            logger.debug("Merged %d external models for %s", added, self._provider.value)
+
     def _provider_default(self) -> ProviderType:
         return self._provider
 

@@ -10,7 +10,7 @@ Configuration values can be overridden by environment variables where appropriat
 
 import os
 
-from utils.env import get_env
+from utils.env import get_env, get_env_bool
 
 # Version and metadata
 # These values are used in server responses and for tracking releases
@@ -174,3 +174,12 @@ CONVERSATION_STORAGE_DIR = os.path.join(PAL_STORAGE_DIR, "threads")
 IMAGE_STORAGE_DIR = os.path.join(PAL_STORAGE_DIR, "images")
 CONTENT_STORAGE_DIR = os.path.join(PAL_STORAGE_DIR, "content")
 CODE_STORAGE_DIR = os.path.join(PAL_STORAGE_DIR, "code")
+
+# External model data (litellm baseline)
+LITELLM_MODEL_DATA_URL = get_env(
+    "LITELLM_MODEL_DATA_URL",
+    "https://raw.githubusercontent.com/BerriAI/litellm/main/model_prices_and_context_window.json",
+)
+LITELLM_MODEL_DATA_DIR = os.path.join(PAL_STORAGE_DIR, "model_data")
+LITELLM_MODEL_DATA_CACHE_TTL = int(get_env("LITELLM_MODEL_DATA_CACHE_TTL") or 86400)  # 24h default
+EXTERNAL_MODELS_DISABLED = get_env_bool("PAL_DISABLE_EXTERNAL_MODELS", default=False)

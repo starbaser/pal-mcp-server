@@ -32,6 +32,10 @@ env_config.reload_env({"PAL_MCP_FORCE_ENV_OVERRIDE": "false"})
 # This prevents all tests from failing due to missing model parameter
 os.environ["DEFAULT_MODEL"] = "gemini-2.5-flash"
 
+# Disable external model data (litellm baseline) in tests so assertions
+# validate only against the curated conf/*.json catalogs.
+os.environ["PAL_DISABLE_EXTERNAL_MODELS"] = "true"
+
 # Force reload of config module to pick up the env var
 import config  # noqa: E402
 

@@ -27,8 +27,8 @@ class XAIModelProvider(RegistryBackedProviderMixin, OpenAICompatibleProvider):
     MODEL_CAPABILITIES: ClassVar[dict[str, ModelCapabilities]] = {}
 
     # Canonical model identifiers used for category routing.
-    PRIMARY_MODEL = "grok-4-1-fast-reasoning"
-    FALLBACK_MODEL = "grok-4"
+    PRIMARY_MODEL = "grok-4.20-0309-reasoning"
+    FALLBACK_MODEL = "grok-4-1-fast-reasoning"
 
     def __init__(self, api_key: str, **kwargs):
         """Initialize X.AI provider with API key."""

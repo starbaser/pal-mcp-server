@@ -135,8 +135,13 @@ class AnthropicModelProvider(AnthropicSDKProviderMixin, RegistryBackedProviderMi
         resolved_model = self._resolve_model_name(model_name)
 
         msg_kwargs = self._build_anthropic_kwargs(
-            resolved_model, prompt, system_prompt, effective_temperature,
-            max_output_tokens, capabilities, thinking_mode,
+            resolved_model,
+            prompt,
+            system_prompt,
+            effective_temperature,
+            max_output_tokens,
+            capabilities,
+            thinking_mode,
         )
 
         max_retries = 4
@@ -158,7 +163,9 @@ class AnthropicModelProvider(AnthropicSDKProviderMixin, RegistryBackedProviderMi
                     "finish_reason": response.stop_reason,
                     "model": response.model,
                     "id": response.id,
-                    "thinking_mode": thinking_mode if capabilities and capabilities.supports_extended_thinking else None,
+                    "thinking_mode": (
+                        thinking_mode if capabilities and capabilities.supports_extended_thinking else None
+                    ),
                 },
             )
 
@@ -171,9 +178,7 @@ class AnthropicModelProvider(AnthropicSDKProviderMixin, RegistryBackedProviderMi
             )
         except Exception as exc:
             attempts = max(attempt_counter["value"], 1)
-            raise RuntimeError(
-                f"Anthropic API error for {resolved_model} after {attempts} attempts: {exc}"
-            ) from exc
+            raise RuntimeError(f"Anthropic API error for {resolved_model} after {attempts} attempts: {exc}") from exc
 
     def get_preferred_model(self, category: "ToolModelCategory", allowed_models: list[str]) -> Optional[str]:
         from tools.models import ToolModelCategory
@@ -188,27 +193,33 @@ class AnthropicModelProvider(AnthropicSDKProviderMixin, RegistryBackedProviderMi
             return None
 
         if category == ToolModelCategory.EXTENDED_REASONING:
-            preferred = find_first([
-                "claude-opus-4-6",
-                "claude-opus-4-5-20251101",
-                "claude-sonnet-4-6",
-                "claude-sonnet-4-5-20250929",
-            ])
+            preferred = find_first(
+                [
+                    "claude-opus-4-6",
+                    "claude-opus-4-5-20251101",
+                    "claude-sonnet-4-6",
+                    "claude-sonnet-4-5-20250929",
+                ]
+            )
             return preferred if preferred else allowed_models[0]
         elif category == ToolModelCategory.FAST_RESPONSE:
-            preferred = find_first([
-                "claude-haiku-4-5-20251001",
-                "claude-3-5-haiku-20241022",
-                "claude-sonnet-4-6",
-            ])
+            preferred = find_first(
+                [
+                    "claude-haiku-4-5-20251001",
+                    "claude-3-5-haiku-20241022",
+                    "claude-sonnet-4-6",
+                ]
+            )
             return preferred if preferred else allowed_models[0]
         else:
-            preferred = find_first([
-                "claude-sonnet-4-6",
-                "claude-sonnet-4-5-20250929",
-                "claude-opus-4-6",
-                "claude-haiku-4-5-20251001",
-            ])
+            preferred = find_first(
+                [
+                    "claude-sonnet-4-6",
+                    "claude-sonnet-4-5-20250929",
+                    "claude-opus-4-6",
+                    "claude-haiku-4-5-20251001",
+                ]
+            )
             return preferred if preferred else allowed_models[0]
 
 

@@ -51,8 +51,8 @@ class TestOpenAIProvider:
         assert provider.validate_model_name("gpt-5") is True
         assert provider.validate_model_name("gpt-5-mini") is True
         assert provider.validate_model_name("gpt-5.2") is True
-        assert provider.validate_model_name("gpt-5.1-codex") is True
-        assert provider.validate_model_name("gpt-5.1-codex-mini") is True
+        assert provider.validate_model_name("gpt-5.4-pro") is True
+        assert provider.validate_model_name("gpt-5.4-mini") is True
 
         # Test valid aliases
         assert provider.validate_model_name("mini") is True
@@ -64,8 +64,8 @@ class TestOpenAIProvider:
         assert provider.validate_model_name("gpt5mini") is True
         assert provider.validate_model_name("gpt5.2") is True
         assert provider.validate_model_name("gpt5.1") is True
-        assert provider.validate_model_name("gpt5.1-codex") is True
-        assert provider.validate_model_name("codex-mini") is True
+        assert provider.validate_model_name("gpt5.4-pro") is True
+        assert provider.validate_model_name("gpt5.4-mini") is True
 
         # Test invalid model
         assert provider.validate_model_name("invalid-model") is False
@@ -85,22 +85,21 @@ class TestOpenAIProvider:
         assert provider._resolve_model_name("gpt5-mini") == "gpt-5-mini"
         assert provider._resolve_model_name("gpt5mini") == "gpt-5-mini"
         assert provider._resolve_model_name("gpt5.2") == "gpt-5.2"
-        assert provider._resolve_model_name("gpt5.1") == "gpt-5.2"
-        assert provider._resolve_model_name("gpt5.1-codex") == "gpt-5.1-codex"
-        assert provider._resolve_model_name("codex-mini") == "gpt-5.1-codex-mini"
+        assert provider._resolve_model_name("gpt5.1") == "gpt-5.1"
+        assert provider._resolve_model_name("gpt5.4-pro") == "gpt-5.4-pro"
+        assert provider._resolve_model_name("gpt5.4-mini") == "gpt-5.4-mini"
 
         # Test full name passthrough
         assert provider._resolve_model_name("o3") == "o3"
         assert provider._resolve_model_name("o3-mini") == "o3-mini"
         assert provider._resolve_model_name("o3-pro") == "o3-pro"
         assert provider._resolve_model_name("o4-mini") == "o4-mini"
-        assert provider._resolve_model_name("o4-mini") == "o4-mini"
         assert provider._resolve_model_name("gpt-5") == "gpt-5"
         assert provider._resolve_model_name("gpt-5-mini") == "gpt-5-mini"
         assert provider._resolve_model_name("gpt-5.2") == "gpt-5.2"
-        assert provider._resolve_model_name("gpt-5.1") == "gpt-5.2"
-        assert provider._resolve_model_name("gpt-5.1-codex") == "gpt-5.1-codex"
-        assert provider._resolve_model_name("gpt-5.1-codex-mini") == "gpt-5.1-codex-mini"
+        assert provider._resolve_model_name("gpt-5.1") == "gpt-5.1"
+        assert provider._resolve_model_name("gpt-5.4-pro") == "gpt-5.4-pro"
+        assert provider._resolve_model_name("gpt-5.4-mini") == "gpt-5.4-mini"
 
     def test_get_capabilities_o3(self):
         """Test getting model capabilities for O3."""
@@ -172,22 +171,22 @@ class TestOpenAIProvider:
         assert capabilities.supports_json_mode is True
         assert capabilities.allow_code_generation is True
 
-    def test_get_capabilities_gpt51_codex(self):
-        """Test GPT-5.1 Codex is responses-only and non-streaming."""
+    def test_get_capabilities_gpt54_pro(self):
+        """Test GPT-5.4 Pro uses responses endpoint and supports code generation."""
         provider = OpenAIModelProvider("test-key")
 
-        capabilities = provider.get_capabilities("gpt-5.1-codex")
-        assert capabilities.model_name == "gpt-5.1-codex"
-        assert capabilities.supports_streaming is False
+        capabilities = provider.get_capabilities("gpt-5.4-pro")
+        assert capabilities.model_name == "gpt-5.4-pro"
+        assert capabilities.supports_streaming is True
         assert capabilities.use_openai_response_api is True
         assert capabilities.allow_code_generation is True
 
-    def test_get_capabilities_gpt51_codex_mini(self):
-        """Test GPT-5.1 Codex mini exposes streaming and code generation."""
+    def test_get_capabilities_gpt54_mini(self):
+        """Test GPT-5.4 mini exposes streaming and code generation."""
         provider = OpenAIModelProvider("test-key")
 
-        capabilities = provider.get_capabilities("gpt-5.1-codex-mini")
-        assert capabilities.model_name == "gpt-5.1-codex-mini"
+        capabilities = provider.get_capabilities("gpt-5.4-mini")
+        assert capabilities.model_name == "gpt-5.4-mini"
         assert capabilities.supports_streaming is True
         assert capabilities.allow_code_generation is True
 

@@ -25,18 +25,39 @@
   },
   "models": [
     {
-      "model_name": "grok-4",
-      "friendly_name": "X.AI (Grok 4)",
+      "model_name": "grok-4.20-0309-reasoning",
+      "friendly_name": "X.AI (Grok 4.20 Reasoning)",
       "aliases": [
         "grok",
-        "grok4",
-        "grok-4"
+        "grok4.20",
+        "grok-4.20",
+        "grok4.20-reasoning"
+      ],
+      "intelligence_score": 17,
+      "description": "GROK-4.20 Reasoning (2M context) - xAI flagship reasoning model, Mar 2026 snapshot",
+      "context_window": 2000000,
+      "max_output_tokens": 2000000,
+      "supports_extended_thinking": true,
+      "supports_system_prompts": true,
+      "supports_streaming": true,
+      "supports_function_calling": true,
+      "supports_json_mode": true,
+      "supports_images": true,
+      "supports_temperature": true,
+      "max_image_size_mb": 20.0
+    },
+    {
+      "model_name": "grok-4.20-0309-non-reasoning",
+      "friendly_name": "X.AI (Grok 4.20 Non-Reasoning)",
+      "aliases": [
+        "grok4.20-fast",
+        "grok-4.20-fast"
       ],
       "intelligence_score": 16,
-      "description": "GROK-4 (256K context) - Frontier multimodal reasoning model with advanced capabilities",
-      "context_window": 256000,
-      "max_output_tokens": 256000,
-      "supports_extended_thinking": true,
+      "description": "GROK-4.20 Non-Reasoning (2M context) - Fast xAI flagship without extended reasoning overhead",
+      "context_window": 2000000,
+      "max_output_tokens": 2000000,
+      "supports_extended_thinking": false,
       "supports_system_prompts": true,
       "supports_streaming": true,
       "supports_function_calling": true,
@@ -51,14 +72,33 @@
       "aliases": [
         "grok-4.1",
         "grok-4-1",
-        "grok-4.1-fast-reasoning",
-        "grok-4.1-fast-reasoning-latest",
+        "grok4.1",
         "grok-4.1-fast"
       ],
       "intelligence_score": 15,
       "description": "GROK-4.1 Fast Reasoning (2M context) - High-performance multimodal reasoning model with function calling",
       "context_window": 2000000,
       "max_output_tokens": 2000000,
+      "supports_extended_thinking": true,
+      "supports_system_prompts": true,
+      "supports_streaming": true,
+      "supports_function_calling": true,
+      "supports_json_mode": true,
+      "supports_images": true,
+      "supports_temperature": true,
+      "max_image_size_mb": 20.0
+    },
+    {
+      "model_name": "grok-4",
+      "friendly_name": "X.AI (Grok 4)",
+      "aliases": [
+        "grok4",
+        "grok4-legacy"
+      ],
+      "intelligence_score": 14,
+      "description": "GROK-4 (256K context) - Previous frontier model, superseded by Grok 4.1 and 4.20",
+      "context_window": 256000,
+      "max_output_tokens": 256000,
       "supports_extended_thinking": true,
       "supports_system_prompts": true,
       "supports_streaming": true,

@@ -73,8 +73,13 @@ class ZAIModelProvider(AnthropicSDKProviderMixin, RegistryBackedProviderMixin, M
         resolved_model = self._resolve_model_name(model_name)
 
         msg_kwargs = self._build_anthropic_kwargs(
-            resolved_model, prompt, system_prompt, effective_temperature,
-            max_output_tokens, capabilities, thinking_mode,
+            resolved_model,
+            prompt,
+            system_prompt,
+            effective_temperature,
+            max_output_tokens,
+            capabilities,
+            thinking_mode,
         )
 
         max_retries = 4
@@ -96,7 +101,9 @@ class ZAIModelProvider(AnthropicSDKProviderMixin, RegistryBackedProviderMixin, M
                     "finish_reason": response.stop_reason,
                     "model": response.model,
                     "id": response.id,
-                    "thinking_mode": thinking_mode if capabilities and capabilities.supports_extended_thinking else None,
+                    "thinking_mode": (
+                        thinking_mode if capabilities and capabilities.supports_extended_thinking else None
+                    ),
                 },
             )
 

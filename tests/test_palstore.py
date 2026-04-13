@@ -805,9 +805,9 @@ class TestContextBuilder:
         history = build_context_from_ancestry(ancestors)
 
         # The file body should appear exactly once (in L1's turn)
-        assert history.count("def hello():") == 1, (
-            f"file body appeared {history.count('def hello():')} times after migration, expected 1"
-        )
+        assert (
+            history.count("def hello():") == 1
+        ), f"file body appeared {history.count('def hello():')} times after migration, expected 1"
         # All responses should still be present
         assert "stored L1" in history
         assert "stored L2" in history

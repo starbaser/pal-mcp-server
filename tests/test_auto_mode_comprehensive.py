@@ -94,9 +94,9 @@ class TestAutoModeComprehensive:
                     "OPENROUTER_API_KEY": None,
                 },
                 {
-                    "EXTENDED_REASONING": "gpt-5.1-codex",  # GPT-5.1 Codex prioritized for coding tasks
-                    "FAST_RESPONSE": "gpt-5.2",  # Prefer gpt-5.2 for speed
-                    "BALANCED": "gpt-5.2",  # Prefer gpt-5.2 for balanced
+                    "EXTENDED_REASONING": "gpt-5.4-pro",  # GPT-5.4 Pro prioritized for extended reasoning
+                    "FAST_RESPONSE": "gpt-5.4-mini",  # Prefer gpt-5.4-mini for speed
+                    "BALANCED": "gpt-5.4",  # Prefer gpt-5.4 for balanced
                 },
             ),
             # Only X.AI API available
@@ -108,9 +108,9 @@ class TestAutoModeComprehensive:
                     "OPENROUTER_API_KEY": None,
                 },
                 {
-                    "EXTENDED_REASONING": "grok-4-1-fast-reasoning",  # Latest Grok 4.1 Fast Reasoning
-                    "FAST_RESPONSE": "grok-4-1-fast-reasoning",  # Latest fast SKU
-                    "BALANCED": "grok-4-1-fast-reasoning",  # Latest balanced default
+                    "EXTENDED_REASONING": "grok-4.20-0309-reasoning",  # Grok 4.20 Reasoning (highest score)
+                    "FAST_RESPONSE": "grok-4.20-0309-reasoning",  # Grok 4.20 Reasoning (highest score)
+                    "BALANCED": "grok-4.20-0309-reasoning",  # Grok 4.20 Reasoning (highest score)
                 },
             ),
             # Both Gemini and OpenAI available - Google comes first in priority
@@ -201,7 +201,7 @@ class TestAutoModeComprehensive:
         assert tool.get_model_category() == expected_category
 
     @pytest.mark.asyncio
-    async def test_auto_mode_with_gemini_only_uses_correct_models(self, tmp_path):
+    async def test_auto_mode_with_gemini_only_uses_correct_models(self):
         """Test that auto mode with only Gemini uses flash for fast tools and pro for reasoning tools."""
 
         provider_config = {

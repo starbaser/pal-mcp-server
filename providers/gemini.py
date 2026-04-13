@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 from google import genai
 from google.genai import types
 
-from utils.env import get_env
+from utils.env import get_env, get_env_bool
 from utils.media_utils import is_audio_file, is_video_file, validate_media
 
 from .base import ModelProvider
@@ -49,6 +49,7 @@ class GeminiModelProvider(RegistryBackedProviderMixin, ModelProvider):
         self._ensure_registry()
         super().__init__(api_key, **kwargs)
         self._client = None
+        self._oai_client = None
         self._token_counters = {}  # Cache for token counting
         self._base_url = kwargs.get("base_url", None)  # Optional custom endpoint
         self._timeout_override = self._resolve_http_timeout()
@@ -83,6 +84,24 @@ class GeminiModelProvider(RegistryBackedProviderMixin, ModelProvider):
             else:
                 self._client = genai.Client(api_key=self.api_key)
         return self._client
+
+    @property
+    def _proxy_mode(self) -> bool:
+        """True only when explicitly opted into OpenAI-compatible proxy."""
+        return get_env_bool("GEMINI_PROXY_MODE", False)
+
+    @property
+    def openai_client(self):
+        """Lazy OpenAI client for proxy mode (e.g. ccproxy/litellm)."""
+        if self._oai_client is None:
+            from openai import OpenAI
+
+            base = self._base_url.rstrip("/")
+            if base.endswith("/gemini"):
+                base = base[: -len("/gemini")]
+            logger.info("Gemini proxy mode: using OpenAI-compatible client at %s", base)
+            self._oai_client = OpenAI(api_key=self.api_key, base_url=base)
+        return self._oai_client
 
     def _resolve_http_timeout(self) -> Optional[float]:
         """Compute timeout override from shared custom timeout environment variables."""
@@ -147,6 +166,19 @@ class GeminiModelProvider(RegistryBackedProviderMixin, ModelProvider):
 
         resolved_model_name = self._resolve_model_name(model_name)
 
+        if self._proxy_mode:
+            return self._generate_via_proxy(
+                resolved_model_name,
+                prompt,
+                system_prompt=system_prompt,
+                temperature=temperature,
+                max_output_tokens=max_output_tokens,
+                thinking_mode=thinking_mode,
+                capabilities=capabilities,
+                capability_map=capability_map,
+                media=media,
+            )
+
         # Prepare content parts (text and potentially images)
         parts = []
 
@@ -193,7 +225,7 @@ class GeminiModelProvider(RegistryBackedProviderMixin, ModelProvider):
             )
 
         # Create contents structure
-        contents = [{"parts": parts}]
+        contents = [{"role": "user", "parts": parts}]
 
         effective_thinking_mode = thinking_mode
 
@@ -353,6 +385,78 @@ class GeminiModelProvider(RegistryBackedProviderMixin, ModelProvider):
                 f"{'s' if attempts > 1 else ''}: {exc}"
             )
             raise RuntimeError(error_msg) from exc
+
+    def _generate_via_proxy(
+        self,
+        resolved_model_name: str,
+        prompt: str,
+        *,
+        system_prompt: Optional[str] = None,
+        temperature: float = 1.0,
+        max_output_tokens: Optional[int] = None,
+        thinking_mode: str = "medium",
+        capabilities: Optional[ModelCapabilities] = None,
+        capability_map: Optional[dict[str, ModelCapabilities]] = None,
+        media: Optional[list[str]] = None,
+    ) -> ModelResponse:
+        """Generate content via an OpenAI-compatible proxy (e.g. ccproxy/litellm)."""
+        messages: list[dict] = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+
+        completion_params: dict = {
+            "model": resolved_model_name,
+            "messages": messages,
+            "temperature": temperature,
+            "stream": False,
+        }
+        if max_output_tokens:
+            completion_params["max_tokens"] = max_output_tokens
+
+        max_retries = 4
+        retry_delays = [1, 3, 5, 8]
+        attempt_counter = {"value": 0}
+
+        def _attempt() -> ModelResponse:
+            attempt_counter["value"] += 1
+            response = self.openai_client.chat.completions.create(**completion_params)
+            content = response.choices[0].message.content
+            usage: dict[str, int] = {}
+            if response.usage:
+                usage = {
+                    "input_tokens": response.usage.prompt_tokens or 0,
+                    "output_tokens": response.usage.completion_tokens or 0,
+                    "total_tokens": response.usage.total_tokens or 0,
+                }
+            return ModelResponse(
+                content=content,
+                usage=usage,
+                model_name=resolved_model_name,
+                friendly_name="Gemini",
+                provider=ProviderType.GOOGLE,
+                metadata={
+                    "thinking_mode": (
+                        thinking_mode if capabilities and capabilities.supports_extended_thinking else None
+                    ),
+                    "finish_reason": response.choices[0].finish_reason,
+                    "proxy_mode": True,
+                },
+            )
+
+        try:
+            return self._run_with_retries(
+                operation=_attempt,
+                max_attempts=max_retries,
+                delays=retry_delays,
+                log_prefix=f"Gemini proxy ({resolved_model_name})",
+            )
+        except Exception as exc:
+            attempts = max(attempt_counter["value"], 1)
+            raise RuntimeError(
+                f"Gemini proxy error for model {resolved_model_name} after {attempts} "
+                f"attempt{'s' if attempts > 1 else ''}: {exc}"
+            ) from exc
 
     def get_provider_type(self) -> ProviderType:
         """Get the provider type."""

@@ -63,6 +63,7 @@ def test_registry_lists_roles():
     codex_client = registry.get_client("codex")
     # Verify codex uses --enable web_search_request (not --search which is unsupported by exec)
     assert codex_client.config_args == [
+        "--skip-git-repo-check",
         "--json",
         "--dangerously-bypass-approvals-and-sandbox",
         "--enable",

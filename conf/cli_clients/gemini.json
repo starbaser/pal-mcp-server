@@ -2,7 +2,9 @@
   "name": "gemini",
   "command": "gemini",
   "additional_args": [
-    "--yolo"
+    "--yolo",
+    "--telemetry",
+    "false"
   ],
   "env": {},
   "roles": {

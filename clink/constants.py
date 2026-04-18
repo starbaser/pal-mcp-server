@@ -26,6 +26,25 @@ class CLIInternalDefaults:
     runner: str | None = None
 
 
+PASSTHROUGH_ARGS: dict[str, list[str]] = {
+    "claude": [
+        "--print",
+        "--output-format",
+        "json",
+        "--no-update-check",
+        "--no-input",
+        "--permission-mode",
+        "bypassPermissions",
+    ],
+    "gemini": ["--yolo", "-o", "json", "--telemetry", "false"],
+    "codex": [
+        "exec",
+        "--skip-git-repo-check",
+        "--json",
+        "--dangerously-bypass-approvals-and-sandbox",
+    ],
+}
+
 INTERNAL_DEFAULTS: dict[str, CLIInternalDefaults] = {
     "gemini": CLIInternalDefaults(
         parser="gemini_json",
@@ -41,19 +60,19 @@ INTERNAL_DEFAULTS: dict[str, CLIInternalDefaults] = {
     ),
     "claude": CLIInternalDefaults(
         parser="claude_json",
-        additional_args=["--print", "--output-format", "json"],
+        additional_args=["--print", "--output-format", "json", "--no-update-check"],
         default_role_prompt="systemprompts/clink/default.txt",
         runner="claude",
     ),
     "claude-zai": CLIInternalDefaults(
         parser="claude_json",
-        additional_args=["--print", "--output-format", "json"],
+        additional_args=["--print", "--output-format", "json", "--no-update-check"],
         default_role_prompt="systemprompts/clink/default.txt",
         runner="claude",
     ),
     "glmaude": CLIInternalDefaults(
         parser="claude_json",
-        additional_args=["--print", "--output-format", "json"],
+        additional_args=["--print", "--output-format", "json", "--no-update-check"],
         default_role_prompt="systemprompts/clink/default.txt",
         runner="claude",
     ),

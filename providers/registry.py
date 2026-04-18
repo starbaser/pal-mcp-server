@@ -43,6 +43,7 @@ class ModelProviderRegistry:
         ProviderType.XAI,  # Direct X.AI GROK access
         ProviderType.ZAI,  # Direct ZAI GLM access
         ProviderType.DIAL,  # DIAL unified API access
+        ProviderType.CLINK,  # CLI subprocess passthrough
         ProviderType.CUSTOM,  # Local/self-hosted models
         ProviderType.OPENROUTER,  # Catch-all for cloud models
     ]
@@ -126,6 +127,8 @@ class ModelProviderRegistry:
                 provider_kwargs["base_url"] = gemini_base_url
                 logging.info(f"Initialized Gemini provider with custom endpoint: {gemini_base_url}")
             provider = provider_class(**provider_kwargs)
+        elif provider_type == ProviderType.CLINK:
+            provider = provider_class(api_key="")
         elif provider_type == ProviderType.AZURE:
             if not api_key:
                 return None
@@ -348,6 +351,7 @@ class ModelProviderRegistry:
             ProviderType.ZAI: "ZAI_API_KEY",
             ProviderType.OPENROUTER: "OPENROUTER_API_KEY",
             ProviderType.CUSTOM: "CUSTOM_API_KEY",  # Can be empty for providers that don't need auth
+            ProviderType.CLINK: None,
             ProviderType.DIAL: "DIAL_API_KEY",
         }
 

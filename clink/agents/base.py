@@ -204,6 +204,10 @@ class BaseCLIAgent:
 
         env = os.environ.copy()
 
+        # Strip Claude Code's own session marker so nested CLI invocations don't
+        # mistake themselves for running inside a Claude Code session.
+        env.pop("CLAUDECODE", None)
+
         # Set marker variable to identify clink invocations
         env["PAL_MCP_CLINK"] = "1"
 

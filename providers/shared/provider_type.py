@@ -15,5 +15,6 @@ class ProviderType(Enum):
     XAI = "xai"
     ZAI = "zai"
     OPENROUTER = "openrouter"
+    CLINK = "clink"
     CUSTOM = "custom"
     DIAL = "dial"

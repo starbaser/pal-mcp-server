@@ -642,6 +642,19 @@ def configure_providers():
             registered_providers.append(ProviderType.DIAL.value)
             logger.debug(f"Registered provider: {ProviderType.DIAL.value}")
 
+    # Clink provider (CLI subprocess passthrough, no API key required)
+    try:
+        from clink.registry import get_registry as get_clink_registry
+        from providers.clink_provider import ClinkProvider
+
+        clink_registry = get_clink_registry()
+        if clink_registry.list_clients():
+            ModelProviderRegistry.register_provider(ProviderType.CLINK, ClinkProvider)
+            registered_providers.append(ProviderType.CLINK.value)
+            logger.info("Clink provider registered with clients: %s", ", ".join(clink_registry.list_clients()))
+    except Exception as exc:
+        logger.debug("Clink provider not available: %s", exc)
+
     # 2. Custom provider second (for local/private models)
     if has_custom:
         # Factory function that creates CustomProvider with proper parameters
@@ -1329,7 +1342,13 @@ async def _call_tool_impl(name: str, arguments: dict[str, Any], tools: dict) -> 
 
         # Parse model:option format if present
         model_name, model_option = parse_model_option(model_name)
-        if model_option:
+
+        # Rewrite clink:<model> into the prefixed form the ClinkProvider expects
+        if model_name == "clink" and model_option:
+            model_name = f"clink:{model_option}"
+            model_option = None
+            logger.info(f"Clink passthrough requested - routed model: '{model_name}'")
+        elif model_option:
             logger.info(f"Parsed model format - model: '{model_name}', option: '{model_option}'")
         else:
             logger.info(f"Parsed model format - model: '{model_name}'")

@@ -146,12 +146,16 @@ class ClinkProvider(ModelProvider):
         cli_name = self._resolve_cli_client_name(real_model)
         client = self._registry.get_client(cli_name)
 
+        # When real_model is just the CLI name (e.g. "claude" from "clink:claude"),
+        # don't override the model — let the CLI use its configured default.
+        effective_model = None if real_model.lower() == cli_name.lower() else real_model
+
         timeout = client.timeout_seconds or DEFAULT_TIMEOUT_SECONDS
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(
                 asyncio.run,
-                self._async_generate(client, real_model, prompt, system_prompt),
+                self._async_generate(client, effective_model, prompt, system_prompt),
             )
             try:
                 agent_output = future.result(timeout=timeout)

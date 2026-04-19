@@ -5,6 +5,14 @@
     "--yolo"
   ],
   "env": {},
+  "models": {
+    "clink-gemini": "",
+    "clink-gemini-2.5-flash": "gemini-2.5-flash",
+    "clink-gemini-2.5-pro": "gemini-2.5-pro",
+    "clink-gemini-3-flash-preview": "gemini-3-flash-preview",
+    "clink-gemini-3-pro-preview": "gemini-3-pro-preview",
+    "clink-gemini-3.1-pro-preview": "gemini-3.1-pro-preview"
+  },
   "roles": {
     "default": {
       "prompt_path": "systemprompts/clink/default.txt",

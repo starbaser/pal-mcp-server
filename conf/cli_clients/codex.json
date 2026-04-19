@@ -9,6 +9,12 @@
     "web_search_request"
   ],
   "env": {},
+  "models": {
+    "clink-codex": "",
+    "clink-o4-mini": "o4-mini",
+    "clink-o3": "o3",
+    "clink-gpt-5.4": "gpt-5.4"
+  },
   "roles": {
     "default": {
       "prompt_path": "systemprompts/clink/default.txt",

@@ -1343,12 +1343,7 @@ async def _call_tool_impl(name: str, arguments: dict[str, Any], tools: dict) -> 
         # Parse model:option format if present
         model_name, model_option = parse_model_option(model_name)
 
-        # Rewrite clink:<model> into the prefixed form the ClinkProvider expects
-        if model_name == "clink" and model_option:
-            model_name = f"clink:{model_option}"
-            model_option = None
-            logger.info(f"Clink passthrough requested - routed model: '{model_name}'")
-        elif model_option:
+        if model_option:
             logger.info(f"Parsed model format - model: '{model_name}', option: '{model_option}'")
         else:
             logger.info(f"Parsed model format - model: '{model_name}'")

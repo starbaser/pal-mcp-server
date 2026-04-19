@@ -10,6 +10,11 @@
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-4.7",
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "glm-4.5-air"
   },
+  "models": {
+    "clink-glmaude": "",
+    "clink-glm-4.7": "sonnet",
+    "clink-glm-4.5-air": "haiku"
+  },
   "roles": {
     "default": {
       "prompt_path": "systemprompts/clink/default.txt",

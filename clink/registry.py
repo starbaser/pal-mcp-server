@@ -86,6 +86,30 @@ class ClinkRegistry:
             raise KeyError(f"CLI '{cli_name}' is not configured. Available clients: {available}")
         return self._clients[key]
 
+    def resolve_model_slug(self, slug: str) -> tuple[ResolvedCLIClient, str | None]:
+        """Resolve a clink model slug to (client, real_model_name).
+
+        Returns the CLI client that owns the slug and the model name to pass
+        via --model (or None to use the client's configured default).
+        """
+        lower = slug.lower()
+        for client in self._clients.values():
+            for model_slug, real_model in client.models.items():
+                if model_slug.lower() == lower:
+                    return client, (real_model if real_model else None)
+        raise KeyError(f"No CLI client has model slug '{slug}'")
+
+    def list_model_slugs(self) -> dict[str, str]:
+        """Return all registered model slugs across all clients.
+
+        Returns dict mapping slug → CLI client name.
+        """
+        result: dict[str, str] = {}
+        for client in self._clients.values():
+            for slug in client.models:
+                result[slug] = client.name
+        return result
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -169,6 +193,7 @@ class ClinkRegistry:
             roles=roles,
             output_to_file=output_to_file,
             working_dir=working_dir,
+            models=dict(raw.models),
         )
 
     def _resolve_executable(

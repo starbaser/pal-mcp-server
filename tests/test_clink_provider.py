@@ -1,19 +1,15 @@
 """Tests for ClinkProvider and stable headless CLI configuration."""
 
-import asyncio
 import json
-import os
-import shutil
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from clink.agents.base import BaseCLIAgent
 from clink.constants import INTERNAL_DEFAULTS, PASSTHROUGH_ARGS
 from clink.models import ResolvedCLIClient, ResolvedCLIRole
+from clink.registry import get_registry
 from providers.clink_provider import (
-    CLINK_PREFIX,
     PASSTHROUGH_SYSTEM_PROMPT,
     ClinkProvider,
 )
@@ -63,7 +59,7 @@ class TestPassthroughArgs:
 
 
 # ---------------------------------------------------------------------------
-# INTERNAL_DEFAULTS hardening
+# INTERNAL_DEFAULTS
 # ---------------------------------------------------------------------------
 
 
@@ -128,7 +124,7 @@ class TestClaudecodeEnvStripping:
 
 
 class TestPassthroughSystemPrompt:
-    """Verify PASSTHROUGH_SYSTEM_PROMPT is injected in provider mode."""
+    """Verify PASSTHROUGH_SYSTEM_PROMPT content."""
 
     def test_prompt_prohibits_file_writes(self):
         assert "Do NOT create, modify" in PASSTHROUGH_SYSTEM_PROMPT
@@ -138,6 +134,11 @@ class TestPassthroughSystemPrompt:
 
     def test_prompt_instructs_text_output(self):
         assert "fenced code blocks" in PASSTHROUGH_SYSTEM_PROMPT
+
+
+# ---------------------------------------------------------------------------
+# ClinkProvider passthrough client building
+# ---------------------------------------------------------------------------
 
 
 class TestClinkProviderPassthrough:
@@ -189,36 +190,80 @@ class TestClinkProviderPassthrough:
 
 
 # ---------------------------------------------------------------------------
-# ClinkProvider model validation
+# ClinkProvider slug-based model validation
 # ---------------------------------------------------------------------------
 
 
 class TestClinkProviderModelValidation:
-    """Verify clink: prefix validation logic."""
+    """Verify slug-based model validation via conf/cli_clients/*.json."""
 
     @pytest.fixture()
     def provider(self):
         provider = ClinkProvider.__new__(ClinkProvider)
         provider._capabilities_cache = {}
-
-        from clink.registry import get_registry
-
         provider._registry = get_registry()
         return provider
 
-    def test_accepts_clink_prefixed_model(self, provider):
-        clients = provider._registry.list_clients()
-        if clients:
-            assert provider.validate_model_name(f"clink:{clients[0]}")
+    def test_accepts_configured_slug(self, provider):
+        assert provider.validate_model_name("clink-gemini")
 
-    def test_rejects_unprefixed_model(self, provider):
+    def test_accepts_model_specific_slug(self, provider):
+        assert provider.validate_model_name("clink-sonnet")
+
+    def test_rejects_unknown_slug(self, provider):
+        assert not provider.validate_model_name("clink-nonexistent-model-xyz")
+
+    def test_rejects_bare_model_name(self, provider):
         assert not provider.validate_model_name("gemini-2.5-flash")
 
-    def test_rejects_empty_after_prefix(self, provider):
-        assert not provider.validate_model_name("clink:")
+    def test_rejects_old_colon_prefix(self, provider):
+        assert not provider.validate_model_name("clink:gemini")
 
-    def test_rejects_missing_prefix(self, provider):
-        assert not provider.validate_model_name("gpt5")
+
+# ---------------------------------------------------------------------------
+# Registry model slug resolution
+# ---------------------------------------------------------------------------
+
+
+class TestRegistryModelSlugs:
+    """Verify the registry resolves model slugs to clients and real model names."""
+
+    def test_clink_claude_resolves_to_default(self):
+        registry = get_registry()
+        client, real_model = registry.resolve_model_slug("clink-claude")
+        assert client.name == "claude"
+        assert real_model is None
+
+    def test_clink_sonnet_resolves_to_sonnet(self):
+        registry = get_registry()
+        client, real_model = registry.resolve_model_slug("clink-sonnet")
+        assert client.name == "claude"
+        assert real_model == "sonnet"
+
+    def test_clink_gemini_resolves_to_default(self):
+        registry = get_registry()
+        client, real_model = registry.resolve_model_slug("clink-gemini")
+        assert client.name == "gemini"
+        assert real_model is None
+
+    def test_clink_gemini_specific_model(self):
+        registry = get_registry()
+        client, real_model = registry.resolve_model_slug("clink-gemini-2.5-flash")
+        assert client.name == "gemini"
+        assert real_model == "gemini-2.5-flash"
+
+    def test_list_model_slugs_includes_all_clients(self):
+        registry = get_registry()
+        slugs = registry.list_model_slugs()
+        client_names = set(slugs.values())
+        assert "claude" in client_names
+        assert "gemini" in client_names
+        assert "codex" in client_names
+
+    def test_unknown_slug_raises_key_error(self):
+        registry = get_registry()
+        with pytest.raises(KeyError):
+            registry.resolve_model_slug("nonexistent-slug")
 
 
 # ---------------------------------------------------------------------------
@@ -256,3 +301,17 @@ class TestCliClientConfigs:
         assert "--permission-mode" in args
         idx = args.index("--permission-mode")
         assert args[idx + 1] == "acceptEdits"
+
+    def test_claude_config_has_models(self):
+        config = self._load_config("claude")
+        assert "clink-claude" in config["models"]
+        assert "clink-sonnet" in config["models"]
+
+    def test_gemini_config_has_models(self):
+        config = self._load_config("gemini")
+        assert "clink-gemini" in config["models"]
+        assert "clink-gemini-2.5-flash" in config["models"]
+
+    def test_codex_config_has_models(self):
+        config = self._load_config("codex")
+        assert "clink-codex" in config["models"]

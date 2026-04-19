@@ -51,6 +51,11 @@ class CLIClientConfig(BaseModel):
     timeout_seconds: PositiveInt | None = Field(default=None)
     roles: dict[str, CLIRoleConfig] = Field(default_factory=dict)
     output_to_file: OutputCaptureConfig | None = None
+    models: dict[str, str] = Field(
+        default_factory=dict,
+        description="Maps clink slug → real model name passed to --model. "
+        "e.g. {'clink-sonnet': 'sonnet', 'clink-gemini-2.5-flash': 'gemini-2.5-flash'}",
+    )
 
     @field_validator("additional_args", mode="before")
     @classmethod
@@ -87,6 +92,7 @@ class ResolvedCLIClient(BaseModel):
     runner: str | None = None
     roles: dict[str, ResolvedCLIRole]
     output_to_file: OutputCaptureConfig | None = None
+    models: dict[str, str] = Field(default_factory=dict)
 
     def list_roles(self) -> list[str]:
         return list(self.roles.keys())

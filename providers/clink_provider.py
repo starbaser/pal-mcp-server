@@ -24,8 +24,6 @@ from .shared import (
 
 logger = logging.getLogger(__name__)
 
-CLINK_PREFIX = "clink:"
-
 PASSTHROUGH_SYSTEM_PROMPT = (
     "[clink passthrough mode]\n"
     "You are operating as a text-to-text model endpoint invoked through PAL MCP's "
@@ -47,18 +45,6 @@ PASSTHROUGH_SYSTEM_PROMPT = (
     "them — you will not."
 )
 
-DEFAULT_MODEL_CLI_MAP: dict[str, str] = {
-    "gemini": "gemini",
-    "claude": "claude",
-    "sonnet": "claude",
-    "opus": "claude",
-    "haiku": "claude",
-    "gpt": "codex",
-    "o1": "codex",
-    "o3": "codex",
-    "o4": "codex",
-}
-
 _FALLBACK_CAPABILITIES = ModelCapabilities(
     provider=ProviderType.CLINK,
     model_name="clink-fallback",
@@ -71,7 +57,13 @@ _FALLBACK_CAPABILITIES = ModelCapabilities(
 
 
 class ClinkProvider(ModelProvider):
-    """Routes model calls through configured CLI subprocesses."""
+    """Routes model calls through configured CLI subprocesses.
+
+    Models are declared in conf/cli_clients/*.json under the ``models`` key
+    as a slug→real_model_name mapping.  Slugs use a ``clink-`` prefix by
+    convention (e.g. ``clink-sonnet``, ``clink-gemini-2.5-flash``) so they
+    sort cleanly alongside native provider models.
+    """
 
     MODEL_CAPABILITIES: dict[str, Any] = {}
 
@@ -88,15 +80,10 @@ class ClinkProvider(ModelProvider):
     # ------------------------------------------------------------------
 
     def validate_model_name(self, model_name: str) -> bool:
-        if not model_name.startswith(CLINK_PREFIX):
-            return False
-        real_model = model_name[len(CLINK_PREFIX) :]
-        if not real_model:
-            return False
         try:
-            self._resolve_cli_client_name(real_model)
+            self._registry.resolve_model_slug(model_name)
             return True
-        except ValueError:
+        except KeyError:
             return False
 
     # ------------------------------------------------------------------
@@ -107,13 +94,17 @@ class ClinkProvider(ModelProvider):
         if model_name in self._capabilities_cache:
             return self._capabilities_cache[model_name]
 
-        real_model = model_name[len(CLINK_PREFIX) :] if model_name.startswith(CLINK_PREFIX) else model_name
-        caps = self._delegate_capabilities(real_model)
+        try:
+            _client, real_model = self._registry.resolve_model_slug(model_name)
+        except KeyError:
+            real_model = None
+
+        caps = self._delegate_capabilities(real_model) if real_model else _FALLBACK_CAPABILITIES
         clink_caps = replace(
             caps,
             provider=ProviderType.CLINK,
             model_name=model_name,
-            friendly_name=f"clink:{caps.friendly_name}",
+            friendly_name=f"clink/{caps.friendly_name}",
         )
         self._capabilities_cache[model_name] = clink_caps
         return clink_caps
@@ -142,32 +133,28 @@ class ClinkProvider(ModelProvider):
         max_output_tokens: int | None = None,
         **kwargs: Any,
     ) -> ModelResponse:
-        real_model = model_name[len(CLINK_PREFIX) :] if model_name.startswith(CLINK_PREFIX) else model_name
-        cli_name = self._resolve_cli_client_name(real_model)
-        client = self._registry.get_client(cli_name)
-
-        # When real_model is just the CLI name (e.g. "claude" from "clink:claude"),
-        # don't override the model — let the CLI use its configured default.
-        effective_model = None if real_model.lower() == cli_name.lower() else real_model
+        client, real_model = self._registry.resolve_model_slug(model_name)
 
         timeout = client.timeout_seconds or DEFAULT_TIMEOUT_SECONDS
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(
                 asyncio.run,
-                self._async_generate(client, effective_model, prompt, system_prompt),
+                self._async_generate(client, real_model, prompt, system_prompt),
             )
             try:
                 agent_output = future.result(timeout=timeout)
             except concurrent.futures.TimeoutError:
-                raise RuntimeError(f"CLI '{cli_name}' timed out after {timeout}s for model '{real_model}'") from None
+                raise RuntimeError(
+                    f"CLI '{client.name}' timed out after {timeout}s for model '{model_name}'"
+                ) from None
 
-        return self._to_model_response(agent_output.parsed, real_model, model_name)
+        return self._to_model_response(agent_output.parsed, real_model or model_name, model_name)
 
     async def _async_generate(
         self,
         client: ResolvedCLIClient,
-        real_model: str,
+        real_model: str | None,
         prompt: str,
         system_prompt: str | None,
     ):
@@ -208,26 +195,6 @@ class ClinkProvider(ModelProvider):
         )
 
     # ------------------------------------------------------------------
-    # CLI resolution
-    # ------------------------------------------------------------------
-
-    def _resolve_cli_client_name(self, model_name: str) -> str:
-        available = {c.lower() for c in self._registry.list_clients()}
-        lower = model_name.lower()
-
-        if lower in available:
-            return lower
-
-        for prefix, cli in sorted(DEFAULT_MODEL_CLI_MAP.items(), key=lambda x: -len(x[0])):
-            if lower.startswith(prefix) and cli.lower() in available:
-                return cli
-
-        raise ValueError(
-            f"Cannot determine CLI client for model '{model_name}'. "
-            f"Available clients: {', '.join(sorted(available))}"
-        )
-
-    # ------------------------------------------------------------------
     # Response mapping
     # ------------------------------------------------------------------
 
@@ -243,7 +210,7 @@ class ClinkProvider(ModelProvider):
             content=parsed.content,
             usage=usage if isinstance(usage, dict) else {},
             model_name=model_used,
-            friendly_name=f"clink:{model_used}",
+            friendly_name=f"clink/{model_used}",
             provider=ProviderType.CLINK,
             metadata=metadata,
         )

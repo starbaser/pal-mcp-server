@@ -247,10 +247,6 @@ class ThinkDeepTool(WorkflowTool):
         """ThinkDeep tools use thinking-specific status."""
         return "deep_thinking_complete_ready_for_implementation"
 
-    def get_completion_data_key(self) -> str:
-        """ThinkDeep uses 'complete_thinking' key."""
-        return "complete_thinking"
-
     def get_final_analysis_from_request(self, request):
         """ThinkDeep tools use 'findings' field."""
         return request.findings

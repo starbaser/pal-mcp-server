@@ -317,21 +317,8 @@ class WorkflowTool(BaseTool, BaseWorkflowMixin):
         Returns:
             Dictionary with completion response data
         """
-        # Prepare work summary using inheritance hook
-        work_summary = self.prepare_work_summary()
-
         return {
             "status": self.get_completion_status(),
-            self.get_completion_data_key(): {
-                "initial_request": initial_description or request.step,
-                "steps_taken": len(consolidated_findings.findings),
-                "files_examined": list(consolidated_findings.files_checked),
-                "relevant_files": list(consolidated_findings.relevant_files),
-                "relevant_context": list(consolidated_findings.relevant_context),
-                "work_summary": work_summary,
-                "final_analysis": self.get_final_analysis_from_request(request),
-                "confidence_level": self.get_confidence_level(request),
-            },
             "next_steps": self.get_completion_message(),
             "skip_expert_analysis": True,
             "expert_analysis": {
@@ -358,10 +345,6 @@ class WorkflowTool(BaseTool, BaseWorkflowMixin):
     def get_completion_status(self) -> str:
         """Get the status to use when completing without expert analysis."""
         return "high_confidence_completion"
-
-    def get_completion_data_key(self) -> str:
-        """Get the key name for completion data in the response."""
-        return f"complete_{self.get_name()}"
 
     def get_final_analysis_from_request(self, request) -> Optional[str]:
         """Extract final analysis from request. Override for tool-specific extraction."""

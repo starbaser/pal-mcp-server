@@ -454,10 +454,6 @@ class DebugIssueTool(WorkflowTool):
         """Debug tools use debug-specific status."""
         return "certain_confidence_proceed_with_fix"
 
-    def get_completion_data_key(self) -> str:
-        """Debug uses 'complete_investigation' key."""
-        return "complete_investigation"
-
     def get_final_analysis_from_request(self, request):
         """Debug tools use 'hypothesis' field."""
         return request.hypothesis

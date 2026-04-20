@@ -465,10 +465,6 @@ class CodeReviewTool(WorkflowTool):
         """Code review tools use review-specific status."""
         return "code_review_complete_ready_for_implementation"
 
-    def get_completion_data_key(self) -> str:
-        """Code review uses 'complete_code_review' key."""
-        return "complete_code_review"
-
     def get_final_analysis_from_request(self, request):
         """Code review tools use 'findings' field."""
         return request.findings
@@ -703,10 +699,6 @@ class CodeReviewTool(WorkflowTool):
                     response_data["code_review_status"]["issues_by_severity"][severity] = 0
                 response_data["code_review_status"]["issues_by_severity"][severity] += 1
             response_data["code_review_status"]["review_validation_type"] = self.get_review_validation_type(request)
-
-        # Map complete_codereviewworkflow to complete_code_review
-        if f"complete_{tool_name}" in response_data:
-            response_data["complete_code_review"] = response_data.pop(f"complete_{tool_name}")
 
         # Map the completion flag to match code review workflow
         if f"{tool_name}_complete" in response_data:

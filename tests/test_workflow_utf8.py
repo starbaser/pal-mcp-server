@@ -200,38 +200,48 @@ class TestWorkflowToolsUTF8(unittest.IsolatedAsyncioTestCase):
             self.assertIn("✅", analysis)
 
     @patch("tools.shared.base_tool.BaseTool.get_model_provider")
-    async def test_debug_tool_french_error_analysis(self, mock_get_provider):
+    @patch("utils.model_context.ModelContext")
+    async def test_debug_tool_french_error_analysis(self, mock_model_context, mock_get_provider):
         """Test that the debug tool analyzes errors in French."""
+        # Mock ModelContext to bypass model validation
+        mock_context_instance = Mock()
+        mock_token_allocation = Mock()
+        mock_token_allocation.file_tokens = 1000
+        mock_token_allocation.total_tokens = 2000
+        mock_context_instance.calculate_token_allocation.return_value = mock_token_allocation
+
         # Mock provider
+        mock_response = Mock(
+            content=json.dumps(
+                {
+                    "status": "pause_for_investigation",
+                    "step_number": 1,
+                    "total_steps": 2,
+                    "next_step_required": True,
+                    "findings": (
+                        "Erreur analysée: variable 'données' non définie. Cause probable: import manquant."
+                    ),
+                    "files_checked": ["/src/data_processor.py"],
+                    "relevant_files": ["/src/data_processor.py"],
+                    "hypothesis": ("Variable 'données' not defined - missing import"),
+                    "confidence": "medium",
+                    "investigation_status": "in_progress",
+                    "error_analysis": ("L'erreur concerne la variable 'données' qui n'est pas définie."),
+                },
+                ensure_ascii=False,
+            ),
+            usage={},
+            model_name="gemini-2.5-flash",
+            metadata={},
+        )
         mock_provider = Mock()
         mock_provider.get_provider_type.return_value = Mock(value="test")
         mock_provider.get_capabilities.return_value = Mock(supports_extended_thinking=False)
-        mock_provider.generate_content = AsyncMock(
-            return_value=Mock(
-                content=json.dumps(
-                    {
-                        "status": "pause_for_investigation",
-                        "step_number": 1,
-                        "total_steps": 2,
-                        "next_step_required": True,
-                        "findings": (
-                            "Erreur analysée: variable 'données' non définie. Cause probable: import manquant."
-                        ),
-                        "files_checked": ["/src/data_processor.py"],
-                        "relevant_files": ["/src/data_processor.py"],
-                        "hypothesis": ("Variable 'données' not defined - missing import"),
-                        "confidence": "medium",
-                        "investigation_status": "in_progress",
-                        "error_analysis": ("L'erreur concerne la variable 'données' qui n'est pas définie."),
-                    },
-                    ensure_ascii=False,
-                ),
-                usage={},
-                model_name="test-model",
-                metadata={},
-            )
-        )
+        mock_provider.generate_content.return_value = mock_response
         mock_get_provider.return_value = mock_provider
+        mock_context_instance.provider = mock_provider
+        mock_context_instance.capabilities = Mock(supports_extended_thinking=False)
+        mock_model_context.return_value = mock_context_instance
 
         # Test the debug tool
         debug_tool = DebugIssueTool()
@@ -246,7 +256,7 @@ class TestWorkflowToolsUTF8(unittest.IsolatedAsyncioTestCase):
                 "relevant_files": ["/src/data_processor.py"],
                 "hypothesis": ("Variable 'données' not defined - missing import"),
                 "confidence": "medium",
-                "model": "test-model",
+                "model": "gemini-2.5-flash",
             }
         )
 

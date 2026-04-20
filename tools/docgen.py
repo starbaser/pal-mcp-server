@@ -440,10 +440,6 @@ class DocgenTool(WorkflowTool):
         """Docgen tools use docgen-specific status."""
         return "documentation_analysis_complete"
 
-    def get_completion_data_key(self) -> str:
-        """Docgen uses 'complete_documentation_analysis' key."""
-        return "complete_documentation_analysis"
-
     def get_final_analysis_from_request(self, request):
         """Docgen tools use 'hypothesis' field for documentation strategy."""
         return request.hypothesis

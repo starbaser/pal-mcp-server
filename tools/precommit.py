@@ -499,10 +499,6 @@ class PrecommitTool(WorkflowTool):
         """Precommit tools use precommit-specific status."""
         return "validation_complete_ready_for_commit"
 
-    def get_completion_data_key(self) -> str:
-        """Precommit uses 'complete_validation' key."""
-        return "complete_validation"
-
     def get_final_analysis_from_request(self, request):
         """Precommit tools use 'findings' field."""
         return request.findings

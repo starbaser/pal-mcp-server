@@ -345,10 +345,6 @@ class TestGenTool(WorkflowTool):
         """Test generation tools use test-specific status."""
         return "test_generation_complete_ready_for_implementation"
 
-    def get_completion_data_key(self) -> str:
-        """Test generation uses 'complete_test_generation' key."""
-        return "complete_test_generation"
-
     def get_final_analysis_from_request(self, request):
         """Test generation tools use findings for final analysis."""
         return request.findings

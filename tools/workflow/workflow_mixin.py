@@ -844,21 +844,10 @@ class BaseWorkflowMixin(ABC):
         Tools can override this for custom high-confidence completion handling.
         Default implementation provides generic response.
         """
-        work_summary = self.prepare_work_summary()
         continuation_id = self.get_request_continuation_id(request)
 
         response_data = {
             "status": self.get_completion_status(),
-            f"complete_{self.get_name()}": {
-                "initial_request": self.get_initial_request(request.step),
-                "steps_taken": len(consolidated_findings.findings),
-                "files_examined": list(consolidated_findings.files_checked),
-                "relevant_files": list(consolidated_findings.relevant_files),
-                "relevant_context": list(consolidated_findings.relevant_context),
-                "work_summary": work_summary,
-                "final_analysis": self.get_final_analysis_from_request(request),
-                "confidence_level": self.get_confidence_level(request),
-            },
             "next_steps": self.get_completion_message(),
             "skip_expert_analysis": True,
             "expert_analysis": {
@@ -1338,17 +1327,6 @@ class BaseWorkflowMixin(ABC):
                 if expert_guidance:
                     response_data["important_considerations"] = expert_guidance
 
-            # Prepare complete work summary
-            work_summary = self._prepare_work_summary()
-            response_data[f"complete_{self.get_name()}"] = {
-                "initial_request": self.get_initial_request(request.step),
-                "steps_taken": len(self.work_history),
-                "files_examined": list(self.consolidated_findings.files_checked),
-                "relevant_files": list(self.consolidated_findings.relevant_files),
-                "relevant_context": list(self.consolidated_findings.relevant_context),
-                "issues_found": self.consolidated_findings.issues_found,
-                "work_summary": work_summary,
-            }
         else:
             # Tool doesn't require expert analysis or local work was sufficient
             if not self.requires_expert_analysis():

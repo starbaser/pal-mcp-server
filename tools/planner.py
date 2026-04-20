@@ -491,10 +491,6 @@ class PlannerTool(WorkflowTool):
         """Planner uses planning-specific status."""
         return "planning_complete"
 
-    def get_completion_data_key(self) -> str:
-        """Planner uses 'complete_planning' key."""
-        return "complete_planning"
-
     def get_completion_message(self) -> str:
         """Planner-specific completion message."""
         return (

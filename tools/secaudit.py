@@ -641,10 +641,6 @@ class SecauditTool(WorkflowTool):
         """Security audit tools use audit-specific status."""
         return "security_analysis_complete"
 
-    def get_completion_data_key(self) -> str:
-        """Security audit uses 'complete_security_audit' key."""
-        return "complete_security_audit"
-
     def get_final_analysis_from_request(self, request):
         """Security audit tools use 'findings' field."""
         return request.findings

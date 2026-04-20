@@ -455,10 +455,6 @@ class RefactorTool(WorkflowTool):
         """Refactor tools use refactor-specific status."""
         return "refactoring_analysis_complete_ready_for_implementation"
 
-    def get_completion_data_key(self) -> str:
-        """Refactor uses 'complete_refactoring' key."""
-        return "complete_refactoring"
-
     def get_final_analysis_from_request(self, request):
         """Refactor tools use 'findings' field."""
         return request.findings

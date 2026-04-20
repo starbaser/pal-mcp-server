@@ -410,10 +410,6 @@ class AnalyzeTool(WorkflowTool):
         """Analyze tools use analysis-specific status."""
         return "analysis_complete_ready_for_implementation"
 
-    def get_completion_data_key(self) -> str:
-        """Analyze uses 'complete_analysis' key."""
-        return "complete_analysis"
-
     def get_final_analysis_from_request(self, request):
         """Analyze tools use 'findings' field."""
         return request.findings
@@ -560,10 +556,6 @@ class AnalyzeTool(WorkflowTool):
                     response_data["analysis_status"]["insights_by_severity"][severity] = 0
                 response_data["analysis_status"]["insights_by_severity"][severity] += 1
             response_data["analysis_status"]["analysis_confidence"] = self.get_request_confidence(request)
-
-        # Map complete_analyze to complete_analysis
-        if f"complete_{tool_name}" in response_data:
-            response_data["complete_analysis"] = response_data.pop(f"complete_{tool_name}")
 
         # Map the completion flag to match analyze workflow
         if f"{tool_name}_complete" in response_data:

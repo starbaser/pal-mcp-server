@@ -427,10 +427,6 @@ class NarrateTool(WorkflowTool):
         """Narrate tools use narration-specific status."""
         return "narrate_complete"
 
-    def get_completion_data_key(self) -> str:
-        """Narrate uses 'complete_narrate' key."""
-        return "complete_narrate"
-
     def get_final_analysis_from_request(self, request):
         """Narrate tools use 'findings' field."""
         return request.findings

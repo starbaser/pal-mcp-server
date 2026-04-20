@@ -140,7 +140,32 @@ def test_error_listing_respects_env_restrictions(monkeypatch, reset_registry):
     assert payload["status"] == "error"
 
     available_models = _extract_available_models(payload["content"])
-    assert set(available_models) == {"gemini-2.5-pro", "gpt-5.2", "gpt5nano", "openai/gpt-5-nano"}
+    assert set(available_models) == {
+        "gemini-2.5-pro",
+        "gemini-pro-2.5",
+        "gpt-5.2",
+        # Clink models (no API key required, no restriction env set)
+        "claude-cli",
+        "claude-cli-sonnet",
+        "claude-cli-opus",
+        "claude-cli-haiku",
+        "claude-cli-sonnet-4-6",
+        "claude-cli-opus-4-6",
+        "claude-cli-haiku-4-5",
+        "codex-cli",
+        "codex-cli-o4-mini",
+        "codex-cli-o3",
+        "codex-cli-gpt-5.4",
+        "gemini-cli",
+        "gemini-cli-2.5-flash",
+        "gemini-cli-2.5-pro",
+        "gemini-cli-3-flash-preview",
+        "gemini-cli-3-pro-preview",
+        "gemini-cli-3.1-pro-preview",
+        "glmaude-cli",
+        "glmaude-cli-4.7",
+        "glmaude-cli-4.5-air",
+    }
 
 
 @pytest.mark.no_mock_provider

@@ -707,10 +707,6 @@ DTOClass ──uses──→ [TARGET_CLASS] ──uses──→ EntityClass
         """Tracer uses tracing-specific status."""
         return "tracing_complete"
 
-    def get_completion_data_key(self) -> str:
-        """Tracer uses 'complete_tracing' key."""
-        return "complete_tracing"
-
     def get_completion_message(self) -> str:
         """Tracer-specific completion message."""
         return (

@@ -10,10 +10,10 @@
   ],
   "env": {},
   "models": {
-    "clink-codex": "",
-    "clink-o4-mini": "o4-mini",
-    "clink-o3": "o3",
-    "clink-gpt-5.4": "gpt-5.4"
+    "codex": "",
+    "o4-mini": "o4-mini",
+    "o3": "o3",
+    "gpt-5.4": "gpt-5.4"
   },
   "roles": {
     "default": {

@@ -204,19 +204,19 @@ class TestClinkProviderModelValidation:
         provider._registry = get_registry()
         return provider
 
-    def test_accepts_configured_slug(self, provider):
-        assert provider.validate_model_name("clink-gemini")
+    def test_accepts_cli_default(self, provider):
+        assert provider.validate_model_name("gemini")
 
     def test_accepts_model_specific_slug(self, provider):
-        assert provider.validate_model_name("clink-sonnet")
+        assert provider.validate_model_name("sonnet")
+
+    def test_accepts_bare_model_name(self, provider):
+        assert provider.validate_model_name("gemini-2.5-flash")
 
     def test_rejects_unknown_slug(self, provider):
-        assert not provider.validate_model_name("clink-nonexistent-model-xyz")
+        assert not provider.validate_model_name("nonexistent-model-xyz")
 
-    def test_rejects_bare_model_name(self, provider):
-        assert not provider.validate_model_name("gemini-2.5-flash")
-
-    def test_rejects_old_colon_prefix(self, provider):
+    def test_rejects_colon_prefix(self, provider):
         assert not provider.validate_model_name("clink:gemini")
 
 
@@ -228,27 +228,27 @@ class TestClinkProviderModelValidation:
 class TestRegistryModelSlugs:
     """Verify the registry resolves model slugs to clients and real model names."""
 
-    def test_clink_claude_resolves_to_default(self):
+    def test_claude_resolves_to_default(self):
         registry = get_registry()
-        client, real_model = registry.resolve_model_slug("clink-claude")
+        client, real_model = registry.resolve_model_slug("claude")
         assert client.name == "claude"
         assert real_model is None
 
-    def test_clink_sonnet_resolves_to_sonnet(self):
+    def test_sonnet_resolves_to_sonnet(self):
         registry = get_registry()
-        client, real_model = registry.resolve_model_slug("clink-sonnet")
+        client, real_model = registry.resolve_model_slug("sonnet")
         assert client.name == "claude"
         assert real_model == "sonnet"
 
-    def test_clink_gemini_resolves_to_default(self):
+    def test_gemini_resolves_to_default(self):
         registry = get_registry()
-        client, real_model = registry.resolve_model_slug("clink-gemini")
+        client, real_model = registry.resolve_model_slug("gemini")
         assert client.name == "gemini"
         assert real_model is None
 
-    def test_clink_gemini_specific_model(self):
+    def test_gemini_specific_model(self):
         registry = get_registry()
-        client, real_model = registry.resolve_model_slug("clink-gemini-2.5-flash")
+        client, real_model = registry.resolve_model_slug("gemini-2.5-flash")
         assert client.name == "gemini"
         assert real_model == "gemini-2.5-flash"
 
@@ -304,14 +304,14 @@ class TestCliClientConfigs:
 
     def test_claude_config_has_models(self):
         config = self._load_config("claude")
-        assert "clink-claude" in config["models"]
-        assert "clink-sonnet" in config["models"]
+        assert "claude" in config["models"]
+        assert "sonnet" in config["models"]
 
     def test_gemini_config_has_models(self):
         config = self._load_config("gemini")
-        assert "clink-gemini" in config["models"]
-        assert "clink-gemini-2.5-flash" in config["models"]
+        assert "gemini" in config["models"]
+        assert "gemini-2.5-flash" in config["models"]
 
     def test_codex_config_has_models(self):
         config = self._load_config("codex")
-        assert "clink-codex" in config["models"]
+        assert "codex" in config["models"]

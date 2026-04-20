@@ -60,9 +60,11 @@ class ClinkProvider(ModelProvider):
     """Routes model calls through configured CLI subprocesses.
 
     Models are declared in conf/cli_clients/*.json under the ``models`` key
-    as a slug→real_model_name mapping.  Slugs use a ``clink-`` prefix by
-    convention (e.g. ``clink-sonnet``, ``clink-gemini-2.5-flash``) so they
-    sort cleanly alongside native provider models.
+    as a slug→real_model_name mapping.  Slugs use bare model names
+    (e.g. ``sonnet``, ``gemini-2.5-flash``) so callers don't need a
+    special prefix.  The ``clink`` boolean parameter (default ``true``)
+    on tool calls controls whether these CLI routes are preferred over
+    native API providers.
     """
 
     MODEL_CAPABILITIES: dict[str, Any] = {}
@@ -90,6 +92,16 @@ class ClinkProvider(ModelProvider):
     # Capabilities
     # ------------------------------------------------------------------
 
+    def get_all_model_capabilities(self) -> dict[str, ModelCapabilities]:
+        """Expose clink models so they appear in available model listings."""
+        result: dict[str, ModelCapabilities] = {}
+        for slug in self._registry.list_model_slugs():
+            try:
+                result[slug] = self.get_capabilities(slug)
+            except Exception:
+                pass
+        return result
+
     def get_capabilities(self, model_name: str) -> ModelCapabilities:
         if model_name in self._capabilities_cache:
             return self._capabilities_cache[model_name]
@@ -110,14 +122,19 @@ class ClinkProvider(ModelProvider):
         return clink_caps
 
     def _delegate_capabilities(self, real_model: str) -> ModelCapabilities:
+        """Get capabilities from an upstream (non-clink) provider."""
         from .registry import ModelProviderRegistry
 
-        provider = ModelProviderRegistry.get_provider_for_model(real_model)
-        if provider:
-            try:
-                return provider.get_capabilities(real_model)
-            except Exception:
-                logger.debug("Failed to get capabilities for %s from upstream provider", real_model)
+        for provider_type in ModelProviderRegistry.PROVIDER_PRIORITY_ORDER:
+            if provider_type == ProviderType.CLINK:
+                continue
+            provider = ModelProviderRegistry.get_provider(provider_type)
+            if provider and provider.validate_model_name(real_model):
+                try:
+                    return provider.get_capabilities(real_model)
+                except Exception:
+                    logger.debug("Failed to get capabilities for %s from %s", real_model, provider_type)
+
         return replace(_FALLBACK_CAPABILITIES, model_name=real_model, friendly_name=real_model)
 
     # ------------------------------------------------------------------

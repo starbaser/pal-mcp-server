@@ -1383,8 +1383,25 @@ async def _call_tool_impl(name: str, arguments: dict[str, Any], tools: dict) -> 
             # Update arguments with resolved model
             arguments["model"] = model_name
 
-        # Validate model availability at MCP boundary
-        provider = ModelProviderRegistry.get_provider_for_model(model_name)
+        # Clink-aware model routing: when enabled, prefer CLI tools over native APIs
+        provider = None
+        clink_enabled = arguments.get("clink", True)
+        if clink_enabled:
+            from clink.registry import get_registry as get_clink_registry
+            from providers.shared import ProviderType
+
+            try:
+                get_clink_registry().resolve_model_slug(model_name)
+                provider = ModelProviderRegistry.get_provider(ProviderType.CLINK)
+                if provider:
+                    logger.info(f"Clink routing: '{model_name}' via CLI")
+            except KeyError:
+                pass
+
+        # Fall through to normal provider resolution
+        if not provider:
+            provider = ModelProviderRegistry.get_provider_for_model(model_name)
+
         if not provider:
             # Get list of available models for error message
             available_models = list(ModelProviderRegistry.get_available_models(respect_restrictions=True).keys())

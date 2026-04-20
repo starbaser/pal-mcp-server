@@ -45,6 +45,11 @@ class SchemaBuilder:
             "type": "boolean",
             "description": COMMON_FIELD_DESCRIPTIONS["raw"],
         },
+        "clink": {
+            "type": "boolean",
+            "default": True,
+            "description": COMMON_FIELD_DESCRIPTIONS["clink"],
+        },
     }
 
     # Simple tool-specific field schemas (workflow tools use relevant_files instead)

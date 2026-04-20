@@ -114,12 +114,12 @@ Models are resolved early at the MCP boundary in `handle_call_tool()`:
 4. Pass resolved context to tool
 
 Tools declare their preferred model tier via `get_model_category()` → `ToolModelCategory`:
-- `EXTENDED_REASONING` — most tools (codereview, debug, analyze, thinkdeep, addtreelayer, querynode, etc.)
+- `EXTENDED_REASONING` — most tools (codereview, debug, analyze, thinkdeep, growlayer, querynode, etc.)
 - `FAST_RESPONSE` — chat, listmodels, version, treelist, readnode, forknode, newtree, renametree, treedump, listnodefiles, readnodefile, writenodefile
 - `BALANCED` — perceive, clink
 - `IMAGE_GENERATION` — imagegen
 
-Tools that override `requires_model() → False` bypass model resolution entirely: clink, planner, consensus, docgen, tracer, challenge, apilookup, listmodels, version, upsertnode, and all PALTree tools except addtreelayer and querynode.
+Tools that override `requires_model() → False` bypass model resolution entirely: clink, planner, consensus, docgen, tracer, challenge, apilookup, listmodels, version, upsertnode, and all PALTree tools except growlayer and querynode.
 
 ### Tool System
 
@@ -146,7 +146,7 @@ BaseTool (direct) ─── PalInitTool, PalForkTool, PalListTool, PalReadTool,
                       PalDeleteTreeTool, PalTraverseTool, PalUpsertTool
                       (requires_model=False, pure filesystem)
 
-SimpleTool → PalTreeBaseTool ─── PalAddTreeLayerTool, PalQueryTool
+SimpleTool → PalTreeBaseTool ─── PalGrowLayerTool, PalQueryTool
                                   (requires_model=True, thinking_mode="max")
 ```
 
@@ -154,7 +154,7 @@ SimpleTool → PalTreeBaseTool ─── PalAddTreeLayerTool, PalQueryTool
 - Fields: `label: str | None = None`, `timestamp: str = ""`, `model: str | None = None`, `tool_name: str | None = None`, `files: list[str] = []`, `input: str = ""`, `output: str = ""`, `metadata: dict[str, Any] = {}`, `children: dict[str, PalNode] = {}`
 - `input` = full tool call data rendered via `render_markdown_output()` (uses `oboros.tome.dumps` — TOME BFS-linearized markdown with `§` sigils)
 - `output` = full tool response rendered via `render_markdown_output()`
-- `files` = flat list of absolute path strings attached to this node (populated by `addtreelayer`/`querynode` via `absolute_file_paths`, or by `writenodefile` post-hoc)
+- `files` = flat list of absolute path strings attached to this node (populated by `growlayer`/`querynode` via `absolute_file_paths`, or by `writenodefile` post-hoc)
 - Each node holds only its own data
 - `format_layer_markdown` (used by `readnode`/`treedump`) accepts `input_text`/`output_text` params
 
@@ -183,7 +183,7 @@ Every path segment matches `[LQFC]\d+`. Range notation `L[1:5]` is used in docum
 
 Nesting rules:
 - **Q→Q**: Intentional. `querynode(tree_path=L3.Q0)` → `L3.Q0.Q0` (follow-up inherits Q0 in ancestry). `querynode(tree_path=L3)` → `L3.Q1` (sibling, independent query).
-- **L→L**: Prevented. `addtreelayer` walks up past L-prefixed ancestors to create siblings (`L3.L0` never happens; `L4` is created instead).
+- **L→L**: Prevented. `growlayer` walks up past L-prefixed ancestors to create siblings (`L3.L0` never happens; `L4` is created instead).
 - **C cascade**: Prevented. `_resolve_tree_continuation` walks up past C/numeric stubs to create flat siblings under the nearest non-stub ancestor. Stubs at root level redirect under the latest L node.
 - **F→F**: Allowed. Forks within forks are valid branching.
 
@@ -241,7 +241,7 @@ Register in `server.py` TOOLS dict. Tools that bypass model resolution override 
 
 ## PALTree Tool Reference
 
-MCP tool names follow a scope convention: **node tools** (`*node`) operate on a single PALNode, **tree tools** (`tree*`/`*tree`) operate on a subtree or the whole tree. Source class names (e.g. `PalAddTreeLayerTool`) are unchanged.
+MCP tool names follow a scope convention: **node tools** (`*node`) operate on a single PALNode, **tree tools** (`tree*`/`*tree`) operate on a subtree or the whole tree. Source class names (e.g. `PalGrowLayerTool`) are unchanged.
 
 ### Path Convention
 
@@ -262,7 +262,7 @@ Tools accept `tree_path` and `node_path` as separate parameters. Internal functi
 | MCP tool name    | Source class         | Model required | Scope |
 |------------------|----------------------|----------------|-------|
 | `newtree`        | PalInitTool          | No             | tree  |
-| `addtreelayer`   | PalAddTreeLayerTool  | Yes            | node  |
+| `growlayer`   | PalGrowLayerTool  | Yes            | node  |
 | `upsertnode`     | PalUpsertTool        | No             | node  |
 | `querynode`      | PalQueryTool         | Yes            | node  |
 | `treelist`       | PalListTool          | No             | tree  |
@@ -277,6 +277,7 @@ Tools accept `tree_path` and `node_path` as separate parameters. Internal functi
 | `movenode`       | PalMoveTool          | No             | node  |
 | `clonetree`      | PalCopyTool          | No             | tree  |
 | `foldtree`       | PalFoldTool          | No             | tree  |
+| `reincarnatetree`| PalReincarnateTool   | Yes            | tree  |
 | `deletenode`     | PalDeleteTool        | No             | node  |
 | `deletetree`     | PalDeleteTreeTool    | No             | tree  |
 

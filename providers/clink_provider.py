@@ -156,9 +156,7 @@ class ClinkProvider(ModelProvider):
             try:
                 agent_output = future.result(timeout=timeout)
             except concurrent.futures.TimeoutError:
-                raise RuntimeError(
-                    f"CLI '{client.name}' timed out after {timeout}s for model '{model_name}'"
-                ) from None
+                raise RuntimeError(f"CLI '{client.name}' timed out after {timeout}s for model '{model_name}'") from None
 
         return self._to_model_response(agent_output.parsed, real_model or model_name, model_name)
 
@@ -180,9 +178,7 @@ class ClinkProvider(ModelProvider):
 
         composed_prompt = f"{PASSTHROUGH_SYSTEM_PROMPT}\n\n{prompt}"
         composed_system_prompt = (
-            f"{PASSTHROUGH_SYSTEM_PROMPT}\n\n{system_prompt}"
-            if system_prompt
-            else PASSTHROUGH_SYSTEM_PROMPT
+            f"{PASSTHROUGH_SYSTEM_PROMPT}\n\n{system_prompt}" if system_prompt else PASSTHROUGH_SYSTEM_PROMPT
         )
 
         return await agent.run(

@@ -80,7 +80,7 @@ def _render_tree(tree, root_path: str = "", indent: int = 0, tlog=None) -> list[
 # ---------------------------------------------------------------------------
 
 
-class PalAddTreeLayerRequest(ToolRequest):
+class PalGrowLayerRequest(ToolRequest):
     prompt: str = Field(...)
     absolute_file_paths: Optional[list[str]] = Field(default_factory=list)
     media: Optional[list[str]] = Field(default_factory=list)
@@ -163,7 +163,7 @@ class PalInitTool(BaseTool):
         return (
             "Create a new named PALTree and register it to a project directory.\n"
             "Run treelist first to check for an existing tree before creating a new one;\n"
-            "use addtreelayer to add nodes after creation."
+            "use growlayer to add nodes after creation."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -253,7 +253,7 @@ class PalInitTool(BaseTool):
                 f"PALTree created.\n\n"
                 f"tree_path: {tree_path}\n"
                 f"directory: {directory}\n\n"
-                f'Use addtreelayer(tree_path="{tree_name}", ...) to add context layers.'
+                f'Use growlayer(tree_path="{tree_name}", ...) to add context layers.'
             ),
             content_type="text",
             metadata={"tree_path": tree_path, "directory": directory, **tlog.to_dict()},
@@ -262,23 +262,23 @@ class PalInitTool(BaseTool):
 
 
 # ---------------------------------------------------------------------------
-# addtreelayer
+# growlayer
 # ---------------------------------------------------------------------------
 
 
-class PalAddTreeLayerTool(PalTreeBaseTool):
+class PalGrowLayerTool(PalTreeBaseTool):
     def get_name(self) -> str:
-        return "addtreelayer"
+        return "growlayer"
 
     def get_description(self) -> str:
         return (
-            "Add a context node to an existing PALTree, embedding files and prose for an external model to process.\n"
+            "Grow a PALTree by adding a new context layer, embedding files and prose for an external model to synthesize.\n"
             "Each call appends a new numbered layer; seed 4-6 key files per layer for best results.\n"
             "Use newtree to create a tree first, then querynode to retrieve stored context."
         )
 
     def get_request_model(self):
-        return PalAddTreeLayerRequest
+        return PalGrowLayerRequest
 
     def get_tool_fields(self) -> dict[str, dict[str, Any]]:
         return {
@@ -353,7 +353,7 @@ class PalAddTreeLayerTool(PalTreeBaseTool):
         if not tree_path:
             error = ToolOutput(
                 status="error",
-                content="addtreelayer requires a tree_path. Use newtree to create a tree first.",
+                content="growlayer requires a tree_path. Use newtree to create a tree first.",
                 content_type="text",
             )
             return [TextContent(type="text", text=error.model_dump_json())]
@@ -390,7 +390,7 @@ class PalAddTreeLayerTool(PalTreeBaseTool):
 
         return await super().execute(arguments)
 
-    async def prepare_prompt(self, request: PalAddTreeLayerRequest) -> str:
+    async def prepare_prompt(self, request: PalGrowLayerRequest) -> str:
         user_content = self.handle_prompt_file_with_fallback(request)
 
         files = self.get_request_files(request)
@@ -448,9 +448,7 @@ class PalAddTreeLayerTool(PalTreeBaseTool):
             return ""
         return f"\n\n=== CONTEXT FILES ===\n{''.join(file_parts)}\n=== END CONTEXT FILES ==="
 
-    def format_response(
-        self, response: str, _request: PalAddTreeLayerRequest, _model_info: Optional[dict] = None
-    ) -> str:
+    def format_response(self, response: str, _request: PalGrowLayerRequest, _model_info: Optional[dict] = None) -> str:
         self._last_raw_response = response
         return f"{response}\n\n---\n\nAGENT'S TURN: Context layer stored. Use the tree_path to add more layers or query this tree."
 
@@ -491,7 +489,7 @@ class PalAddTreeLayerTool(PalTreeBaseTool):
         insertion_parent = getattr(self, "_insertion_parent", None)
         next_key = getattr(self, "_next_key", None)
         if tree is None or insertion_parent is None or next_key is None:
-            logger.warning("addtreelayer: missing tree state in _record_assistant_turn, skipping write")
+            logger.warning("growlayer: missing tree state in _record_assistant_turn, skipping write")
             return
 
         raw = getattr(self, "_last_raw_response", response_text)
@@ -996,7 +994,7 @@ class PalForkTool(BaseTool):
         return (
             "Insert a fork node as a child of the target node in a PALTree, branching to explore alternatives\n"
             "without disrupting the main lineage. Returns a new tree_path for the fork branch.\n"
-            "Use treelist to find the tree_path to fork from; use addtreelayer or querynode with the returned fork tree_path."
+            "Use treelist to find the tree_path to fork from; use growlayer or querynode with the returned fork tree_path."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -1099,7 +1097,7 @@ class PalListTool(BaseTool):
 
     def get_description(self) -> str:
         return (
-            "List PALTrees and their full node trees, returning tree_paths needed for addtreelayer, querynode,\n"
+            "List PALTrees and their full node trees, returning tree_paths needed for growlayer, querynode,\n"
             "readnode, forknode, and other tools. Defaults to the current working directory.\n"
             "Pass directory to scope to a different project, or tree_path to drill into a specific subtree."
         )
@@ -2562,6 +2560,402 @@ class PalFoldTool(BaseTool):
                 "end_node_path": end_node_path,
                 "content_length": content_len,
                 "file_count": file_count,
+                **tlog.to_dict(),
+            },
+        )
+        return [TextContent(type="text", text=tool_output.model_dump_json())]
+
+
+# ---------------------------------------------------------------------------
+# reincarnatetree
+# ---------------------------------------------------------------------------
+
+
+class PalReincarnateTool(BaseTool):
+    """LLM-driven semantic compression that creates a fresh tree from an old one.
+
+    Pipeline: audit (no LLM) → plan (LLM) → synthesize (LLM per layer) → construct (no LLM).
+    Non-destructive: creates a NEW tree, leaving the source intact.
+    """
+
+    def get_name(self) -> str:
+        return "reincarnatetree"
+
+    def get_description(self) -> str:
+        return (
+            "Reincarnate a PALTree: LLM-driven semantic compression that distills an accumulated tree into a fresh,\n"
+            "condensed version. Reads current file state from disk, discards outdated content, and produces a\n"
+            "coherent reborn tree. Non-destructive — creates a new tree, leaving the source intact."
+        )
+
+    def get_input_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "source_tree_path": {"type": "string", "description": TREE_PATH_DESCRIPTION},
+                "new_tree_name": {
+                    "type": "string",
+                    "description": "Name for the reincarnated tree. Defaults to '{name}-reborn'. No dots allowed.",
+                },
+                "focus": {
+                    "type": "string",
+                    "description": "Optional: guide what to preserve (e.g. 'architecture', 'implementation state').",
+                },
+                "max_layers": {
+                    "type": "integer",
+                    "description": "Soft ceiling on layers in the new tree. The LLM decides the actual count. Default: 5.",
+                    "default": 5,
+                    "minimum": 1,
+                    "maximum": 10,
+                },
+                "model": {
+                    "type": "string",
+                    "description": "Model to use for plan and synthesis phases.",
+                },
+                "thinking_mode": {
+                    "type": "string",
+                    "enum": ["minimal", "low", "medium", "high", "max"],
+                    "description": "Reasoning depth for synthesis. Default: max.",
+                    "default": "max",
+                },
+            },
+            "required": ["source_tree_path"],
+            "additionalProperties": False,
+        }
+
+    def get_annotations(self) -> dict:
+        return {"readOnlyHint": False, "openWorldHint": False}
+
+    def get_system_prompt(self) -> str:
+        return ""
+
+    def get_request_model(self):
+        return ToolRequest
+
+    def requires_model(self) -> bool:
+        return True
+
+    def get_model_category(self):
+        from tools.models import ToolModelCategory
+
+        return ToolModelCategory.EXTENDED_REASONING
+
+    async def prepare_prompt(self, _request) -> str:
+        return ""
+
+    def format_response(self, response: str, _request, _model_info=None) -> str:
+        return response
+
+    async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
+        import json as json_mod
+
+        from tools.models import ToolOutput
+        from utils.palstore import (
+            PalNode,
+            PalRoot,
+            TraversalLog,
+            add_palnode,
+            iter_dfs,
+            load_tree,
+            resolve_node,
+            resolve_tree_path,
+            save_tree,
+            update_index,
+        )
+
+        source_path = arguments.get("source_tree_path", "")
+        new_name = arguments.get("new_tree_name")
+        focus = arguments.get("focus", "")
+        max_layers = arguments.get("max_layers", 5)
+        model_name = arguments.get("_resolved_model_name") or arguments.get("model")
+        thinking_mode = arguments.get("thinking_mode", "max")
+
+        # --- Resolve source tree ---
+        try:
+            canonical = resolve_tree_path(source_path)
+            tree = load_tree(canonical)
+            if tree is None:
+                raise KeyError(f"PALTree file not found: {canonical}")
+        except (KeyError, ValueError) as exc:
+            error = ToolOutput(status="error", content=str(exc), content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        if not new_name:
+            new_name = f"{tree.tree_name}-reborn"
+        new_canonical = f"{tree.directory}:{new_name}"
+
+        # --- Resolve model provider ---
+        try:
+            provider = self.get_model_provider(model_name)
+        except ValueError as exc:
+            error = ToolOutput(status="error", content=str(exc), content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        from utils.model_context import ModelContext
+
+        model_context = ModelContext(model_name=model_name)
+
+        # ===================================================================
+        # Phase 1: Audit (no LLM)
+        # ===================================================================
+        all_nodes: list[tuple[str, PalNode]] = list(iter_dfs(tree.tree_path, tree.children))
+        tlog = TraversalLog(traversal_type="reincarnate_audit")
+        for path, node in all_nodes:
+            tlog.record(path, node)
+
+        # Collect unique files across all nodes
+        seen_files: set[str] = set()
+        all_file_refs: list[str] = []
+        for _, node in all_nodes:
+            for f in node.files:
+                if f not in seen_files:
+                    seen_files.add(f)
+                    all_file_refs.append(f)
+
+        # Build file manifest
+        file_manifest: list[dict[str, Any]] = []
+        for fpath in all_file_refs:
+            entry: dict[str, Any] = {"path": fpath, "exists": os.path.exists(fpath)}
+            if entry["exists"]:
+                try:
+                    stat = os.stat(fpath)
+                    entry["size"] = stat.st_size
+                    entry["modified"] = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).strftime(
+                        "%Y-%m-%d %H:%M"
+                    )
+                except OSError:
+                    pass
+            file_manifest.append(entry)
+
+        # Build tree outline (labels + timestamps + file basenames — NOT full content)
+        outline_parts: list[str] = [f"Tree: {canonical}", f"Nodes: {len(all_nodes)}", f"Tokens: ~{tlog.total_tokens}"]
+        for path, node in all_nodes:
+            key = path.rsplit(".", 1)[-1]
+            depth = path.count(".") - tree.tree_path.count(".") - 1
+            indent = "  " * depth
+            ts = (node.timestamp or "")[:10]
+            label = node.label or key
+            files = ", ".join(os.path.basename(f) for f in node.files) if node.files else ""
+            content_size = len(node.input or "") + len(node.output or "")
+            outline_parts.append(
+                f"{indent}{key}: {label} ({ts}) [{content_size} chars]{f' — {files}' if files else ''}"
+            )
+
+        tree_outline = "\n".join(outline_parts)
+
+        # Format manifest
+        manifest_parts: list[str] = []
+        for entry in file_manifest:
+            status = "EXISTS" if entry["exists"] else "DELETED"
+            size = (
+                f" ({entry.get('size', '?')} bytes, modified {entry.get('modified', '?')})" if entry["exists"] else ""
+            )
+            manifest_parts.append(f"  [{status}] {entry['path']}{size}")
+        file_manifest_text = "\n".join(manifest_parts) if manifest_parts else "  (no files referenced)"
+
+        # ===================================================================
+        # Phase 2: Plan (LLM call #1)
+        # ===================================================================
+        from systemprompts.reincarnate_prompt import REINCARNATE_PLAN_PROMPT
+
+        plan_prompt = (
+            f"=== SOURCE TREE OUTLINE ===\n{tree_outline}\n\n"
+            f"=== FILE MANIFEST ===\n{file_manifest_text}\n\n"
+            f"=== CONSTRAINTS ===\n"
+            f"Max layers: {max_layers}\n"
+        )
+        if focus:
+            plan_prompt += f"Focus: {focus}\n"
+
+        plan_prompt += "\nProduce the reincarnation plan as JSON."
+
+        validated_temp, _ = self.validate_and_correct_temperature(0.0, model_context)
+
+        plan_response = provider.generate_content(
+            prompt=plan_prompt,
+            model_name=model_name,
+            system_prompt=REINCARNATE_PLAN_PROMPT,
+            temperature=validated_temp,
+            thinking_mode=thinking_mode,
+        )
+
+        # Parse the plan JSON from the response
+        plan_text = plan_response.content.strip()
+        # Extract JSON from markdown code fence if present
+        if "```json" in plan_text:
+            plan_text = plan_text.split("```json", 1)[1].split("```", 1)[0].strip()
+        elif "```" in plan_text:
+            plan_text = plan_text.split("```", 1)[1].split("```", 1)[0].strip()
+
+        try:
+            plan = json_mod.loads(plan_text)
+        except json_mod.JSONDecodeError as exc:
+            error = ToolOutput(
+                status="error",
+                content=f"LLM returned invalid JSON for reincarnation plan: {exc}\n\nRaw response:\n{plan_response.content[:2000]}",
+                content_type="text",
+            )
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        layers = plan.get("layers", [])
+        if not layers:
+            error = ToolOutput(
+                status="error",
+                content="LLM plan contained no layers. Cannot reincarnate.",
+                content_type="text",
+            )
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        discarded = plan.get("discarded", [])
+        rationale = plan.get("rationale", "")
+
+        # ===================================================================
+        # Phase 3: Synthesize (LLM call per layer)
+        # ===================================================================
+        from systemprompts.reincarnate_prompt import REINCARNATE_SYNTHESIS_PROMPT
+        from utils.token_utils import count_tokens
+
+        synthesized_layers: list[dict[str, Any]] = []
+
+        for layer_idx, layer_plan in enumerate(layers):
+            layer_label = layer_plan.get("label", f"Layer {layer_idx + 1}")
+            source_node_keys = layer_plan.get("source_nodes", [])
+            files_to_read = layer_plan.get("files_to_read", [])
+            directive = layer_plan.get("directive", "Synthesize all relevant knowledge from the source nodes.")
+
+            # Gather source node content
+            source_parts: list[str] = []
+            source_tokens = 0
+            for node_key in source_node_keys:
+                node = resolve_node(tree, node_key)
+                if node is None:
+                    continue
+                node_content = ""
+                if node.input:
+                    node_content += f"--- {node_key} INPUT ---\n{node.input}\n\n"
+                if node.output:
+                    node_content += f"--- {node_key} OUTPUT ---\n{node.output}\n\n"
+                if node_content:
+                    tokens = count_tokens(node_content)
+                    source_tokens += tokens
+                    source_parts.append(node_content)
+
+            # Read current file content from disk
+            file_parts: list[str] = []
+            file_tokens = 0
+            for fpath in files_to_read:
+                if not os.path.exists(fpath):
+                    continue
+                try:
+                    with open(fpath, encoding="utf-8", errors="replace") as f:
+                        content = f.read()
+                    file_block = f"=== CURRENT FILE: {fpath} ===\n{content}\n=== END FILE ===\n\n"
+                    tokens = count_tokens(file_block)
+
+                    # Token budget guard — leave room for source content and response
+                    cap = model_context.calculate_token_allocation()
+                    budget = cap.content_tokens if cap else 400_000
+                    if file_tokens + tokens + source_tokens > budget * 0.7:
+                        logger.warning(
+                            f"[REINCARNATE] Skipping {fpath} — would exceed token budget for layer {layer_idx}"
+                        )
+                        continue
+
+                    file_parts.append(file_block)
+                    file_tokens += tokens
+                except OSError:
+                    continue
+
+            synthesis_prompt = f"=== REINCARNATION DIRECTIVE ===\n{directive}\n\n" f"=== LAYER: {layer_label} ===\n\n"
+            if source_parts:
+                synthesis_prompt += f"=== SOURCE NODE CONTENT ===\n{''.join(source_parts)}\n"
+            if file_parts:
+                synthesis_prompt += f"=== CURRENT FILE STATE (from disk) ===\n{''.join(file_parts)}\n"
+
+            synthesis_response = provider.generate_content(
+                prompt=synthesis_prompt,
+                model_name=model_name,
+                system_prompt=REINCARNATE_SYNTHESIS_PROMPT,
+                temperature=validated_temp,
+                thinking_mode=thinking_mode,
+            )
+
+            synthesized_layers.append(
+                {
+                    "label": layer_label,
+                    "content": synthesis_response.content,
+                    "source_nodes": source_node_keys,
+                    "files": [f for f in files_to_read if os.path.exists(f)],
+                    "usage": synthesis_response.usage,
+                }
+            )
+
+        # ===================================================================
+        # Phase 4: Construct (no LLM)
+        # ===================================================================
+        now = datetime.now(timezone.utc)
+        timestamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        new_tree = PalRoot(
+            tree_path=new_canonical,
+            label=f"Reincarnated from {tree.tree_name}",
+            created_at=timestamp,
+        )
+
+        total_output_tokens = 0
+        for i, synth in enumerate(synthesized_layers):
+            layer_key = f"L{i + 1}"
+            node = PalNode(
+                label=synth["label"],
+                timestamp=timestamp,
+                model=model_name,
+                tool_name="reincarnatetree",
+                files=synth["files"],
+                input=f"Reincarnation of {canonical} — {synth['label']}",
+                output=synth["content"],
+                metadata={
+                    "reincarnated_from": canonical,
+                    "source_nodes": synth["source_nodes"],
+                    "reincarnation_date": timestamp,
+                    "source_token_count": tlog.total_tokens,
+                },
+            )
+            add_palnode(new_tree, "", layer_key, node)
+            total_output_tokens += count_tokens(synth["content"])
+
+        save_tree(new_tree)
+        update_index(new_canonical)
+
+        # Build summary
+        compression = round((1 - total_output_tokens / max(tlog.total_tokens, 1)) * 100, 1)
+        summary_parts = [
+            "Reincarnation complete.",
+            "",
+            f"Source: {canonical}",
+            f"  Nodes: {len(all_nodes)} | Tokens: ~{tlog.total_tokens}",
+            "",
+            f"Reborn: {new_canonical}",
+            f"  Layers: {len(synthesized_layers)} | Tokens: ~{total_output_tokens}",
+            f"  Compression: {compression}%",
+        ]
+        if discarded:
+            summary_parts.append(f"  Discarded: {', '.join(discarded)}")
+        if rationale:
+            summary_parts.append(f"  Rationale: {rationale}")
+
+        tool_output = ToolOutput(
+            status="success",
+            content="\n".join(summary_parts),
+            content_type="text",
+            metadata={
+                "source_tree": canonical,
+                "new_tree": new_canonical,
+                "source_nodes": len(all_nodes),
+                "source_tokens": tlog.total_tokens,
+                "output_layers": len(synthesized_layers),
+                "output_tokens": total_output_tokens,
+                "compression_pct": compression,
+                "model": model_name,
                 **tlog.to_dict(),
             },
         )

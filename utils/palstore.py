@@ -436,7 +436,7 @@ def iter_context(tree: PalRoot, node_path: str) -> Generator[tuple[str, PalNode]
     Empty node_path defaults to a full strata walk through the last layer.
     Non-L paths fall back to iter_ancestry.
 
-    This is the correct traversal for model-calling tools (addtreelayer,
+    This is the correct traversal for model-calling tools (growlayer,
     querynode) where the model needs full strata context.
     """
     if not node_path:

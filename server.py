@@ -74,7 +74,6 @@ from tools import (  # noqa: E402
 )
 from tools.models import ToolOutput  # noqa: E402
 from tools.palstore import (
-    PalAddTreeLayerTool,
     PalCopyTool,
     PalDeleteTool,
     PalDeleteTreeTool,
@@ -84,11 +83,13 @@ from tools.palstore import (
     PalFileWriteTool,
     PalFoldTool,
     PalForkTool,
+    PalGrowLayerTool,
     PalInitTool,
     PalListTool,
     PalMoveTool,
     PalQueryTool,
     PalReadTool,
+    PalReincarnateTool,
     PalRenameTool,
     PalTraverseTool,
     PalUpsertTool,
@@ -306,7 +307,7 @@ TOOLS = {
     "imagegen": ImageGenTool(),  # Native AI image generation and editing
     "perceive": PerceiveTool(),  # Structured media intelligence extraction (image, video, audio)
     "newtree": PalInitTool(),
-    "addtreelayer": PalAddTreeLayerTool(),
+    "growlayer": PalGrowLayerTool(),
     "upsertnode": PalUpsertTool(),
     "querynode": PalQueryTool(),
     "treelist": PalListTool(),
@@ -321,6 +322,7 @@ TOOLS = {
     "movenode": PalMoveTool(),
     "clonetree": PalCopyTool(),
     "foldtree": PalFoldTool(),
+    "reincarnatetree": PalReincarnateTool(),
     "deletenode": PalDeleteTool(),
     "deletetree": PalDeleteTreeTool(),
 }
@@ -428,10 +430,10 @@ PROMPT_TEMPLATES = {
         "description": "Create a named PALTree",
         "template": "Initialize PALTree",
     },
-    "addtreelayer": {
-        "name": "addtreelayer",
-        "description": "Add context layer to a PALTree",
-        "template": "Add layer with {model}",
+    "growlayer": {
+        "name": "growlayer",
+        "description": "Grow a PALTree with a new context layer",
+        "template": "Grow layer with {model}",
     },
     "upsertnode": {
         "name": "upsertnode",

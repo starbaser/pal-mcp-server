@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from tools.models import ToolModelCategory
-from tools.palstore import PalAddTreeLayerRequest, PalAddTreeLayerTool, PalInitTool, PalListTool, PalQueryTool
+from tools.palstore import PalGrowLayerRequest, PalGrowLayerTool, PalInitTool, PalListTool, PalQueryTool
 
 
 class TestPalInitTool:
@@ -66,12 +66,12 @@ class TestPalInitTool:
         assert "dot" in payload["content"].lower()
 
 
-class TestPalAddTreeLayerTool:
+class TestPalGrowLayerTool:
     def setup_method(self):
-        self.tool = PalAddTreeLayerTool()
+        self.tool = PalGrowLayerTool()
 
     def test_tool_metadata(self):
-        assert self.tool.get_name() == "addtreelayer"
+        assert self.tool.get_name() == "growlayer"
         assert "layer" in self.tool.get_description().lower()
         assert self.tool.get_model_category() is ToolModelCategory.EXTENDED_REASONING
 
@@ -106,7 +106,7 @@ class TestPalAddTreeLayerTool:
         assert self.tool.get_default_thinking_mode() == "max"
 
     async def test_prepare_prompt_includes_header(self):
-        request = PalAddTreeLayerRequest(prompt="ignored", tree_path="myproject")
+        request = PalGrowLayerRequest(prompt="ignored", tree_path="myproject")
 
         with patch.object(self.tool, "handle_prompt_file_with_fallback", return_value="test content"):
             with patch.object(self.tool, "get_request_files", return_value=[]):
@@ -212,7 +212,7 @@ class TestContextEphemeralGuard:
         from server import reconstruct_thread_context
         from utils.conversation_memory import add_turn, create_thread, get_thread
 
-        thread_id = create_thread("addtreelayer", {"prompt": "init"}, model_name="test-model")
+        thread_id = create_thread("growlayer", {"prompt": "init"}, model_name="test-model")
         add_turn(thread_id, "assistant", "Stored initial context", model_name="test-model", model_provider="custom")
 
         arguments = {
@@ -236,7 +236,7 @@ class TestContextEphemeralGuard:
         from server import reconstruct_thread_context
         from utils.conversation_memory import add_turn, create_thread, get_thread
 
-        thread_id = create_thread("addtreelayer", {"prompt": "init"}, model_name="test-model")
+        thread_id = create_thread("growlayer", {"prompt": "init"}, model_name="test-model")
         add_turn(thread_id, "assistant", "Stored initial context", model_name="test-model", model_provider="custom")
 
         arguments = {
@@ -265,7 +265,7 @@ class TestContextEphemeralGuard:
     def test_palstore_registered_in_tools(self):
         from server import TOOLS
 
-        assert "addtreelayer" in TOOLS
+        assert "growlayer" in TOOLS
 
 
 class TestContextForkChain:
@@ -274,7 +274,7 @@ class TestContextForkChain:
     async def test_fork_creates_parent_chain(self):
         from utils.conversation_memory import add_turn, create_thread, get_thread_chain
 
-        parent_id = create_thread("addtreelayer", {"prompt": "parent init"}, model_name="gemini-test")
+        parent_id = create_thread("growlayer", {"prompt": "parent init"}, model_name="gemini-test")
         add_turn(parent_id, "user", "Store this context")
         add_turn(parent_id, "assistant", "Context stored", model_name="gemini-test", model_provider="google")
 
@@ -289,7 +289,7 @@ class TestContextForkChain:
     async def test_fork_does_not_modify_parent(self):
         from utils.conversation_memory import add_turn, create_thread, get_thread
 
-        parent_id = create_thread("addtreelayer", {"prompt": "parent"}, model_name="gemini-test")
+        parent_id = create_thread("growlayer", {"prompt": "parent"}, model_name="gemini-test")
         add_turn(parent_id, "user", "Initial store")
         add_turn(parent_id, "assistant", "Acknowledged", model_name="gemini-test", model_provider="google")
 
@@ -309,7 +309,7 @@ class TestContextForkChain:
     async def test_multi_level_fork_chain(self):
         from utils.conversation_memory import add_turn, create_thread, get_thread_chain
 
-        id_a = create_thread("addtreelayer", {"prompt": "root"}, model_name="test-model")
+        id_a = create_thread("growlayer", {"prompt": "root"}, model_name="test-model")
         add_turn(id_a, "assistant", "Root context", model_name="test-model", model_provider="custom")
 
         id_b = create_thread("querynode", {"prompt": "fork-b"}, parent_thread_id=id_a)
@@ -378,7 +378,7 @@ class TestResolveTreeContinuation:
 
         # Root must have L nodes — stubs nest under the latest one
         store.children["L0"] = PalNode(
-            tool_name="addtreelayer",
+            tool_name="growlayer",
             timestamp=datetime.now(timezone.utc).isoformat(),
             input="context layer",
             output="stored",
@@ -408,7 +408,7 @@ class TestResolveTreeContinuation:
 
         # Valid structure: L0 with a C-prefixed continuation stub
         l0_node = PalNode(
-            tool_name="addtreelayer",
+            tool_name="growlayer",
             timestamp=datetime.now(timezone.utc).isoformat(),
             input="context layer",
             output="stored",
@@ -444,7 +444,7 @@ class TestResolveTreeContinuation:
 
         # Valid structure: L0 with a C-prefixed continuation stub
         l0_node = PalNode(
-            tool_name="addtreelayer",
+            tool_name="growlayer",
             timestamp=datetime.now(timezone.utc).isoformat(),
             input="context layer",
             output="stored",
@@ -480,7 +480,7 @@ class TestResolveTreeContinuation:
 
         # Valid structure: L0 with Q0 child
         l0_node = PalNode(
-            tool_name="addtreelayer",
+            tool_name="growlayer",
             timestamp=datetime.now(timezone.utc).isoformat(),
             input="context layer",
             output="stored",
@@ -513,7 +513,7 @@ class TestResolveTreeContinuation:
 
         # Root must have L nodes for stubs to nest under
         store.children["L0"] = PalNode(
-            tool_name="addtreelayer",
+            tool_name="growlayer",
             timestamp=datetime.now(timezone.utc).isoformat(),
             input="context layer",
             output="stored",
@@ -682,7 +682,7 @@ class TestStrictHistoryEnforcement:
             thread_id="test-strict",
             created_at="2026-01-01T00:00:00Z",
             last_updated_at="2026-01-01T00:00:00Z",
-            tool_name="addtreelayer",
+            tool_name="growlayer",
             turns=turns,
             initial_context={},
         )
@@ -765,7 +765,7 @@ class TestStrictHistoryEnforcement:
             thread_id="test-fits",
             created_at="2026-01-01T00:00:00Z",
             last_updated_at="2026-01-01T00:00:01Z",
-            tool_name="addtreelayer",
+            tool_name="growlayer",
             turns=turns,
             initial_context={},
         )

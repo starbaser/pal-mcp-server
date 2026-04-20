@@ -4,13 +4,13 @@
   "additional_args": ["--permission-mode", "acceptEdits", "--model", "sonnet"],
   "env": {},
   "models": {
-    "claude": "",
-    "sonnet": "sonnet",
-    "opus": "opus",
-    "haiku": "haiku",
-    "claude-sonnet-4-6": "claude-sonnet-4-6",
-    "claude-opus-4-6": "claude-opus-4-6",
-    "claude-haiku-4-5": "claude-haiku-4-5"
+    "claude-cli": "",
+    "claude-cli-sonnet": "sonnet",
+    "claude-cli-opus": "opus",
+    "claude-cli-haiku": "haiku",
+    "claude-cli-sonnet-4-6": "claude-sonnet-4-6",
+    "claude-cli-opus-4-6": "claude-opus-4-6",
+    "claude-cli-haiku-4-5": "claude-haiku-4-5"
   },
   "roles": {
     "default": {

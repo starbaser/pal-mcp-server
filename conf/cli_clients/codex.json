@@ -10,10 +10,10 @@
   ],
   "env": {},
   "models": {
-    "codex": "",
-    "o4-mini": "o4-mini",
-    "o3": "o3",
-    "gpt-5.4": "gpt-5.4"
+    "codex-cli": "",
+    "codex-cli-o4-mini": "o4-mini",
+    "codex-cli-o3": "o3",
+    "codex-cli-gpt-5.4": "gpt-5.4"
   },
   "roles": {
     "default": {

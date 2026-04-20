@@ -31,11 +31,6 @@ COMMON_FIELD_DESCRIPTIONS = {
     "media": "Optional absolute media file paths or base64 blobs for visual context.",
     "absolute_file_paths": "Full paths to relevant code",
     "raw": "Return raw JSON instead of rendered markdown. Default: false.",
-    "clink": (
-        "Route through CLI tools when available. When true (default), models with a "
-        "matching CLI client are routed through the CLI instead of native APIs. "
-        "Set false to force native API routing."
-    ),
 }
 
 # Workflow-specific field descriptions
@@ -82,9 +77,6 @@ class ToolRequest(BaseModel):
 
     # Visual context
     media: Optional[list[str]] = Field(None, description=COMMON_FIELD_DESCRIPTIONS["media"])
-
-    # CLI routing
-    clink: Optional[bool] = Field(True, description=COMMON_FIELD_DESCRIPTIONS["clink"])
 
 
 class BaseWorkflowRequest(ToolRequest):

@@ -11,9 +11,9 @@
     "ANTHROPIC_DEFAULT_HAIKU_MODEL": "glm-4.5-air"
   },
   "models": {
-    "glmaude": "",
-    "glm-4.7": "sonnet",
-    "glm-4.5-air": "haiku"
+    "glmaude-cli": "",
+    "glmaude-cli-4.7": "sonnet",
+    "glmaude-cli-4.5-air": "haiku"
   },
   "roles": {
     "default": {

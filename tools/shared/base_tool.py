@@ -542,7 +542,7 @@ class BaseTool(ABC):
             description = (
                 "Currently in auto model selection mode. CRITICAL: When the user names a model, you MUST use that exact name unless the server rejects it. "
                 "If no model is provided, you may use the `listmodels` tool to review options and select an appropriate match. "
-                "When clink=true (default), models with a matching CLI client route through the CLI instead of native APIs."
+                "Models using the '{cli}-cli-{variant}' pattern (e.g. 'gemini-cli-2.5-flash', 'claude-cli-opus-4-6') route through CLI tools."
             )
             summaries, total, restricted = self._get_ranked_model_summaries()
             remainder = max(0, total - len(summaries))
@@ -567,7 +567,7 @@ class BaseTool(ABC):
         description = (
             f"The default model is '{DEFAULT_MODEL}'. Override only when the user explicitly requests a different model, and use that exact name. "
             "If the requested model fails validation, surface the server error instead of substituting another model. When unsure, use the `listmodels` tool for details. "
-            "When clink=true (default), models with a matching CLI client route through the CLI instead of native APIs."
+            "Models using the '{cli}-cli-{variant}' pattern (e.g. 'gemini-cli-2.5-flash', 'claude-cli-opus-4-6') route through CLI tools."
         )
         summaries, total, restricted = self._get_ranked_model_summaries()
         remainder = max(0, total - len(summaries))

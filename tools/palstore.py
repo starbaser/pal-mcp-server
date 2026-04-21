@@ -2648,6 +2648,7 @@ class PalReincarnateTool(BaseTool):
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
         import json as json_mod
+        import re
 
         from tools.models import ToolOutput
         from utils.palstore import (
@@ -2657,7 +2658,6 @@ class PalReincarnateTool(BaseTool):
             add_palnode,
             iter_dfs,
             load_tree,
-            resolve_node,
             resolve_tree_path,
             save_tree,
             update_index,
@@ -2696,202 +2696,220 @@ class PalReincarnateTool(BaseTool):
         model_context = ModelContext(model_name=model_name)
 
         # ===================================================================
-        # Phase 1: Audit (no LLM)
+        # Phase 1: Audit — walk tree, collect metadata
         # ===================================================================
         all_nodes: list[tuple[str, PalNode]] = list(iter_dfs(tree.tree_path, tree.children))
         tlog = TraversalLog(traversal_type="reincarnate_audit")
         for path, node in all_nodes:
             tlog.record(path, node)
 
-        # Collect unique files across all nodes
-        seen_files: set[str] = set()
-        all_file_refs: list[str] = []
-        for _, node in all_nodes:
-            for f in node.files:
-                if f not in seen_files:
-                    seen_files.add(f)
-                    all_file_refs.append(f)
+        # Collect L-nodes at root level (the layers to feed progressively)
+        l_nodes: list[tuple[str, PalNode]] = []
+        for key in sorted(tree.children, key=lambda k: (int(k[1:]) if re.match(r"^L\d+$", k) else 999)):
+            if re.match(r"^L\d+$", key):
+                l_nodes.append((key, tree.children[key]))
 
-        # Build file manifest
-        file_manifest: list[dict[str, Any]] = []
-        for fpath in all_file_refs:
-            entry: dict[str, Any] = {"path": fpath, "exists": os.path.exists(fpath)}
-            if entry["exists"]:
-                try:
-                    stat = os.stat(fpath)
-                    entry["size"] = stat.st_size
-                    entry["modified"] = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).strftime(
-                        "%Y-%m-%d %H:%M"
-                    )
-                except OSError:
-                    pass
-            file_manifest.append(entry)
+        if not l_nodes:
+            error = ToolOutput(status="error", content="Source tree has no L-nodes to reincarnate.", content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
 
-        # Build tree outline (labels + timestamps + file basenames — NOT full content)
-        outline_parts: list[str] = [f"Tree: {canonical}", f"Nodes: {len(all_nodes)}", f"Tokens: ~{tlog.total_tokens}"]
+        # Build tree outline for the opening context
+        outline_parts: list[str] = [f"Tree: {canonical}", f"Layers: {len(l_nodes)}", f"Tokens: ~{tlog.total_tokens}"]
         for path, node in all_nodes:
             key = path.rsplit(".", 1)[-1]
             depth = path.count(".") - tree.tree_path.count(".") - 1
             indent = "  " * depth
             ts = (node.timestamp or "")[:10]
             label = node.label or key
-            files = ", ".join(os.path.basename(f) for f in node.files) if node.files else ""
-            content_size = len(node.input or "") + len(node.output or "")
-            outline_parts.append(
-                f"{indent}{key}: {label} ({ts}) [{content_size} chars]{f' — {files}' if files else ''}"
-            )
-
+            files_str = ", ".join(os.path.basename(f) for f in node.files) if node.files else ""
+            outline_parts.append(f"{indent}{key}: {label} ({ts}){f' — {files_str}' if files_str else ''}")
         tree_outline = "\n".join(outline_parts)
 
-        # Format manifest
-        manifest_parts: list[str] = []
-        for entry in file_manifest:
-            status = "EXISTS" if entry["exists"] else "DELETED"
-            size = (
-                f" ({entry.get('size', '?')} bytes, modified {entry.get('modified', '?')})" if entry["exists"] else ""
-            )
-            manifest_parts.append(f"  [{status}] {entry['path']}{size}")
-        file_manifest_text = "\n".join(manifest_parts) if manifest_parts else "  (no files referenced)"
-
-        # ===================================================================
-        # Phase 2: Plan (LLM call #1)
-        # ===================================================================
-        from systemprompts.reincarnate_prompt import REINCARNATE_PLAN_PROMPT
-
-        plan_prompt = (
-            f"=== SOURCE TREE OUTLINE ===\n{tree_outline}\n\n"
-            f"=== FILE MANIFEST ===\n{file_manifest_text}\n\n"
-            f"=== CONSTRAINTS ===\n"
-            f"Max layers: {max_layers}\n"
+        logger.info(
+            "[REINCARNATE] Phase 1: audit complete — %d nodes, %d L-layers, %d tokens",
+            len(all_nodes),
+            len(l_nodes),
+            tlog.total_tokens,
         )
-        if focus:
-            plan_prompt += f"Focus: {focus}\n"
 
-        plan_prompt += "\nProduce the reincarnation plan as JSON."
+        # ===================================================================
+        # Phase 2: Progressive feeding — single conversation thread
+        # ===================================================================
+        from systemprompts.reincarnate_prompt import REINCARNATE_SYSTEM_PROMPT
+        from utils.conversation_memory import add_turn, build_conversation_history, create_thread, get_thread
+        from utils.token_utils import count_tokens
 
         validated_temp, _ = self.validate_and_correct_temperature(0.0, model_context)
 
-        plan_response = provider.generate_content(
-            prompt=plan_prompt,
+        # Create conversation thread for the reincarnation session
+        thread_id = create_thread("reincarnatetree", {"source": canonical}, model_name=model_name)
+
+        # Opening turn: tree outline + instructions
+        opening = (
+            f"I'm reincarnating the PALTree '{canonical}' ({len(l_nodes)} layers, ~{tlog.total_tokens} tokens).\n\n"
+            f"=== TREE OUTLINE ===\n{tree_outline}\n\n"
+            f"I will now feed you each layer's content, oldest first. For each layer, "
+            f"note what knowledge is still relevant vs superseded. You have full access to "
+            f"the project filesystem to verify current state.\n"
+        )
+        if focus:
+            opening += f"\nFocus: {focus}\n"
+        opening += f"\nMax layers in the reincarnated tree: {max_layers}"
+
+        add_turn(thread_id, "user", opening)
+
+        logger.info("[REINCARNATE] Phase 2: opening turn sent, feeding %d layers progressively", len(l_nodes))
+
+        opening_response = provider.generate_content(
+            prompt=opening,
             model_name=model_name,
-            system_prompt=REINCARNATE_PLAN_PROMPT,
+            system_prompt=REINCARNATE_SYSTEM_PROMPT,
             temperature=validated_temp,
             thinking_mode=thinking_mode,
         )
+        add_turn(thread_id, "assistant", opening_response.content, model_name=model_name)
 
-        # Parse the plan JSON from the response
-        plan_text = plan_response.content.strip()
-        # Extract JSON from markdown code fence if present
-        if "```json" in plan_text:
-            plan_text = plan_text.split("```json", 1)[1].split("```", 1)[0].strip()
-        elif "```" in plan_text:
-            plan_text = plan_text.split("```", 1)[1].split("```", 1)[0].strip()
+        logger.info("[REINCARNATE] Phase 2: opening response received (%d chars)", len(opening_response.content))
 
-        try:
-            plan = json_mod.loads(plan_text)
-        except json_mod.JSONDecodeError as exc:
-            error = ToolOutput(
-                status="error",
-                content=f"LLM returned invalid JSON for reincarnation plan: {exc}\n\nRaw response:\n{plan_response.content[:2000]}",
-                content_type="text",
+        # Feed each L-node progressively
+        for layer_idx, (l_key, l_node) in enumerate(l_nodes):
+            # Build layer content: input + output + children summary
+            layer_parts = [f"=== LAYER {l_key} ==="]
+            if l_node.label:
+                layer_parts.append(f"Label: {l_node.label}")
+            if l_node.timestamp:
+                layer_parts.append(f"Date: {l_node.timestamp[:10]}")
+            if l_node.files:
+                layer_parts.append(f"Files: {', '.join(l_node.files)}")
+
+            if l_node.input:
+                layer_parts.append(f"\n--- INPUT ---\n{l_node.input}")
+            if l_node.output:
+                layer_parts.append(f"\n--- OUTPUT ---\n{l_node.output}")
+
+            # Include child node content (Q/F/C nodes under this layer)
+            if l_node.children:
+                for child_key in sorted(l_node.children):
+                    child = l_node.children[child_key]
+                    if child.output:
+                        child_label = child.label or child_key
+                        layer_parts.append(f"\n--- {l_key}.{child_key}: {child_label} ---\n{child.output}")
+
+            layer_content = "\n".join(layer_parts)
+
+            layer_prompt = (
+                f"Here is layer {layer_idx + 1}/{len(l_nodes)} ({l_key}).\n"
+                f"Identify what's still relevant. Compare against current disk state where needed.\n\n"
+                f"{layer_content}"
             )
-            return [TextContent(type="text", text=error.model_dump_json())]
 
-        layers = plan.get("layers", [])
-        if not layers:
-            error = ToolOutput(
-                status="error",
-                content="LLM plan contained no layers. Cannot reincarnate.",
-                content_type="text",
+            # Build conversation history from thread for context replay
+            thread_ctx = get_thread(thread_id)
+            if thread_ctx:
+                history, history_tokens = build_conversation_history(thread_ctx, model_context)
+                if history:
+                    full_prompt = f"{history}\n\n=== NEW USER INPUT ===\n{layer_prompt}"
+                else:
+                    full_prompt = layer_prompt
+            else:
+                full_prompt = layer_prompt
+
+            add_turn(thread_id, "user", layer_prompt)
+
+            logger.info(
+                "[REINCARNATE] Phase 2: feeding layer %d/%d (%s, %d chars)",
+                layer_idx + 1,
+                len(l_nodes),
+                l_key,
+                len(layer_content),
             )
-            return [TextContent(type="text", text=error.model_dump_json())]
 
-        discarded = plan.get("discarded", [])
-        rationale = plan.get("rationale", "")
-
-        # ===================================================================
-        # Phase 3: Synthesize (LLM call per layer)
-        # ===================================================================
-        from systemprompts.reincarnate_prompt import REINCARNATE_SYNTHESIS_PROMPT
-        from utils.token_utils import count_tokens
-
-        synthesized_layers: list[dict[str, Any]] = []
-
-        for layer_idx, layer_plan in enumerate(layers):
-            layer_label = layer_plan.get("label", f"Layer {layer_idx + 1}")
-            source_node_keys = layer_plan.get("source_nodes", [])
-            files_to_read = layer_plan.get("files_to_read", [])
-            directive = layer_plan.get("directive", "Synthesize all relevant knowledge from the source nodes.")
-
-            # Gather source node content
-            source_parts: list[str] = []
-            source_tokens = 0
-            for node_key in source_node_keys:
-                node = resolve_node(tree, node_key)
-                if node is None:
-                    continue
-                node_content = ""
-                if node.input:
-                    node_content += f"--- {node_key} INPUT ---\n{node.input}\n\n"
-                if node.output:
-                    node_content += f"--- {node_key} OUTPUT ---\n{node.output}\n\n"
-                if node_content:
-                    tokens = count_tokens(node_content)
-                    source_tokens += tokens
-                    source_parts.append(node_content)
-
-            # Read current file content from disk
-            file_parts: list[str] = []
-            file_tokens = 0
-            for fpath in files_to_read:
-                if not os.path.exists(fpath):
-                    continue
-                try:
-                    with open(fpath, encoding="utf-8", errors="replace") as f:
-                        content = f.read()
-                    file_block = f"=== CURRENT FILE: {fpath} ===\n{content}\n=== END FILE ===\n\n"
-                    tokens = count_tokens(file_block)
-
-                    # Token budget guard — leave room for source content and response
-                    cap = model_context.calculate_token_allocation()
-                    budget = cap.content_tokens if cap else 400_000
-                    if file_tokens + tokens + source_tokens > budget * 0.7:
-                        logger.warning(
-                            f"[REINCARNATE] Skipping {fpath} — would exceed token budget for layer {layer_idx}"
-                        )
-                        continue
-
-                    file_parts.append(file_block)
-                    file_tokens += tokens
-                except OSError:
-                    continue
-
-            synthesis_prompt = f"=== REINCARNATION DIRECTIVE ===\n{directive}\n\n" f"=== LAYER: {layer_label} ===\n\n"
-            if source_parts:
-                synthesis_prompt += f"=== SOURCE NODE CONTENT ===\n{''.join(source_parts)}\n"
-            if file_parts:
-                synthesis_prompt += f"=== CURRENT FILE STATE (from disk) ===\n{''.join(file_parts)}\n"
-
-            synthesis_response = provider.generate_content(
-                prompt=synthesis_prompt,
+            layer_response = provider.generate_content(
+                prompt=full_prompt,
                 model_name=model_name,
-                system_prompt=REINCARNATE_SYNTHESIS_PROMPT,
+                system_prompt=REINCARNATE_SYSTEM_PROMPT,
                 temperature=validated_temp,
                 thinking_mode=thinking_mode,
             )
 
-            synthesized_layers.append(
-                {
-                    "label": layer_label,
-                    "content": synthesis_response.content,
-                    "source_nodes": source_node_keys,
-                    "files": [f for f in files_to_read if os.path.exists(f)],
-                    "usage": synthesis_response.usage,
-                }
+            add_turn(thread_id, "assistant", layer_response.content, model_name=model_name)
+
+            logger.info(
+                "[REINCARNATE] Phase 2: layer %d response received (%d chars)",
+                layer_idx + 1,
+                len(layer_response.content),
             )
 
         # ===================================================================
-        # Phase 4: Construct (no LLM)
+        # Phase 3: Final synthesis — ask for reincarnated structure
+        # ===================================================================
+        synthesis_prompt = (
+            "All layers have been fed. You've seen the full history of this tree.\n\n"
+            "Now produce the reincarnated tree. Return a JSON object with:\n"
+            '- "layers": array of {label, content, files} objects\n'
+            '- "discarded_summary": brief note on what was dropped\n\n'
+            "Group by theme/subsystem, not chronology. Each layer should be comprehensive "
+            "and grounded in what's currently on disk. Produce ONLY the JSON."
+        )
+
+        thread_ctx = get_thread(thread_id)
+        if thread_ctx:
+            history, _ = build_conversation_history(thread_ctx, model_context)
+            full_synthesis = f"{history}\n\n=== NEW USER INPUT ===\n{synthesis_prompt}" if history else synthesis_prompt
+        else:
+            full_synthesis = synthesis_prompt
+
+        add_turn(thread_id, "user", synthesis_prompt)
+
+        logger.info("[REINCARNATE] Phase 3: requesting final synthesis")
+
+        synthesis_response = provider.generate_content(
+            prompt=full_synthesis,
+            model_name=model_name,
+            system_prompt=REINCARNATE_SYSTEM_PROMPT,
+            temperature=validated_temp,
+            thinking_mode=thinking_mode,
+        )
+
+        add_turn(thread_id, "assistant", synthesis_response.content, model_name=model_name)
+
+        logger.info("[REINCARNATE] Phase 3: synthesis response received (%d chars)", len(synthesis_response.content))
+
+        # Parse JSON from synthesis response
+        synth_text = synthesis_response.content.strip()
+        if "```json" in synth_text:
+            synth_text = synth_text.split("```json", 1)[1].split("```", 1)[0].strip()
+        elif "```" in synth_text:
+            synth_text = synth_text.split("```", 1)[1].split("```", 1)[0].strip()
+
+        try:
+            result = json_mod.loads(synth_text)
+        except json_mod.JSONDecodeError as exc:
+            error = ToolOutput(
+                status="error",
+                content=(
+                    f"LLM returned invalid JSON for reincarnated tree: {exc}\n\n"
+                    f"Raw response (first 3000 chars):\n{synthesis_response.content[:3000]}"
+                ),
+                content_type="text",
+                metadata={"thread_id": thread_id, "turns": len(l_nodes) + 2},
+            )
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        layers = result.get("layers", [])
+        if not layers:
+            error = ToolOutput(
+                status="error",
+                content="LLM synthesis contained no layers.",
+                content_type="text",
+                metadata={"thread_id": thread_id},
+            )
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        discarded_summary = result.get("discarded_summary", "")
+
+        # ===================================================================
+        # Phase 4: Construct — build new tree from synthesis
         # ===================================================================
         now = datetime.now(timezone.utc)
         timestamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -2903,28 +2921,40 @@ class PalReincarnateTool(BaseTool):
         )
 
         total_output_tokens = 0
-        for i, synth in enumerate(synthesized_layers):
+        for i, layer in enumerate(layers):
             layer_key = f"L{i + 1}"
+            layer_content = layer.get("content", "")
+            layer_files = layer.get("files", [])
+            layer_label = layer.get("label", f"Layer {i + 1}")
+
             node = PalNode(
-                label=synth["label"],
+                label=layer_label,
                 timestamp=timestamp,
                 model=model_name,
                 tool_name="reincarnatetree",
-                files=synth["files"],
-                input=f"Reincarnation of {canonical} — {synth['label']}",
-                output=synth["content"],
+                files=[f for f in layer_files if isinstance(f, str)],
+                input=f"Reincarnation of {canonical} — {layer_label}",
+                output=layer_content,
                 metadata={
                     "reincarnated_from": canonical,
-                    "source_nodes": synth["source_nodes"],
                     "reincarnation_date": timestamp,
                     "source_token_count": tlog.total_tokens,
+                    "thread_id": thread_id,
+                    "turns": len(l_nodes) + 2,
                 },
             )
             add_palnode(new_tree, "", layer_key, node)
-            total_output_tokens += count_tokens(synth["content"])
+            total_output_tokens += count_tokens(layer_content)
 
         save_tree(new_tree)
         update_index(new_canonical)
+
+        logger.info(
+            "[REINCARNATE] Phase 4: tree constructed — %s (%d layers, %d tokens)",
+            new_canonical,
+            len(layers),
+            total_output_tokens,
+        )
 
         # Build summary
         compression = round((1 - total_output_tokens / max(tlog.total_tokens, 1)) * 100, 1)
@@ -2935,13 +2965,12 @@ class PalReincarnateTool(BaseTool):
             f"  Nodes: {len(all_nodes)} | Tokens: ~{tlog.total_tokens}",
             "",
             f"Reborn: {new_canonical}",
-            f"  Layers: {len(synthesized_layers)} | Tokens: ~{total_output_tokens}",
+            f"  Layers: {len(layers)} | Tokens: ~{total_output_tokens}",
             f"  Compression: {compression}%",
+            f"  LLM calls: {len(l_nodes) + 2} (opening + {len(l_nodes)} layers + synthesis)",
         ]
-        if discarded:
-            summary_parts.append(f"  Discarded: {', '.join(discarded)}")
-        if rationale:
-            summary_parts.append(f"  Rationale: {rationale}")
+        if discarded_summary:
+            summary_parts.append(f"  Discarded: {discarded_summary}")
 
         tool_output = ToolOutput(
             status="success",
@@ -2952,10 +2981,12 @@ class PalReincarnateTool(BaseTool):
                 "new_tree": new_canonical,
                 "source_nodes": len(all_nodes),
                 "source_tokens": tlog.total_tokens,
-                "output_layers": len(synthesized_layers),
+                "output_layers": len(layers),
                 "output_tokens": total_output_tokens,
                 "compression_pct": compression,
                 "model": model_name,
+                "thread_id": thread_id,
+                "llm_calls": len(l_nodes) + 2,
                 **tlog.to_dict(),
             },
         )

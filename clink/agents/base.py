@@ -63,12 +63,13 @@ class BaseCLIAgent:
         json_schema: dict | None = None,
         model: str | None = None,
         cwd: str | None = None,
+        session_id: str | None = None,
     ) -> AgentOutput:
         # Files and images are already embedded into the prompt by the tool; they are
         # accepted here only to keep parity with SimpleTool callers.
         _ = (files, images, json_schema)
         # The runner simply executes the configured CLI command for the selected role.
-        command = self._build_command(role=role, system_prompt=system_prompt, model=model)
+        command = self._build_command(role=role, system_prompt=system_prompt, model=model, session_id=session_id)
         env = self._build_environment()
 
         # Resolve executable path for cross-platform compatibility (especially Windows)
@@ -190,12 +191,16 @@ class BaseCLIAgent:
         role: ResolvedCLIRole,
         system_prompt: str | None,
         model: str | None = None,
+        session_id: str | None = None,
     ) -> list[str]:
         _ = model  # Unused in base class, used by subclasses
         base = list(self.client.executable)
         base.extend(self.client.internal_args)
         base.extend(self.client.config_args)
         base.extend(role.role_args)
+
+        if session_id:
+            base.extend(["--resume", session_id])
 
         return base
 

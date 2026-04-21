@@ -46,6 +46,7 @@ class ClaudeAgent(BaseCLIAgent):
         system_prompt: str | None,
         json_schema: dict | None = None,
         model: str | None = None,
+        session_id: str | None = None,
     ) -> list[str]:
         command = list(self.client.executable)
         command.extend(self.client.internal_args)
@@ -72,6 +73,10 @@ class ClaudeAgent(BaseCLIAgent):
             command.extend(["--json-schema", schema_json])
 
         command.extend(role.role_args)
+
+        if session_id:
+            command.extend(["--resume", session_id])
+
         return command
 
     @staticmethod

@@ -145,13 +145,14 @@ class ClinkProvider(ModelProvider):
         **kwargs: Any,
     ) -> ModelResponse:
         client, real_model = self._registry.resolve_model_slug(model_name)
+        session_id = kwargs.get("session_id")
 
         timeout = client.timeout_seconds or DEFAULT_TIMEOUT_SECONDS
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(
                 asyncio.run,
-                self._async_generate(client, real_model, prompt, system_prompt),
+                self._async_generate(client, real_model, prompt, system_prompt, session_id=session_id),
             )
             try:
                 agent_output = future.result(timeout=timeout)
@@ -166,6 +167,7 @@ class ClinkProvider(ModelProvider):
         real_model: str | None,
         prompt: str,
         system_prompt: str | None,
+        session_id: str | None = None,
     ):
         passthrough_client = self._build_passthrough_client(client)
         agent = create_agent(passthrough_client)
@@ -188,6 +190,7 @@ class ClinkProvider(ModelProvider):
             files=[],
             images=[],
             model=real_model,
+            session_id=session_id,
         )
 
     def _build_passthrough_client(self, client: ResolvedCLIClient) -> ResolvedCLIClient:

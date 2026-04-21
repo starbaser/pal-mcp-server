@@ -27,6 +27,10 @@ class GeminiJSONParser(BaseParser):
 
         metadata: dict[str, Any] = {"raw": payload}
 
+        session_id = payload.get("session_id")
+        if isinstance(session_id, str) and session_id:
+            metadata["session_id"] = session_id
+
         stats = payload.get("stats")
         if isinstance(stats, dict):
             metadata["stats"] = stats

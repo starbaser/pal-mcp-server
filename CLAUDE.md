@@ -277,7 +277,7 @@ Tools accept `tree_path` and `node_path` as separate parameters. Internal functi
 | `movenode`       | PalMoveTool          | No             | node  |
 | `clonetree`      | PalCopyTool          | No             | tree  |
 | `foldtree`       | PalFoldTool          | No             | tree  |
-| `reincarnatetree`| PalReincarnateTool   | Yes            | tree  |
+| `rebirthtree`    | PalRebirthTool       | Yes            | tree  |
 | `deletenode`     | PalDeleteTool        | No             | node  |
 | `deletetree`     | PalDeleteTreeTool    | No             | tree  |
 

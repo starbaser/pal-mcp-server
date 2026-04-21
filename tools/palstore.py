@@ -2567,23 +2567,23 @@ class PalFoldTool(BaseTool):
 
 
 # ---------------------------------------------------------------------------
-# reincarnatetree
+# rebirthtree
 # ---------------------------------------------------------------------------
 
 
-class PalReincarnateTool(BaseTool):
+class PalRebirthTool(BaseTool):
     """LLM-driven semantic compression that creates a fresh tree from an old one.
 
-    Pipeline: audit (no LLM) → plan (LLM) → synthesize (LLM per layer) → construct (no LLM).
+    Pipeline: audit (no LLM) → progressive feeding (LLM per layer via --resume) → synthesis → construct (no LLM).
     Non-destructive: creates a NEW tree, leaving the source intact.
     """
 
     def get_name(self) -> str:
-        return "reincarnatetree"
+        return "rebirthtree"
 
     def get_description(self) -> str:
         return (
-            "Reincarnate a PALTree: LLM-driven semantic compression that distills an accumulated tree into a fresh,\n"
+            "Rebirth a PALTree: LLM-driven semantic compression that distills an accumulated tree into a fresh,\n"
             "condensed version. Reads current file state from disk, discards outdated content, and produces a\n"
             "coherent reborn tree. Non-destructive — creates a new tree, leaving the source intact."
         )
@@ -2595,7 +2595,7 @@ class PalReincarnateTool(BaseTool):
                 "source_tree_path": {"type": "string", "description": TREE_PATH_DESCRIPTION},
                 "new_tree_name": {
                     "type": "string",
-                    "description": "Name for the reincarnated tree. Defaults to '{name}-reborn'. No dots allowed.",
+                    "description": "Name for the reborn tree. Defaults to '{name}-reborn'. No dots allowed.",
                 },
                 "focus": {
                     "type": "string",
@@ -2699,7 +2699,7 @@ class PalReincarnateTool(BaseTool):
         # Phase 1: Audit — walk tree, collect L-nodes
         # ===================================================================
         all_nodes: list[tuple[str, PalNode]] = list(iter_dfs(tree.tree_path, tree.children))
-        tlog = TraversalLog(traversal_type="reincarnate_audit")
+        tlog = TraversalLog(traversal_type="rebirth_audit")
         for path, node in all_nodes:
             tlog.record(path, node)
 
@@ -2709,7 +2709,9 @@ class PalReincarnateTool(BaseTool):
                 l_nodes.append((key, tree.children[key]))
 
         if not l_nodes:
-            error = ToolOutput(status="error", content="Source tree has no L-nodes to reincarnate.", content_type="text")
+            error = ToolOutput(
+                status="error", content="Source tree has no L-nodes to rebirth.", content_type="text"
+            )
             return [TextContent(type="text", text=error.model_dump_json())]
 
         # Build tree outline for opening context
@@ -2725,7 +2727,7 @@ class PalReincarnateTool(BaseTool):
         tree_outline = "\n".join(outline_parts)
 
         logger.info(
-            "[REINCARNATE] Phase 1: audit — %d nodes, %d L-layers, %d tokens",
+            "[REBIRTH] Phase 1: audit — %d nodes, %d L-layers, %d tokens",
             len(all_nodes),
             len(l_nodes),
             tlog.total_tokens,
@@ -2734,33 +2736,40 @@ class PalReincarnateTool(BaseTool):
         # ===================================================================
         # Phase 2: Progressive feeding via CLI session resume
         # ===================================================================
-        from systemprompts.reincarnate_prompt import REINCARNATE_SYSTEM_PROMPT
-
         session_id: str | None = None
 
-        # Opening turn: tree outline + instructions
+        # Opening turn: tree outline + rebirth task instructions
         opening = (
-            f"I'm reincarnating the PALTree '{canonical}' ({len(l_nodes)} layers, ~{tlog.total_tokens} tokens).\n\n"
+            f"TREE REBIRTH — distilling PALTree '{canonical}' ({len(l_nodes)} layers, ~{tlog.total_tokens} tokens).\n\n"
             f"=== TREE OUTLINE ===\n{tree_outline}\n\n"
-            f"I will now feed you each layer's content, oldest first. For each layer, "
-            f"note what knowledge is still relevant vs superseded. You have full access to "
-            f"the project filesystem to verify current state.\n"
+            f"I will feed you each historical layer one at a time, oldest first. For each layer:\n"
+            f"- Cross-reference against current files on disk using your filesystem tools\n"
+            f"- Track what knowledge endures vs what has been superseded\n"
+            f"- Note key architectural decisions, interfaces, and design rationale that remain valid\n"
+            f"- Discard discussion about changes already implemented — current files ARE the outcome\n\n"
+            f"After all layers, I'll ask you to produce a synthesized reborn tree as JSON.\n"
+            f"Each layer's content must be DETAILED technical prose (500-2000 words) — "
+            f"architectural specifics, key types/functions, protocol details, integration points, "
+            f"design rationale, and current state. The reborn tree replaces the original as the "
+            f"project's institutional memory.\n"
         )
         if focus:
             opening += f"\nFocus: {focus}\n"
-        opening += f"\nMax layers in the reincarnated tree: {max_layers}"
+        opening += f"\nMax layers in the reborn tree: {max_layers}"
 
-        logger.info("[REINCARNATE] Phase 2: opening turn, feeding %d layers via --resume", len(l_nodes))
+        logger.info("[REBIRTH] Phase 2: opening turn, feeding %d layers via --resume", len(l_nodes))
 
         opening_response = provider.generate_content(
             prompt=opening,
             model_name=model_name,
-            system_prompt=REINCARNATE_SYSTEM_PROMPT,
+            system_prompt=CONTEXT_PROMPT,
             temperature=validated_temp,
             thinking_mode=thinking_mode,
         )
         session_id = opening_response.metadata.get("session_id")
-        logger.info("[REINCARNATE] Phase 2: opening done, session_id=%s (%d chars)", session_id, len(opening_response.content))
+        logger.info(
+            "[REBIRTH] Phase 2: opening done, session_id=%s (%d chars)", session_id, len(opening_response.content)
+        )
 
         # Feed each L-node progressively, resuming the same CLI session
         for layer_idx, (l_key, l_node) in enumerate(l_nodes):
@@ -2789,12 +2798,14 @@ class PalReincarnateTool(BaseTool):
                 f"Note what's still relevant vs superseded.\n\n{layer_content}"
             )
 
-            logger.info("[REINCARNATE] Phase 2: feeding %s (%d chars), session_id=%s", l_key, len(layer_content), session_id)
+            logger.info(
+                "[REBIRTH] Phase 2: feeding %s (%d chars), session_id=%s", l_key, len(layer_content), session_id
+            )
 
             layer_response = provider.generate_content(
                 prompt=layer_prompt,
                 model_name=model_name,
-                system_prompt=REINCARNATE_SYSTEM_PROMPT,
+                system_prompt=CONTEXT_PROMPT,
                 temperature=validated_temp,
                 thinking_mode=thinking_mode,
                 session_id=session_id,
@@ -2804,32 +2815,38 @@ class PalReincarnateTool(BaseTool):
             if not session_id:
                 session_id = layer_response.metadata.get("session_id")
 
-            logger.info("[REINCARNATE] Phase 2: %s done (%d chars)", l_key, len(layer_response.content))
+            logger.info("[REBIRTH] Phase 2: %s done (%d chars)", l_key, len(layer_response.content))
 
         # ===================================================================
-        # Phase 3: Final synthesis — ask for reincarnated structure
+        # Phase 3: Final synthesis — produce reborn tree structure
         # ===================================================================
         synthesis_prompt = (
             "All layers have been fed. You've seen the full history of this tree.\n\n"
-            "Now produce the reincarnated tree. Return a JSON object with:\n"
+            "Now produce the reborn tree. Return a JSON object with:\n"
             '- "layers": array of {label, content, files} objects\n'
             '- "discarded_summary": brief note on what was dropped\n\n'
-            "Group by theme/subsystem, not chronology. Each layer should be comprehensive "
-            "and grounded in what's currently on disk. Produce ONLY the JSON."
+            "REQUIREMENTS:\n"
+            "- Group by theme/subsystem, not chronology\n"
+            "- Each layer's 'content' must be 500-2000 words of DETAILED technical prose — "
+            "architectural specifics, key types/functions, protocol details, integration points, "
+            "design rationale, and current state. NOT a brief summary or index card.\n"
+            "- Verify file paths exist on disk before including them in 'files'\n"
+            "- A developer reading ONLY these layers must understand the full architecture\n\n"
+            "Produce ONLY the JSON."
         )
 
-        logger.info("[REINCARNATE] Phase 3: requesting final synthesis, session_id=%s", session_id)
+        logger.info("[REBIRTH] Phase 3: requesting final synthesis, session_id=%s", session_id)
 
         synthesis_response = provider.generate_content(
             prompt=synthesis_prompt,
             model_name=model_name,
-            system_prompt=REINCARNATE_SYSTEM_PROMPT,
+            system_prompt=CONTEXT_PROMPT,
             temperature=validated_temp,
             thinking_mode=thinking_mode,
             session_id=session_id,
         )
 
-        logger.info("[REINCARNATE] Phase 3: synthesis received (%d chars)", len(synthesis_response.content))
+        logger.info("[REBIRTH] Phase 3: synthesis received (%d chars)", len(synthesis_response.content))
 
         # Parse JSON from synthesis response
         synth_text = synthesis_response.content.strip()
@@ -2844,7 +2861,7 @@ class PalReincarnateTool(BaseTool):
             error = ToolOutput(
                 status="error",
                 content=(
-                    f"LLM returned invalid JSON for reincarnated tree: {exc}\n\n"
+                    f"LLM returned invalid JSON for reborn tree: {exc}\n\n"
                     f"Raw response (first 3000 chars):\n{synthesis_response.content[:3000]}"
                 ),
                 content_type="text",
@@ -2872,7 +2889,7 @@ class PalReincarnateTool(BaseTool):
 
         new_tree = PalRoot(
             tree_path=new_canonical,
-            label=f"Reincarnated from {tree.tree_name}",
+            label=f"Reborn from {tree.tree_name}",
             created_at=timestamp,
         )
 
@@ -2887,13 +2904,13 @@ class PalReincarnateTool(BaseTool):
                 label=layer_label,
                 timestamp=timestamp,
                 model=model_name,
-                tool_name="reincarnatetree",
+                tool_name="rebirthtree",
                 files=[f for f in layer_files if isinstance(f, str)],
-                input=f"Reincarnation of {canonical} — {layer_label}",
+                input=f"Rebirth of {canonical} — {layer_label}",
                 output=layer_content,
                 metadata={
-                    "reincarnated_from": canonical,
-                    "reincarnation_date": timestamp,
+                    "reborn_from": canonical,
+                    "rebirth_date": timestamp,
                     "source_token_count": tlog.total_tokens,
                     "session_id": session_id,
                     "llm_calls": len(l_nodes) + 2,
@@ -2906,7 +2923,7 @@ class PalReincarnateTool(BaseTool):
         update_index(new_canonical)
 
         logger.info(
-            "[REINCARNATE] Phase 4: tree constructed — %s (%d layers, %d tokens, %d calls)",
+            "[REBIRTH] Phase 4: tree constructed — %s (%d layers, %d tokens, %d calls)",
             new_canonical,
             len(layers),
             total_output_tokens,
@@ -2915,7 +2932,7 @@ class PalReincarnateTool(BaseTool):
 
         compression = round((1 - total_output_tokens / max(tlog.total_tokens, 1)) * 100, 1)
         summary_parts = [
-            "Reincarnation complete.",
+            "Rebirth complete.",
             "",
             f"Source: {canonical}",
             f"  Nodes: {len(all_nodes)} | Tokens: ~{tlog.total_tokens}",

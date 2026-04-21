@@ -21,7 +21,7 @@ from .palstore import (
     PalListTool,
     PalQueryTool,
     PalReadTool,
-    PalReincarnateTool,
+    PalRebirthTool,
     PalUpsertTool,
 )
 from .perceive import PerceiveTool
@@ -62,6 +62,6 @@ __all__ = [
     "PalListTool",
     "PalForkTool",
     "PalReadTool",
-    "PalReincarnateTool",
+    "PalRebirthTool",
     "NarrateTool",
 ]

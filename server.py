@@ -89,7 +89,7 @@ from tools.palstore import (
     PalMoveTool,
     PalQueryTool,
     PalReadTool,
-    PalReincarnateTool,
+    PalRebirthTool,
     PalRenameTool,
     PalTraverseTool,
     PalUpsertTool,
@@ -322,7 +322,7 @@ TOOLS = {
     "movenode": PalMoveTool(),
     "clonetree": PalCopyTool(),
     "foldtree": PalFoldTool(),
-    "reincarnatetree": PalReincarnateTool(),
+    "rebirthtree": PalRebirthTool(),
     "deletenode": PalDeleteTool(),
     "deletetree": PalDeleteTreeTool(),
 }

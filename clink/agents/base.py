@@ -193,16 +193,35 @@ class BaseCLIAgent:
         model: str | None = None,
         session_id: str | None = None,
     ) -> list[str]:
-        _ = model  # Unused in base class, used by subclasses
         base = list(self.client.executable)
         base.extend(self.client.internal_args)
         base.extend(self.client.config_args)
+
+        if model:
+            base = self._filter_flag(base, "--model")
+            base.extend(["--model", model])
+
         base.extend(role.role_args)
 
         if session_id:
             base.extend(["--resume", session_id])
 
         return base
+
+    @staticmethod
+    def _filter_flag(command: list[str], flag: str) -> list[str]:
+        """Remove a flag and its value from command list."""
+        result = []
+        skip_next = False
+        for item in command:
+            if skip_next:
+                skip_next = False
+                continue
+            if item == flag:
+                skip_next = True
+                continue
+            result.append(item)
+        return result
 
     def _build_environment(self) -> dict[str, str]:
         from utils.env import expand_env_vars

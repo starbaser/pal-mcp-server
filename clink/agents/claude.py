@@ -12,7 +12,7 @@ from .base import AgentOutput, BaseCLIAgent, CLIAgentError
 
 
 class ClaudeAgent(BaseCLIAgent):
-    """Claude CLI agent with system-prompt injection support."""
+    """Claude CLI agent with system-prompt injection and json-schema support."""
 
     async def run(
         self,
@@ -27,7 +27,6 @@ class ClaudeAgent(BaseCLIAgent):
         cwd: str | None = None,
     ) -> AgentOutput:
         self._json_schema = json_schema
-        self._model = model
         return await super().run(
             role=role,
             prompt=prompt,
@@ -52,11 +51,9 @@ class ClaudeAgent(BaseCLIAgent):
         command.extend(self.client.internal_args)
         command.extend(self.client.config_args)
 
-        # Model override - remove existing --model from config_args if present
-        model_to_use = model if model is not None else getattr(self, "_model", None)
-        if model_to_use:
+        if model:
             command = self._filter_flag(command, "--model")
-            command.extend(["--model", model_to_use])
+            command.extend(["--model", model])
 
         if system_prompt and "--append-system-prompt" not in self.client.config_args:
             command.extend(["--append-system-prompt", system_prompt])
@@ -78,21 +75,6 @@ class ClaudeAgent(BaseCLIAgent):
             command.extend(["--resume", session_id])
 
         return command
-
-    @staticmethod
-    def _filter_flag(command: list[str], flag: str) -> list[str]:
-        """Remove a flag and its value from command list."""
-        result = []
-        skip_next = False
-        for item in command:
-            if skip_next:
-                skip_next = False
-                continue
-            if item == flag:
-                skip_next = True
-                continue
-            result.append(item)
-        return result
 
     def _recover_from_error(
         self,

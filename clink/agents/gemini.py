@@ -3,19 +3,68 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from typing import Any
 
-from clink.models import ResolvedCLIClient
+from clink.models import ResolvedCLIClient, ResolvedCLIRole
 from clink.parsers.base import ParsedCLIResponse
 
 from .base import AgentOutput, BaseCLIAgent
 
 
 class GeminiAgent(BaseCLIAgent):
-    """Gemini-specific behaviour."""
+    """Gemini-specific behaviour.
+
+    Gemini CLI ingests files via ``@/path/to/file`` directives prepended to
+    the prompt text (sent over stdin).  This agent overrides ``run`` to inject
+    those directives for every attached file and media path.
+    """
 
     def __init__(self, client: ResolvedCLIClient):
         super().__init__(client)
+
+    async def run(
+        self,
+        *,
+        role: ResolvedCLIRole,
+        prompt: str,
+        system_prompt: str | None = None,
+        files: Sequence[str],
+        images: Sequence[str],
+        json_schema: dict | None = None,
+        model: str | None = None,
+        cwd: str | None = None,
+        session_id: str | None = None,
+    ) -> AgentOutput:
+        prompt = self._prepend_file_directives(prompt, files=files, images=images)
+        return await super().run(
+            role=role,
+            prompt=prompt,
+            system_prompt=system_prompt,
+            files=files,
+            images=images,
+            json_schema=json_schema,
+            model=model,
+            cwd=cwd,
+            session_id=session_id,
+        )
+
+    @staticmethod
+    def _prepend_file_directives(
+        prompt: str,
+        *,
+        files: Sequence[str],
+        images: Sequence[str],
+    ) -> str:
+        """Prepend ``@path`` directives so Gemini CLI reads file content inline."""
+        directives: list[str] = []
+        for path in images:
+            directives.append(f"@{path}")
+        for path in files:
+            directives.append(f"@{path}")
+        if not directives:
+            return prompt
+        return " ".join(directives) + " " + prompt
 
     def _recover_from_error(
         self,

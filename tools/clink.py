@@ -336,6 +336,8 @@ class CLinkTool(SimpleTool):
 
         resolved_schema = self._resolve_json_schema(request.json_schema, request.cwd)
 
+        session_id = self._current_arguments.get("_clink_session_id")
+
         agent = create_agent(client_config)
         try:
             result = await agent.run(
@@ -347,6 +349,7 @@ class CLinkTool(SimpleTool):
                 json_schema=resolved_schema,
                 model=request.model,
                 cwd=request.cwd,
+                session_id=session_id,
             )
         except CLIAgentError as exc:
             metadata = self._build_error_metadata(client_config, exc)
@@ -354,6 +357,12 @@ class CLinkTool(SimpleTool):
                 f"CLI '{client_config.name}' execution failed: {exc}",
                 metadata=metadata,
             )
+
+        response_session_id = result.parsed.metadata.get("session_id")
+        if response_session_id and continuation_id:
+            from utils.conversation_memory import set_thread_session_id
+
+            set_thread_session_id(continuation_id, response_session_id)
 
         metadata = self._build_success_metadata(client_config, role_config, result)
         metadata = self._prune_metadata(metadata, client_config, reason="normal")

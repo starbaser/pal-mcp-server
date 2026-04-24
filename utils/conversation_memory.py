@@ -171,6 +171,7 @@ class ThreadContext(BaseModel):
     turns: list[ConversationTurn]
     initial_context: dict[str, Any]  # Original request parameters
     model_name: Optional[str] = None  # Canonical model locked to this thread
+    clink_session_id: Optional[str] = None  # CLI session ID for --resume (clink provider only)
 
 
 def get_storage():
@@ -275,6 +276,19 @@ def get_thread(thread_id: str) -> Optional[ThreadContext]:
     except Exception:
         # Silently handle errors to avoid exposing storage details
         return None
+
+
+def set_thread_session_id(thread_id: str, session_id: str) -> bool:
+    """Store a CLI session_id on the thread for subsequent --resume calls."""
+    context = get_thread(thread_id)
+    if not context:
+        return False
+    context.clink_session_id = session_id
+    context.last_updated_at = datetime.now(timezone.utc).isoformat()
+    storage = get_storage()
+    storage.set(f"thread:{thread_id}", context.model_dump_json())
+    logger.debug(f"[THREAD] Set clink_session_id on thread {thread_id}")
+    return True
 
 
 def add_turn(

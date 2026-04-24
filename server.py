@@ -74,6 +74,7 @@ from tools import (  # noqa: E402
 )
 from tools.models import ToolOutput  # noqa: E402
 from tools.palstore import (
+    PalCompactTool,
     PalCopyTool,
     PalDeleteTool,
     PalDeleteTreeTool,
@@ -89,7 +90,7 @@ from tools.palstore import (
     PalMoveTool,
     PalQueryTool,
     PalReadTool,
-    PalRebirthTool,
+    PalRegrowTool,
     PalRenameTool,
     PalTraverseTool,
     PalUpsertTool,
@@ -322,7 +323,8 @@ TOOLS = {
     "movenode": PalMoveTool(),
     "clonetree": PalCopyTool(),
     "foldtree": PalFoldTool(),
-    "rebirthtree": PalRebirthTool(),
+    "compacttree": PalCompactTool(),
+    "regrowtree": PalRegrowTool(),
     "deletenode": PalDeleteTool(),
     "deletetree": PalDeleteTreeTool(),
 }
@@ -1781,6 +1783,25 @@ async def reconstruct_thread_context(arguments: dict[str, Any]) -> dict[str, Any
             model_context = ModelContext(fallback_model)
             arguments["_model_context"] = model_context
             arguments["_resolved_model_name"] = fallback_model
+
+    # Inject clink session_id from thread context if available
+    if context.clink_session_id:
+        arguments["_clink_session_id"] = context.clink_session_id
+        logger.debug(f"[CLINK_SESSION] Injected session_id from thread {continuation_id}")
+
+        # When the provider is ClinkProvider, skip full context rebuild —
+        # the CLI already has the conversation via --resume
+        from providers.clink_provider import ClinkProvider
+
+        if isinstance(model_context.provider, ClinkProvider):
+            logger.info(
+                f"[CLINK_SESSION] Resuming CLI session {context.clink_session_id} "
+                f"for thread {continuation_id} — skipping context rebuild"
+            )
+            enhanced_arguments = arguments.copy()
+            enhanced_arguments["_model_context"] = model_context
+            enhanced_arguments.setdefault("_resolved_model_name", model_context.model_name)
+            return enhanced_arguments
 
     # Build conversation history with model-specific limits
     logger.debug(f"[CONVERSATION_DEBUG] Building conversation history for thread {continuation_id}")

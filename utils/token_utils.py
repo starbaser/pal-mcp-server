@@ -15,41 +15,22 @@ def _get_encoding():
 
 
 def count_tokens(text: str) -> int:
-    """Count tokens using the cl100k_base tiktoken encoding.
-
-    For texts over 100K chars, falls back to a character heuristic
-    since tiktoken can be slow on certain inputs at scale.
-    """
+    """Count tokens using the cl100k_base tiktoken encoding."""
     if not text:
         return 0
-    if len(text) > 100_000:
-        return len(text) // 4
     return len(_get_encoding().encode(text))
 
+
+# Keep as an alias — many callsites import this name
+estimate_tokens = count_tokens
 
 # Default fallback for token limit (conservative estimate)
 DEFAULT_CONTEXT_WINDOW = 200_000  # Conservative fallback for unknown models
 
 
-def estimate_tokens(text: str) -> int:
-    """Count tokens using the cl100k_base tiktoken encoding.
-
-    Args:
-        text: The text to count tokens for
-
-    Returns:
-        int: Token count
-    """
-    return count_tokens(text)
-
-
 def check_token_limit(text: str, context_window: int = DEFAULT_CONTEXT_WINDOW) -> tuple[bool, int]:
     """
     Check if text exceeds the specified token limit.
-
-    This function is used to validate that prepared prompts will fit
-    within the model's context window, preventing API errors and ensuring
-    reliable operation.
 
     Args:
         text: The text to check
@@ -60,5 +41,5 @@ def check_token_limit(text: str, context_window: int = DEFAULT_CONTEXT_WINDOW) -
         - is_within_limit: True if the text fits within context_window
         - estimated_tokens: The estimated token count
     """
-    estimated = estimate_tokens(text)
+    estimated = count_tokens(text)
     return estimated <= context_window, estimated

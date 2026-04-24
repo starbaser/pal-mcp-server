@@ -25,3 +25,9 @@ class ModelResponse:
         """Return the total token count if the provider reported usage data."""
 
         return self.usage.get("total_tokens", 0)
+
+    @property
+    def session_id(self) -> str | None:
+        """Return CLI session_id if present (clink provider only)."""
+
+        return self.metadata.get("session_id")

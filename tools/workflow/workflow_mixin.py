@@ -1487,6 +1487,7 @@ class BaseWorkflowMixin(ABC):
                 logger.warning(warning)
 
             # Generate AI response - use request parameters if available
+            clink_session_id = arguments.get("_clink_session_id")
             model_response = provider.generate_content(
                 prompt=prompt,
                 model_name=model_name,
@@ -1494,7 +1495,17 @@ class BaseWorkflowMixin(ABC):
                 temperature=validated_temperature,
                 thinking_mode=self.get_request_thinking_mode(request),
                 media=list(set(self.consolidated_findings.media)) if self.consolidated_findings.media else None,
+                session_id=clink_session_id,
             )
+
+            response_session_id = model_response.session_id
+            if isinstance(response_session_id, str) and response_session_id:
+                arguments["_clink_session_id"] = response_session_id
+                continuation_id = arguments.get("continuation_id")
+                if continuation_id:
+                    from utils.conversation_memory import set_thread_session_id
+
+                    set_thread_session_id(continuation_id, response_session_id)
 
             _usage = model_response.usage if model_response.usage else {}
             _api_input = _usage.get("input_tokens", 0)

@@ -464,6 +464,7 @@ class SimpleTool(BaseTool):
             supports_thinking = capabilities.supports_extended_thinking
 
             # Generate content with provider abstraction
+            clink_session_id = self._current_arguments.get("_clink_session_id")
             model_response = provider.generate_content(
                 prompt=prompt,
                 model_name=self._current_model_name,
@@ -471,7 +472,17 @@ class SimpleTool(BaseTool):
                 temperature=temperature,
                 thinking_mode=thinking_mode if supports_thinking else None,
                 media=images if images else None,
+                session_id=clink_session_id,
             )
+
+            response_session_id = model_response.session_id
+            if isinstance(response_session_id, str) and response_session_id:
+                self._current_arguments["_clink_session_id"] = response_session_id
+                continuation_id = self._current_arguments.get("continuation_id")
+                if continuation_id:
+                    from utils.conversation_memory import set_thread_session_id
+
+                    set_thread_session_id(continuation_id, response_session_id)
 
             logger.info(f"Received response from {provider.get_provider_type().value} API for {self.get_name()}")
             _final_model_response = model_response
@@ -541,6 +552,7 @@ class SimpleTool(BaseTool):
                                 temperature=temperature,
                                 thinking_mode=thinking_mode if supports_thinking else None,
                                 media=images if images else None,
+                                session_id=self._current_arguments.get("_clink_session_id"),
                             )
 
                             if retry_response.content:

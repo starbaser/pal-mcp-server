@@ -187,19 +187,14 @@ class ModelProvider(ABC):
         """
 
     def count_tokens(self, text: str, model_name: str) -> int:
-        """Estimate token usage for a piece of text."""
+        """Count tokens using tiktoken cl100k_base encoding."""
 
         if not text:
             return 0
 
-        try:
-            from utils.token_utils import count_tokens as _count_tokens
+        from utils.token_utils import count_tokens as _count_tokens
 
-            return _count_tokens(text)
-        except Exception:
-            estimated = max(1, len(text) // 4)
-            logger.debug("Falling back to character heuristic: %s tokens", estimated)
-            return estimated
+        return _count_tokens(text)
 
     def close(self) -> None:
         """Clean up any resources held by the provider."""

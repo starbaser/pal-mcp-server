@@ -15,13 +15,14 @@ from .imagegen import ImageGenTool
 from .listmodels import ListModelsTool
 from .narrate import NarrateTool
 from .palstore import (
+    PalCompactTool,
     PalForkTool,
     PalGrowLayerTool,
     PalInitTool,
     PalListTool,
     PalQueryTool,
     PalReadTool,
-    PalRebirthTool,
+    PalRegrowTool,
     PalUpsertTool,
 )
 from .perceive import PerceiveTool
@@ -62,6 +63,7 @@ __all__ = [
     "PalListTool",
     "PalForkTool",
     "PalReadTool",
-    "PalRebirthTool",
+    "PalCompactTool",
+    "PalRegrowTool",
     "NarrateTool",
 ]

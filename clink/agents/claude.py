@@ -25,6 +25,7 @@ class ClaudeAgent(BaseCLIAgent):
         json_schema: dict | None = None,
         model: str | None = None,
         cwd: str | None = None,
+        session_id: str | None = None,
     ) -> AgentOutput:
         self._json_schema = json_schema
         return await super().run(
@@ -36,6 +37,7 @@ class ClaudeAgent(BaseCLIAgent):
             json_schema=json_schema,
             model=model,
             cwd=cwd,
+            session_id=session_id,
         )
 
     def _build_command(

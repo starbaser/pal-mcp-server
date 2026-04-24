@@ -2567,25 +2567,26 @@ class PalFoldTool(BaseTool):
 
 
 # ---------------------------------------------------------------------------
-# rebirthtree
+# compacttree
 # ---------------------------------------------------------------------------
 
 
-class PalRebirthTool(BaseTool):
-    """LLM-driven semantic compression that creates a fresh tree from an old one.
+class PalCompactTool(BaseTool):
+    """Layer-by-layer compaction of a PALTree via clink CLI agents.
 
-    Pipeline: audit (no LLM) → progressive feeding (LLM per layer via --resume) → synthesis → construct (no LLM).
-    Non-destructive: creates a NEW tree, leaving the source intact.
+    Walks each L-node, dumps attached files to a temp directory, and lets a CLI
+    agent (with filesystem access) evaluate the layer against the current project
+    state. Returns a compacted markdown blob — the "seed" for a new tree.
     """
 
     def get_name(self) -> str:
-        return "rebirthtree"
+        return "compacttree"
 
     def get_description(self) -> str:
         return (
-            "Rebirth a PALTree: LLM-driven semantic compression that distills an accumulated tree into a fresh,\n"
-            "condensed version. Reads current file state from disk, discards outdated content, and produces a\n"
-            "coherent reborn tree. Non-destructive — creates a new tree, leaving the source intact."
+            "Compact a PALTree: walk each layer with a CLI agent that has filesystem access,\n"
+            "evaluate historical content against current project state, discard outdated material,\n"
+            "and produce a compacted markdown blob. Non-destructive — source tree is unchanged."
         )
 
     def get_input_schema(self) -> dict[str, Any]:
@@ -2593,30 +2594,17 @@ class PalRebirthTool(BaseTool):
             "type": "object",
             "properties": {
                 "source_tree_path": {"type": "string", "description": TREE_PATH_DESCRIPTION},
-                "new_tree_name": {
-                    "type": "string",
-                    "description": "Name for the reborn tree. Defaults to '{name}-reborn'. No dots allowed.",
-                },
                 "focus": {
                     "type": "string",
-                    "description": "Optional: guide what to preserve (e.g. 'architecture', 'implementation state').",
+                    "description": "Optional: guide what to preserve (e.g. 'architecture', 'design rationale').",
                 },
-                "max_layers": {
-                    "type": "integer",
-                    "description": "Soft ceiling on layers in the new tree. The LLM decides the actual count. Default: 5.",
-                    "default": 5,
-                    "minimum": 1,
-                    "maximum": 10,
+                "cli_name": {
+                    "type": "string",
+                    "description": "CLI client to use for compaction (e.g. 'gemini'). Defaults to configured default.",
                 },
                 "model": {
                     "type": "string",
-                    "description": "Model to use for plan and synthesis phases.",
-                },
-                "thinking_mode": {
-                    "type": "string",
-                    "enum": ["minimal", "low", "medium", "high", "max"],
-                    "description": "Reasoning depth for synthesis. Default: max.",
-                    "default": "max",
+                    "description": "Model override for the CLI agent.",
                 },
             },
             "required": ["source_tree_path"],
@@ -2633,7 +2621,7 @@ class PalRebirthTool(BaseTool):
         return ToolRequest
 
     def requires_model(self) -> bool:
-        return True
+        return False
 
     def get_model_category(self):
         from tools.models import ToolModelCategory
@@ -2647,29 +2635,27 @@ class PalRebirthTool(BaseTool):
         return response
 
     async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
-        import json as json_mod
         import re
+        import shutil
+        import tempfile
 
+        from clink import get_registry
+        from clink.agents import CLIAgentError, create_agent
         from tools.models import ToolOutput
         from utils.palstore import (
-            PalNode,
-            PalRoot,
             TraversalLog,
-            add_palnode,
             iter_dfs,
             load_tree,
             resolve_tree_path,
-            save_tree,
-            update_index,
         )
+        from utils.token_utils import count_tokens
 
         source_path = arguments.get("source_tree_path", "")
-        new_name = arguments.get("new_tree_name")
         focus = arguments.get("focus", "")
-        max_layers = arguments.get("max_layers", 5)
-        model_name = arguments.get("_resolved_model_name") or arguments.get("model")
-        thinking_mode = arguments.get("thinking_mode", "max")
+        cli_name = arguments.get("cli_name")
+        model = arguments.get("model")
 
+        # --- Resolve tree ---
         try:
             canonical = resolve_tree_path(source_path)
             tree = load_tree(canonical)
@@ -2679,42 +2665,32 @@ class PalRebirthTool(BaseTool):
             error = ToolOutput(status="error", content=str(exc), content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        if not new_name:
-            new_name = f"{tree.tree_name}-reborn"
-        new_canonical = f"{tree.directory}:{new_name}"
-
-        try:
-            provider = self.get_model_provider(model_name)
-        except ValueError as exc:
-            error = ToolOutput(status="error", content=str(exc), content_type="text")
-            return [TextContent(type="text", text=error.model_dump_json())]
-
-        from utils.model_context import ModelContext
-        from utils.token_utils import count_tokens
-
-        model_context = ModelContext(model_name=model_name)
-        validated_temp, _ = self.validate_and_correct_temperature(0.0, model_context)
-
         # ===================================================================
         # Phase 1: Audit — walk tree, collect L-nodes
         # ===================================================================
-        all_nodes: list[tuple[str, PalNode]] = list(iter_dfs(tree.tree_path, tree.children))
-        tlog = TraversalLog(traversal_type="rebirth_audit")
+        all_nodes = list(iter_dfs(tree.tree_path, tree.children))
+        tlog = TraversalLog(traversal_type="compact_audit")
         for path, node in all_nodes:
             tlog.record(path, node)
 
-        l_nodes: list[tuple[str, PalNode]] = []
-        for key in sorted(tree.children, key=lambda k: (int(k[1:]) if re.match(r"^L\d+$", k) else 999)):
-            if re.match(r"^L\d+$", key):
+        l_nodes: list[tuple[str, Any]] = []
+
+        def _layer_sort_key(k: str) -> int:
+            if re.match(r"^L\d+$", k):
+                return int(k[1:])
+            if re.match(r"^\d+$", k):
+                return int(k)
+            return 999
+
+        for key in sorted(tree.children, key=_layer_sort_key):
+            if re.match(r"^L\d+$", key) or re.match(r"^\d+$", key):
                 l_nodes.append((key, tree.children[key]))
 
         if not l_nodes:
-            error = ToolOutput(
-                status="error", content="Source tree has no L-nodes to rebirth.", content_type="text"
-            )
+            error = ToolOutput(status="error", content="Source tree has no layer nodes to compact.", content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        # Build tree outline for opening context
+        # Build tree outline
         outline_parts: list[str] = [f"Tree: {canonical}", f"Layers: {len(l_nodes)}", f"Tokens: ~{tlog.total_tokens}"]
         for path, node in all_nodes:
             key = path.rsplit(".", 1)[-1]
@@ -2727,224 +2703,176 @@ class PalRebirthTool(BaseTool):
         tree_outline = "\n".join(outline_parts)
 
         logger.info(
-            "[REBIRTH] Phase 1: audit — %d nodes, %d L-layers, %d tokens",
+            "[COMPACT] Phase 1: audit — %d nodes, %d L-layers, %d tokens",
             len(all_nodes),
             len(l_nodes),
             tlog.total_tokens,
         )
 
-        # ===================================================================
-        # Phase 2: Progressive feeding via CLI session resume
-        # ===================================================================
-        session_id: str | None = None
-
-        # Opening turn: tree outline + rebirth task instructions
-        opening = (
-            f"TREE REBIRTH — distilling PALTree '{canonical}' ({len(l_nodes)} layers, ~{tlog.total_tokens} tokens).\n\n"
-            f"=== TREE OUTLINE ===\n{tree_outline}\n\n"
-            f"I will feed you each historical layer one at a time, oldest first. For each layer:\n"
-            f"- Cross-reference against current files on disk using your filesystem tools\n"
-            f"- Track what knowledge endures vs what has been superseded\n"
-            f"- Note key architectural decisions, interfaces, and design rationale that remain valid\n"
-            f"- Discard discussion about changes already implemented — current files ARE the outcome\n\n"
-            f"After all layers, I'll ask you to produce a synthesized reborn tree as JSON.\n"
-            f"Each layer's content must be DETAILED technical prose (500-2000 words) — "
-            f"architectural specifics, key types/functions, protocol details, integration points, "
-            f"design rationale, and current state. The reborn tree replaces the original as the "
-            f"project's institutional memory.\n"
-        )
-        if focus:
-            opening += f"\nFocus: {focus}\n"
-        opening += f"\nMax layers in the reborn tree: {max_layers}"
-
-        logger.info("[REBIRTH] Phase 2: opening turn, feeding %d layers via --resume", len(l_nodes))
-
-        opening_response = provider.generate_content(
-            prompt=opening,
-            model_name=model_name,
-            system_prompt=CONTEXT_PROMPT,
-            temperature=validated_temp,
-            thinking_mode=thinking_mode,
-        )
-        session_id = opening_response.metadata.get("session_id")
-        logger.info(
-            "[REBIRTH] Phase 2: opening done, session_id=%s (%d chars)", session_id, len(opening_response.content)
-        )
-
-        # Feed each L-node progressively, resuming the same CLI session
-        for layer_idx, (l_key, l_node) in enumerate(l_nodes):
-            layer_parts = [f"=== LAYER {l_key} ==="]
-            if l_node.label:
-                layer_parts.append(f"Label: {l_node.label}")
-            if l_node.timestamp:
-                layer_parts.append(f"Date: {l_node.timestamp[:10]}")
-            if l_node.files:
-                layer_parts.append(f"Files: {', '.join(l_node.files)}")
-            if l_node.input:
-                layer_parts.append(f"\n--- INPUT ---\n{l_node.input}")
-            if l_node.output:
-                layer_parts.append(f"\n--- OUTPUT ---\n{l_node.output}")
-
-            # Include child node content (Q/F/C nodes under this layer)
-            for child_key in sorted(l_node.children):
-                child = l_node.children[child_key]
-                if child.output:
-                    child_label = child.label or child_key
-                    layer_parts.append(f"\n--- {l_key}.{child_key}: {child_label} ---\n{child.output}")
-
-            layer_content = "\n".join(layer_parts)
-            layer_prompt = (
-                f"Layer {layer_idx + 1}/{len(l_nodes)} ({l_key}). "
-                f"Note what's still relevant vs superseded.\n\n{layer_content}"
-            )
-
-            logger.info(
-                "[REBIRTH] Phase 2: feeding %s (%d chars), session_id=%s", l_key, len(layer_content), session_id
-            )
-
-            layer_response = provider.generate_content(
-                prompt=layer_prompt,
-                model_name=model_name,
-                system_prompt=CONTEXT_PROMPT,
-                temperature=validated_temp,
-                thinking_mode=thinking_mode,
-                session_id=session_id,
-            )
-
-            # Update session_id in case the first call didn't return one but a later one does
-            if not session_id:
-                session_id = layer_response.metadata.get("session_id")
-
-            logger.info("[REBIRTH] Phase 2: %s done (%d chars)", l_key, len(layer_response.content))
-
-        # ===================================================================
-        # Phase 3: Final synthesis — produce reborn tree structure
-        # ===================================================================
-        synthesis_prompt = (
-            "All layers have been fed. You've seen the full history of this tree.\n\n"
-            "Now produce the reborn tree. Return a JSON object with:\n"
-            '- "layers": array of {label, content, files} objects\n'
-            '- "discarded_summary": brief note on what was dropped\n\n'
-            "REQUIREMENTS:\n"
-            "- Group by theme/subsystem, not chronology\n"
-            "- Each layer's 'content' must be 500-2000 words of DETAILED technical prose — "
-            "architectural specifics, key types/functions, protocol details, integration points, "
-            "design rationale, and current state. NOT a brief summary or index card.\n"
-            "- Verify file paths exist on disk before including them in 'files'\n"
-            "- A developer reading ONLY these layers must understand the full architecture\n\n"
-            "Produce ONLY the JSON."
-        )
-
-        logger.info("[REBIRTH] Phase 3: requesting final synthesis, session_id=%s", session_id)
-
-        synthesis_response = provider.generate_content(
-            prompt=synthesis_prompt,
-            model_name=model_name,
-            system_prompt=CONTEXT_PROMPT,
-            temperature=validated_temp,
-            thinking_mode=thinking_mode,
-            session_id=session_id,
-        )
-
-        logger.info("[REBIRTH] Phase 3: synthesis received (%d chars)", len(synthesis_response.content))
-
-        # Parse JSON from synthesis response
-        synth_text = synthesis_response.content.strip()
-        if "```json" in synth_text:
-            synth_text = synth_text.split("```json", 1)[1].split("```", 1)[0].strip()
-        elif "```" in synth_text:
-            synth_text = synth_text.split("```", 1)[1].split("```", 1)[0].strip()
-
+        # --- Resolve CLI client ---
         try:
-            result = json_mod.loads(synth_text)
-        except json_mod.JSONDecodeError as exc:
-            error = ToolOutput(
-                status="error",
-                content=(
-                    f"LLM returned invalid JSON for reborn tree: {exc}\n\n"
-                    f"Raw response (first 3000 chars):\n{synthesis_response.content[:3000]}"
-                ),
-                content_type="text",
-                metadata={"session_id": session_id, "llm_calls": len(l_nodes) + 2},
-            )
+            registry = get_registry()
+            cli_names = registry.list_clients()
+            if not cli_names:
+                raise ValueError("No CLI clients configured for clink.")
+            selected_cli = cli_name or ("gemini" if "gemini" in cli_names else cli_names[0])
+            client_config = registry.get_client(selected_cli)
+        except (KeyError, ValueError) as exc:
+            error = ToolOutput(status="error", content=f"CLI resolution failed: {exc}", content_type="text")
             return [TextContent(type="text", text=error.model_dump_json())]
 
-        layers = result.get("layers", [])
-        if not layers:
-            error = ToolOutput(
-                status="error",
-                content="LLM synthesis contained no layers.",
-                content_type="text",
-                metadata={"session_id": session_id},
-            )
-            return [TextContent(type="text", text=error.model_dump_json())]
-
-        discarded_summary = result.get("discarded_summary", "")
+        role_config = client_config.get_role(None)
 
         # ===================================================================
-        # Phase 4: Construct — build new tree from synthesis
+        # Phase 2: Temp directory staging
         # ===================================================================
-        now = datetime.now(timezone.utc)
-        timestamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+        temp_dir = tempfile.mkdtemp(prefix="pal-compact-")
+        try:
+            for l_key, l_node in l_nodes:
+                layer_dir = os.path.join(temp_dir, l_key)
+                os.makedirs(layer_dir, exist_ok=True)
+                for filepath in l_node.files:
+                    if os.path.isfile(filepath):
+                        shutil.copy2(filepath, layer_dir)
 
-        new_tree = PalRoot(
-            tree_path=new_canonical,
-            label=f"Reborn from {tree.tree_name}",
-            created_at=timestamp,
-        )
+            logger.info("[COMPACT] Phase 2: temp dir staged at %s", temp_dir)
 
-        total_output_tokens = 0
-        for i, layer in enumerate(layers):
-            layer_key = f"L{i + 1}"
-            layer_content = layer.get("content", "")
-            layer_files = layer.get("files", [])
-            layer_label = layer.get("label", f"Layer {i + 1}")
+            # ===================================================================
+            # Phase 3: Clink compaction — layer-by-layer, single session
+            # ===================================================================
+            agent = create_agent(client_config)
+            session_id: str | None = None
+            compacted_segments: list[str] = []
+            layers_kept = 0
+            layers_discarded = 0
 
-            node = PalNode(
-                label=layer_label,
-                timestamp=timestamp,
-                model=model_name,
-                tool_name="rebirthtree",
-                files=[f for f in layer_files if isinstance(f, str)],
-                input=f"Rebirth of {canonical} — {layer_label}",
-                output=layer_content,
-                metadata={
-                    "reborn_from": canonical,
-                    "rebirth_date": timestamp,
-                    "source_token_count": tlog.total_tokens,
-                    "session_id": session_id,
-                    "llm_calls": len(l_nodes) + 2,
-                },
+            # Opening turn
+            opening = (
+                f"TREE COMPACTION — evaluating PALTree '{canonical}' "
+                f"({len(l_nodes)} layers, ~{tlog.total_tokens} tokens) against current project state.\n\n"
+                f"=== TREE OUTLINE ===\n{tree_outline}\n\n"
+                f"I will feed you each historical layer one at a time, oldest first.\n"
+                f"For each layer, evaluate it against the current state of the codebase:\n"
+                f"- DISCARD implementation details already realized in the current codebase\n"
+                f"- DISCARD dead ends, resolved bugs, superseded decisions\n"
+                f"- EXTRACT enduring design rationale, 'why' decisions, unwritten constraints\n"
+                f"- EXTRACT architectural patterns and integration knowledge NOT obvious from code\n\n"
+                f"If a layer has no enduring value, return exactly an empty string.\n"
+                f"Otherwise return dense technical markdown — no conversational filler.\n"
+                f"The files referenced by each layer are available in your working directory.\n"
             )
-            add_palnode(new_tree, "", layer_key, node)
-            total_output_tokens += count_tokens(layer_content)
+            if focus:
+                opening += f"\nFocus: {focus}\n"
 
-        save_tree(new_tree)
-        update_index(new_canonical)
+            logger.info("[COMPACT] Phase 3: opening turn")
 
-        logger.info(
-            "[REBIRTH] Phase 4: tree constructed — %s (%d layers, %d tokens, %d calls)",
-            new_canonical,
-            len(layers),
-            total_output_tokens,
-            len(l_nodes) + 2,
-        )
+            # Use first layer's dir as cwd for the opening turn
+            opening_cwd = os.path.join(temp_dir, l_nodes[0][0])
+            try:
+                opening_result = await agent.run(
+                    role=role_config,
+                    prompt=opening,
+                    system_prompt=CONTEXT_PROMPT,
+                    files=[],
+                    images=[],
+                    model=model,
+                    cwd=opening_cwd,
+                )
+                session_id = opening_result.parsed.metadata.get("session_id")
+                logger.info("[COMPACT] Phase 3: opening done, session_id=%s", session_id)
+            except CLIAgentError as exc:
+                error = ToolOutput(
+                    status="error",
+                    content=f"CLI agent failed during opening: {exc}",
+                    content_type="text",
+                )
+                return [TextContent(type="text", text=error.model_dump_json())]
 
-        compression = round((1 - total_output_tokens / max(tlog.total_tokens, 1)) * 100, 1)
+            # Feed each L-node
+            for layer_idx, (l_key, l_node) in enumerate(l_nodes):
+                layer_parts = [f"=== LAYER {l_key} ==="]
+                if l_node.label:
+                    layer_parts.append(f"Label: {l_node.label}")
+                if l_node.timestamp:
+                    layer_parts.append(f"Date: {l_node.timestamp[:10]}")
+                if l_node.files:
+                    layer_parts.append(f"Files: {', '.join(os.path.basename(f) for f in l_node.files)}")
+                if l_node.input:
+                    layer_parts.append(f"\n--- INPUT ---\n{l_node.input}")
+                if l_node.output:
+                    layer_parts.append(f"\n--- OUTPUT ---\n{l_node.output}")
+
+                for child_key in sorted(l_node.children):
+                    child = l_node.children[child_key]
+                    if child.output:
+                        child_label = child.label or child_key
+                        layer_parts.append(f"\n--- {l_key}.{child_key}: {child_label} ---\n{child.output}")
+
+                layer_content = "\n".join(layer_parts)
+                layer_prompt = (
+                    f"Layer {layer_idx + 1}/{len(l_nodes)} ({l_key}). "
+                    f"Return compacted summary or empty string.\n\n{layer_content}"
+                )
+
+                layer_cwd = os.path.join(temp_dir, l_key)
+                logger.info("[COMPACT] Phase 3: feeding %s (%d chars)", l_key, len(layer_content))
+
+                try:
+                    layer_result = await agent.run(
+                        role=role_config,
+                        prompt=layer_prompt,
+                        system_prompt=CONTEXT_PROMPT,
+                        files=[],
+                        images=[],
+                        model=model,
+                        cwd=layer_cwd,
+                        session_id=session_id,
+                    )
+                    if not session_id:
+                        session_id = layer_result.parsed.metadata.get("session_id")
+
+                    response_text = layer_result.parsed.content.strip()
+                    if response_text:
+                        compacted_segments.append(response_text)
+                        layers_kept += 1
+                        logger.info("[COMPACT] Phase 3: %s → kept (%d chars)", l_key, len(response_text))
+                    else:
+                        layers_discarded += 1
+                        logger.info("[COMPACT] Phase 3: %s → discarded", l_key)
+
+                except CLIAgentError as exc:
+                    logger.warning("[COMPACT] Phase 3: %s failed: %s", l_key, exc)
+                    layers_discarded += 1
+
+            # Assemble blob
+            blob = "\n\n---\n\n".join(compacted_segments)
+
+        finally:
+            # ===================================================================
+            # Phase 4: Cleanup
+            # ===================================================================
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            logger.info("[COMPACT] Phase 4: temp dir cleaned up")
+
+        # ===================================================================
+        # Phase 5: Return
+        # ===================================================================
+        blob_tokens = count_tokens(blob) if blob else 0
+        compression = round((1 - blob_tokens / max(tlog.total_tokens, 1)) * 100, 1)
+
         summary_parts = [
-            "Rebirth complete.",
+            "Compaction complete.",
             "",
             f"Source: {canonical}",
             f"  Nodes: {len(all_nodes)} | Tokens: ~{tlog.total_tokens}",
             "",
-            f"Reborn: {new_canonical}",
-            f"  Layers: {len(layers)} | Tokens: ~{total_output_tokens}",
-            f"  Compression: {compression}%",
-            f"  LLM calls: {len(l_nodes) + 2} (opening + {len(l_nodes)} layers + synthesis)",
-            f"  Session: {session_id}",
+            f"Compacted: {layers_kept} layers kept, {layers_discarded} discarded",
+            f"  Tokens: ~{blob_tokens} | Compression: {compression}%",
+            f"  CLI: {selected_cli} | Session: {session_id}",
+            "",
+            "=== COMPACTED SEED ===",
+            blob,
         ]
-        if discarded_summary:
-            summary_parts.append(f"  Discarded: {discarded_summary}")
 
         tool_output = ToolOutput(
             status="success",
@@ -2952,16 +2880,203 @@ class PalRebirthTool(BaseTool):
             content_type="text",
             metadata={
                 "source_tree": canonical,
-                "new_tree": new_canonical,
                 "source_nodes": len(all_nodes),
                 "source_tokens": tlog.total_tokens,
-                "output_layers": len(layers),
-                "output_tokens": total_output_tokens,
+                "layers_kept": layers_kept,
+                "layers_discarded": layers_discarded,
+                "output_tokens": blob_tokens,
                 "compression_pct": compression,
-                "model": model_name,
+                "cli_name": selected_cli,
                 "session_id": session_id,
-                "llm_calls": len(l_nodes) + 2,
                 **tlog.to_dict(),
+            },
+        )
+        return [TextContent(type="text", text=tool_output.model_dump_json())]
+
+
+# ---------------------------------------------------------------------------
+# regrowtree
+# ---------------------------------------------------------------------------
+
+
+class PalRegrowTool(BaseTool):
+    """Seed a new PALTree from a compacted markdown blob.
+
+    Reads a markdown file (produced by compacttree), splits on --- delimiters,
+    and creates L-nodes from each segment. The user then continues growing
+    the tree via normal growlayer calls.
+    """
+
+    def get_name(self) -> str:
+        return "regrowtree"
+
+    def get_description(self) -> str:
+        return (
+            "Seed a new PALTree from a compacted markdown file (produced by compacttree).\n"
+            "Splits the file on '---' delimiters and creates one L-node per segment.\n"
+            "Use growlayer afterwards to continue building the tree."
+        )
+
+    def get_input_schema(self) -> dict[str, Any]:
+        return {
+            "type": "object",
+            "properties": {
+                "source_markdown_path": {
+                    "type": "string",
+                    "description": "Absolute path to the compacted markdown file from compacttree.",
+                },
+                "new_tree_name": {
+                    "type": "string",
+                    "description": "Name for the new tree. No dots allowed.",
+                },
+                "directory": {
+                    "type": "string",
+                    "description": "Project directory for the new tree. Defaults to current working directory.",
+                },
+                "label": {
+                    "type": "string",
+                    "description": "Descriptive label for the new tree root.",
+                },
+            },
+            "required": ["source_markdown_path", "new_tree_name"],
+            "additionalProperties": False,
+        }
+
+    def get_annotations(self) -> dict:
+        return {"readOnlyHint": False, "openWorldHint": False}
+
+    def get_system_prompt(self) -> str:
+        return ""
+
+    def get_request_model(self):
+        return ToolRequest
+
+    def requires_model(self) -> bool:
+        return False
+
+    def get_model_category(self):
+        from tools.models import ToolModelCategory
+
+        return ToolModelCategory.FAST_RESPONSE
+
+    async def prepare_prompt(self, _request) -> str:
+        return ""
+
+    def format_response(self, response: str, _request, _model_info=None) -> str:
+        return response
+
+    async def execute(self, arguments: dict[str, Any]) -> list[TextContent]:
+        import re
+
+        from tools.models import ToolOutput
+        from utils.palstore import (
+            PalNode,
+            PalRoot,
+            add_palnode,
+            load_tree,
+            save_tree,
+            update_index,
+        )
+        from utils.token_utils import count_tokens
+
+        source_path = arguments.get("source_markdown_path", "")
+        new_name = arguments.get("new_tree_name", "")
+        directory = arguments.get("directory") or os.getcwd()
+        label = arguments.get("label")
+
+        # Validate inputs
+        if not source_path or not os.path.isfile(source_path):
+            error = ToolOutput(status="error", content=f"Source file not found: {source_path}", content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        if not new_name:
+            error = ToolOutput(status="error", content="new_tree_name is required.", content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        if "." in new_name:
+            error = ToolOutput(status="error", content="Tree name must not contain dots.", content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        canonical = f"{directory}:{new_name}"
+
+        # Check for existing tree
+        existing = load_tree(canonical)
+        if existing is not None:
+            error = ToolOutput(
+                status="error",
+                content=f"Tree already exists: {canonical}. Choose a different name.",
+                content_type="text",
+            )
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        # Read and split the markdown blob
+        with open(source_path, encoding="utf-8") as f:
+            content = f.read()
+
+        if not content.strip():
+            error = ToolOutput(status="error", content="Source file is empty.", content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        # Split on --- delimiter (whitespace-tolerant)
+        segments = re.split(r"\n\s*---\s*\n", content)
+        segments = [seg.strip() for seg in segments if seg.strip()]
+
+        if not segments:
+            error = ToolOutput(status="error", content="No content segments found in source file.", content_type="text")
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        # Create the new tree
+        now = datetime.now(timezone.utc)
+        timestamp = now.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        new_tree = PalRoot(
+            tree_path=canonical,
+            label=label or f"Regrown from {os.path.basename(source_path)}",
+            created_at=timestamp,
+        )
+
+        total_tokens = 0
+        for i, segment in enumerate(segments):
+            layer_key = f"L{i + 1}"
+            # Extract label from first line
+            first_line = segment.split("\n", 1)[0].strip()
+            node_label = _truncate_label(first_line.lstrip("# ")) if first_line else f"Layer {i + 1}"
+
+            node = PalNode(
+                label=node_label,
+                timestamp=timestamp,
+                tool_name="regrowtree",
+                input="Seeded from compacttree",
+                output=segment,
+                metadata={"seeded_from": source_path},
+            )
+            add_palnode(new_tree, "", layer_key, node)
+            total_tokens += count_tokens(segment)
+
+        save_tree(new_tree)
+        update_index(canonical)
+
+        logger.info("[REGROW] Tree created: %s (%d layers, %d tokens)", canonical, len(segments), total_tokens)
+
+        summary_parts = [
+            "Regrowth complete.",
+            "",
+            f"Source: {source_path}",
+            f"New tree: {canonical}",
+            f"  Layers: {len(segments)} | Tokens: ~{total_tokens}",
+            "",
+            "Use growlayer to continue building the tree.",
+        ]
+
+        tool_output = ToolOutput(
+            status="success",
+            content="\n".join(summary_parts),
+            content_type="text",
+            metadata={
+                "new_tree": canonical,
+                "layers": len(segments),
+                "total_tokens": total_tokens,
+                "source_file": source_path,
             },
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]

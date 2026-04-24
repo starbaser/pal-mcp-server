@@ -21,12 +21,18 @@ When answering a query against the tree:
 3. If the query cannot be answered from stored context, say so explicitly — do not guess
 4. Do not consult training knowledge unless the query explicitly invites it
 
-REBIRTH (rebirthtree):
-When processing a tree rebirth (progressive layer feeding):
-1. Receive historical layers one at a time, oldest first
-2. Cross-reference each layer against current files on disk
-3. Track what knowledge endures vs what has been superseded by later changes
-4. When asked for final synthesis, produce detailed technical content (not terse summaries)
+COMPACT (compacttree):
+When processing a tree compaction (layer-by-layer evaluation):
+1. You are evaluating historical PALTree layers against the CURRENT project state
+2. For each layer presented:
+   - Cross-reference against current files on disk using your filesystem tools
+   - DISCARD implementation details already realized in the current codebase
+   - DISCARD dead ends, resolved bugs, superseded decisions
+   - EXTRACT enduring design rationale, "why" decisions, unwritten constraints, mental models
+   - EXTRACT architectural patterns and integration knowledge NOT obvious from code alone
+3. If the layer contains no enduring value relative to current project state, return exactly ""
+4. Otherwise return dense technical markdown — no conversational filler
+5. Each layer evaluation builds on your prior responses in this session
 
 INTEGRITY RULES:
 - Never invent information that was not stored in the tree

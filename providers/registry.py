@@ -42,6 +42,7 @@ class ModelProviderRegistry:
         ProviderType.AZURE,  # Azure-hosted OpenAI deployments
         ProviderType.XAI,  # Direct X.AI GROK access
         ProviderType.ZAI,  # Direct ZAI GLM access
+        ProviderType.DEEPSEEK,  # Direct DeepSeek access
         ProviderType.DIAL,  # DIAL unified API access
         ProviderType.CLINK,  # CLI subprocess passthrough
         ProviderType.CUSTOM,  # Local/self-hosted models
@@ -349,6 +350,7 @@ class ModelProviderRegistry:
             ProviderType.AZURE: "AZURE_OPENAI_API_KEY",
             ProviderType.XAI: "XAI_API_KEY",
             ProviderType.ZAI: "ZAI_API_KEY",
+            ProviderType.DEEPSEEK: "DEEPSEEK_API_KEY",
             ProviderType.OPENROUTER: "OPENROUTER_API_KEY",
             ProviderType.CUSTOM: "CUSTOM_API_KEY",  # Can be empty for providers that don't need auth
             ProviderType.CLINK: None,

@@ -2687,7 +2687,9 @@ class PalCompactTool(BaseTool):
                 l_nodes.append((key, tree.children[key]))
 
         if not l_nodes:
-            error = ToolOutput(status="error", content="Source tree has no layer nodes to compact.", content_type="text")
+            error = ToolOutput(
+                status="error", content="Source tree has no layer nodes to compact.", content_type="text"
+            )
             return [TextContent(type="text", text=error.model_dump_json())]
 
         # Build tree outline

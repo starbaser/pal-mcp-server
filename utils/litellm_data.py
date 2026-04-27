@@ -31,6 +31,7 @@ _LITELLM_PROVIDER_MAP: dict[str, str] = {
     "openai": "openai",
     "xai": "xai",
     "zai": "zai",
+    "deepseek": "deepseek",
 }
 
 # litellm provider prefixes stripped from model keys to produce bare PAL model names.
@@ -38,6 +39,7 @@ _PREFIX_STRIP: dict[str, str] = {
     "gemini": "gemini/",
     "xai": "xai/",
     "zai": "zai/",
+    "deepseek": "deepseek/",
 }
 
 # Singleton — loaded once per process, reused across all registries.

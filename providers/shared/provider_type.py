@@ -14,6 +14,7 @@ class ProviderType(Enum):
     AZURE = "azure"
     XAI = "xai"
     ZAI = "zai"
+    DEEPSEEK = "deepseek"
     OPENROUTER = "openrouter"
     CLINK = "clink"
     CUSTOM = "custom"

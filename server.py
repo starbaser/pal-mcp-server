@@ -502,6 +502,7 @@ def configure_providers():
     from providers.anthropic import AnthropicModelProvider
     from providers.azure_openai import AzureOpenAIProvider
     from providers.custom import CustomProvider
+    from providers.deepseek import DeepSeekModelProvider
     from providers.dial import DIALModelProvider
     from providers.gemini import GeminiModelProvider
     from providers.openai import OpenAIModelProvider
@@ -575,6 +576,12 @@ def configure_providers():
         valid_providers.append("ZAI (GLM)")
         has_native_apis = True
 
+    # Check for DeepSeek API key
+    deepseek_key = get_env("DEEPSEEK_API_KEY")
+    if deepseek_key and deepseek_key != "your_deepseek_api_key_here":
+        valid_providers.append("DeepSeek")
+        has_native_apis = True
+
     # Check for DIAL API key
     dial_key = get_env("DIAL_API_KEY")
     if dial_key and dial_key != "your_dial_api_key_here":
@@ -641,6 +648,10 @@ def configure_providers():
             ModelProviderRegistry.register_provider(ProviderType.ZAI, ZAIModelProvider)
             registered_providers.append(ProviderType.ZAI.value)
             logger.debug(f"Registered provider: {ProviderType.ZAI.value}")
+        if deepseek_key and deepseek_key != "your_deepseek_api_key_here":
+            ModelProviderRegistry.register_provider(ProviderType.DEEPSEEK, DeepSeekModelProvider)
+            registered_providers.append(ProviderType.DEEPSEEK.value)
+            logger.debug(f"Registered provider: {ProviderType.DEEPSEEK.value}")
         if dial_key and dial_key != "your_dial_api_key_here":
             ModelProviderRegistry.register_provider(ProviderType.DIAL, DIALModelProvider)
             registered_providers.append(ProviderType.DIAL.value)

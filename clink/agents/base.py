@@ -257,6 +257,13 @@ class BaseCLIAgent:
         # mistake themselves for running inside a Claude Code session.
         env.pop("CLAUDECODE", None)
 
+        # Strip ccproxy sentinel keys — these are only valid when routed through
+        # ccproxy's MITM layer; child CLI processes connect directly to external APIs.
+        for var in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"):
+            value = env.get(var, "")
+            if "ccproxy" in value:
+                env.pop(var, None)
+
         # Set marker variable to identify clink invocations
         env["PAL_MCP_CLINK"] = "1"
 

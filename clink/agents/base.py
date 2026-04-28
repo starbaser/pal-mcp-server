@@ -157,8 +157,33 @@ class BaseCLIAgent:
                 return recovered
 
         if return_code != 0:
+            # Extract a meaningful snippet from stderr so the error message
+            # is not opaque when recovery fails to parse structured output.
+            stderr_snippet = ""
+            if stderr_text:
+                # Look for an error-like line, preferring lines containing
+                # 'Error' or 'error'. Skip JSON, stack frames, JS objects.
+                for line in reversed(stderr_text.strip().splitlines()):
+                    stripped = line.strip()
+                    if not stripped:
+                        continue
+                    if stripped[0] in ('{', '}', '"') or stripped.startswith(("at ", "  ")):
+                        continue
+                    # Prefer the actual error line if we've seen one
+                    if "error" in stripped.lower():
+                        stderr_snippet = stripped[:300]
+                        break
+                    if not stderr_snippet:
+                        stderr_snippet = stripped[:300]
+                if not stderr_snippet:
+                    stderr_snippet = stderr_text.strip().splitlines()[-1].strip()[:300]
+
+            message = f"CLI '{self.client.name}' exited with status {return_code}"
+            if stderr_snippet:
+                message += f": {stderr_snippet}"
+
             raise CLIAgentError(
-                f"CLI '{self.client.name}' exited with status {return_code}",
+                message,
                 returncode=return_code,
                 stdout=stdout_text,
                 stderr=stderr_text,

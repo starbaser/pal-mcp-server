@@ -80,14 +80,28 @@ class GeminiAgent(BaseCLIAgent):
         if not combined:
             return None
 
-        brace_index = combined.find("{")
-        if brace_index == -1:
-            return None
+        # Stack traces may contain non-JSON JavaScript objects (unquoted
+        # keys) that appear before the actual JSON error response.  Scan
+        # brace-delimited blocks from right to left, accepting the first
+        # one that parses as valid JSON and carries an "error" or
+        # "session_id" key.
+        payload: dict[str, Any] | None = None
+        brace_index: int = -1
+        search_pos = len(combined)
+        while search_pos > 0:
+            search_pos = combined.rfind("{", 0, search_pos)
+            if search_pos == -1:
+                break
+            try:
+                candidate = json.loads(combined[search_pos:])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(candidate.get("error"), dict) or "session_id" in candidate:
+                payload = candidate
+                brace_index = search_pos
+                break
 
-        json_candidate = combined[brace_index:]
-        try:
-            payload: dict[str, Any] = json.loads(json_candidate)
-        except json.JSONDecodeError:
+        if payload is None:
             return None
 
         error_block = payload.get("error")

@@ -167,7 +167,7 @@ class BaseCLIAgent:
                     stripped = line.strip()
                     if not stripped:
                         continue
-                    if stripped[0] in ('{', '}', '"') or stripped.startswith(("at ", "  ")):
+                    if stripped[0] in ("{", "}", '"') or stripped.startswith(("at ", "  ")):
                         continue
                     # Prefer the actual error line if we've seen one
                     if "error" in stripped.lower():

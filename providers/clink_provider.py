@@ -9,7 +9,7 @@ from dataclasses import replace
 from typing import Any
 
 from clink.agents import create_agent
-from clink.constants import DEFAULT_TIMEOUT_SECONDS, PASSTHROUGH_ARGS
+from clink.constants import BUILTIN_PROMPTS_DIR, DEFAULT_TIMEOUT_SECONDS, PASSTHROUGH_ARGS
 from clink.models import ResolvedCLIClient, ResolvedCLIRole
 from clink.parsers.base import ParsedCLIResponse
 from clink.registry import ClinkRegistry, get_registry
@@ -24,26 +24,18 @@ from .shared import (
 
 logger = logging.getLogger(__name__)
 
-PASSTHROUGH_SYSTEM_PROMPT = (
-    "[clink passthrough mode]\n"
-    "You are operating as a text-to-text model endpoint invoked through PAL MCP's "
-    "clink provider. From the caller's perspective this is a stateless input→output "
-    "exchange — the text of your reply IS the entire output returned to the "
-    "workflow.\n\n"
-    "STRICT CONSTRAINTS (output side):\n"
-    "- Do NOT create, modify, overwrite, move, or delete any files on disk.\n"
-    "- Do NOT run destructive shell commands (rm, mv, redirection into files, etc.).\n"
-    "- Do NOT commit, push, stash, or otherwise modify git state.\n"
-    "- Do NOT install packages or mutate the environment.\n\n"
-    "You MAY use read-only tools freely to formulate your answer: reading files, "
-    "listing directories, running non-destructive shell commands, web search, "
-    "URL fetches, grep — anything that gathers information without changing it. "
-    "Your CLI has full tool access; the constraint is that the only artifact you "
-    "produce is your final reply text.\n\n"
-    "If the caller asked for code, patches, or file changes, present them in your "
-    "reply as fenced code blocks with clear path headers. The caller will apply "
-    "them — you will not."
-)
+
+def _load_passthrough_prompt() -> str:
+    """Load the base clink prompt which contains the read-only constraint."""
+    path = BUILTIN_PROMPTS_DIR / "default.txt"
+    try:
+        return path.read_text(encoding="utf-8").strip()
+    except Exception as exc:
+        logger.warning("Failed to load passthrough prompt from %s: %s", path, exc)
+        return ""
+
+
+PASSTHROUGH_SYSTEM_PROMPT = _load_passthrough_prompt()
 
 _FALLBACK_CAPABILITIES = ModelCapabilities(
     provider=ProviderType.CLINK,
@@ -144,10 +136,14 @@ class ClinkProvider(ModelProvider):
         max_output_tokens: int | None = None,
         **kwargs: Any,
     ) -> ModelResponse:
+        import time as _time
+
         client, real_model = self._registry.resolve_model_slug(model_name)
         session_id = kwargs.get("session_id")
 
         timeout = client.timeout_seconds or DEFAULT_TIMEOUT_SECONDS
+        logger.info("clink dispatch: cli=%s model=%s prompt=%d chars timeout=%ds", client.name, model_name, len(prompt), timeout)
+        _t0 = _time.monotonic()
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             future = pool.submit(
@@ -157,8 +153,16 @@ class ClinkProvider(ModelProvider):
             try:
                 agent_output = future.result(timeout=timeout)
             except concurrent.futures.TimeoutError:
+                _elapsed = _time.monotonic() - _t0
+                logger.error("clink timeout: cli=%s model=%s after %.1fs", client.name, model_name, _elapsed)
                 raise RuntimeError(f"CLI '{client.name}' timed out after {timeout}s for model '{model_name}'") from None
 
+        _elapsed = _time.monotonic() - _t0
+        _resp_len = len(agent_output.parsed.content) if agent_output.parsed.content else 0
+        logger.info(
+            "clink complete: cli=%s model=%s duration=%.1fs response=%d chars rc=%d",
+            client.name, model_name, _elapsed, _resp_len, agent_output.returncode,
+        )
         return self._to_model_response(agent_output.parsed, real_model or model_name, model_name)
 
     async def _async_generate(

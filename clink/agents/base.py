@@ -112,6 +112,9 @@ class BaseCLIAgent:
         if effective_cwd:
             self._logger.debug("Working directory: %s", effective_cwd)
 
+        prompt_bytes = prompt.encode("utf-8")
+        self._logger.info("Sending %d bytes (%d chars) to %s stdin", len(prompt_bytes), len(prompt), self.client.name)
+
         try:
             process = await asyncio.create_subprocess_exec(
                 *command_with_output_flag,
@@ -125,13 +128,18 @@ class BaseCLIAgent:
         except FileNotFoundError as exc:
             raise CLIAgentError(f"Executable not found for CLI '{self.client.name}': {exc}") from exc
 
-        stdout_bytes, stderr_bytes = await process.communicate(prompt.encode("utf-8"))
+        stdout_bytes, stderr_bytes = await process.communicate(prompt_bytes)
 
         duration = time.monotonic() - start_time
         return_code = process.returncode
         assert return_code is not None, "returncode should be set after communicate()"
         stdout_text = stdout_bytes.decode("utf-8", errors="replace")
         stderr_text = stderr_bytes.decode("utf-8", errors="replace")
+
+        self._logger.info(
+            "%s completed rc=%d duration=%.1fs stdout=%d stderr=%d chars",
+            self.client.name, return_code, duration, len(stdout_text), len(stderr_text),
+        )
 
         if output_file_path and output_file_path.exists():
             output_file_content = output_file_path.read_text(encoding="utf-8", errors="replace")

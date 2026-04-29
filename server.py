@@ -1103,7 +1103,10 @@ def _save_response_content(
         )
 
         if cid:
-            filename = f"{tool_name}_{cid}.md"
+            safe_cid = re.sub(r"[^a-zA-Z0-9_-]", "_", cid)
+            existing = list(content_dir.glob(f"*_{safe_cid}_*.md"))
+            step = len(existing) + 1
+            filename = f"{tool_name}_{safe_cid}_{step}.md"
         else:
             filename = f"{tool_name}_{timestamp}.md"
         filepath = content_dir / filename
@@ -1315,10 +1318,18 @@ async def _call_tool_impl(name: str, arguments: dict[str, Any], tools: dict) -> 
     # Extract raw output flag before tool sees it (tools use additionalProperties: false)
     raw_output = arguments.pop("raw", False)
 
+    _tool_start_time = time.monotonic()
+    _tool_model_name = arguments.get("model", DEFAULT_MODEL)
+    _prompt_chars = len(arguments.get("prompt", ""))
+    _n_files = len(arguments.get("absolute_file_paths", []))
+
     # Log to activity file for monitoring
     try:
         mcp_activity_logger = logging.getLogger("mcp_activity")
-        mcp_activity_logger.info(f"TOOL_CALL: {name} with {len(arguments)} arguments")
+        mcp_activity_logger.info(
+            "TOOL_CALL: %s model=%s prompt_chars=%d files=%d",
+            name, _tool_model_name, _prompt_chars, _n_files,
+        )
     except Exception:
         pass
 
@@ -1397,6 +1408,15 @@ async def _call_tool_impl(name: str, arguments: dict[str, Any], tools: dict) -> 
             result = _extract_gen_files(result, arguments.get("continuation_id"), os.getcwd())
             result = _apply_output_format(result, raw_output)
             _cleanup_staging_dir(arguments)
+
+            _tool_duration = time.monotonic() - _tool_start_time
+            try:
+                mcp_activity_logger = logging.getLogger("mcp_activity")
+                mcp_activity_logger.info(
+                    "TOOL_COMPLETED: %s duration=%.1fs (no-model)", name, _tool_duration,
+                )
+            except Exception:
+                pass
             return result
 
         # Handle auto mode at MCP boundary - resolve to specific model
@@ -1429,6 +1449,15 @@ async def _call_tool_impl(name: str, arguments: dict[str, Any], tools: dict) -> 
                 content_type="text",
                 metadata={"tool_name": name, "requested_model": model_name},
             )
+            _tool_duration = time.monotonic() - _tool_start_time
+            try:
+                mcp_activity_logger = logging.getLogger("mcp_activity")
+                mcp_activity_logger.info(
+                    "TOOL_ERROR: %s model=%s duration=%.1fs error=model_unavailable",
+                    name, model_name, _tool_duration,
+                )
+            except Exception:
+                pass
             raise ToolExecutionError(error_output.model_dump_json())
 
         # Create model context with resolved model and option
@@ -1449,6 +1478,15 @@ async def _call_tool_impl(name: str, arguments: dict[str, Any], tools: dict) -> 
             file_size_check = check_total_file_size(argument_files, model_name)
             if file_size_check:
                 logger.warning(f"File size check failed for {name} with model {model_name}")
+                _tool_duration = time.monotonic() - _tool_start_time
+                try:
+                    mcp_activity_logger = logging.getLogger("mcp_activity")
+                    mcp_activity_logger.info(
+                        "TOOL_ERROR: %s model=%s duration=%.1fs error=file_size_exceeded",
+                        name, model_name, _tool_duration,
+                    )
+                except Exception:
+                    pass
                 raise ToolExecutionError(ToolOutput(**file_size_check).model_dump_json())
 
         # Execute tool with pre-resolved model context
@@ -1475,9 +1513,22 @@ async def _call_tool_impl(name: str, arguments: dict[str, Any], tools: dict) -> 
         _cleanup_staging_dir(arguments)
 
         # Log completion to activity file
+        _tool_duration = time.monotonic() - _tool_start_time
         try:
             mcp_activity_logger = logging.getLogger("mcp_activity")
-            mcp_activity_logger.info(f"TOOL_COMPLETED: {name}")
+            _ctx_used = arguments.get("_context_used", 0)
+            _resp_chars = 0
+            _resp_status = "unknown"
+            try:
+                _resp_data = json.loads(result[0].text) if result else {}
+                _resp_chars = len(_resp_data.get("content", ""))
+                _resp_status = _resp_data.get("status", "unknown")
+            except Exception:
+                pass
+            mcp_activity_logger.info(
+                "TOOL_COMPLETED: %s model=%s duration=%.1fs ctx_tokens=%d response_chars=%d status=%s",
+                name, model_name, _tool_duration, _ctx_used, _resp_chars, _resp_status,
+            )
         except Exception:
             pass
         return result

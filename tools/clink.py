@@ -556,9 +556,9 @@ class CLinkTool(SimpleTool):
 
     def _agent_capabilities_guidance(self, cli_name: str) -> str:
         return (
-            f"You are operating through the {cli_name} CLI agent. You have access to read-only "
-            "CLI capabilities — reading files, listing directories, web searches, grep, and any other "
-            "non-destructive tools. Gather current information yourself and deliver the final answer without "
+            f"You are operating through the {cli_name} CLI agent. You have access to your full suite of "
+            "CLI capabilities—including launching web searches, reading files, and using any other "
+            "available tools. Gather current information yourself and deliver the final answer without "
             "asking the PAL MCP host to perform searches or file reads."
         )
 

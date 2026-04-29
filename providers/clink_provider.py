@@ -26,8 +26,8 @@ logger = logging.getLogger(__name__)
 
 
 def _load_passthrough_prompt() -> str:
-    """Load the base clink prompt which contains the read-only constraint."""
-    path = BUILTIN_PROMPTS_DIR / "default.txt"
+    """Load the read-only passthrough prompt for CLI-as-model-endpoint usage."""
+    path = BUILTIN_PROMPTS_DIR / "passthrough.txt"
     try:
         return path.read_text(encoding="utf-8").strip()
     except Exception as exc:

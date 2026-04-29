@@ -1216,6 +1216,16 @@ def _extract_gen_files(result: list, continuation_id: str | None, cwd: str) -> l
     return result
 
 
+def _cleanup_staging_dir(arguments: dict) -> None:
+    """Remove the temporary file staging directory created by build_tree_context."""
+    staging_dir = arguments.get("_staging_dir")
+    if staging_dir:
+        import shutil
+
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        logger.debug("Cleaned up staging dir: %s", staging_dir)
+
+
 def _apply_output_format(result: list, raw: bool) -> list:
     """Route tool results through the appropriate output formatter.
 
@@ -1386,6 +1396,7 @@ async def _call_tool_impl(name: str, arguments: dict[str, Any], tools: dict) -> 
 
             result = _extract_gen_files(result, arguments.get("continuation_id"), os.getcwd())
             result = _apply_output_format(result, raw_output)
+            _cleanup_staging_dir(arguments)
             return result
 
         # Handle auto mode at MCP boundary - resolve to specific model
@@ -1461,6 +1472,7 @@ async def _call_tool_impl(name: str, arguments: dict[str, Any], tools: dict) -> 
 
         result = _extract_gen_files(result, arguments.get("continuation_id"), os.getcwd())
         result = _apply_output_format(result, raw_output)
+        _cleanup_staging_dir(arguments)
 
         # Log completion to activity file
         try:

@@ -644,10 +644,9 @@ class TestContextBuilder:
         # /shared.py must appear exactly once
         assert result.count("/shared.py") == 1
 
-    def test_file_blob_not_duplicated_in_cumulative_ancestry(self):
-        """Regression: when layers share a file via content blobs, the same
-        file body must NOT appear multiple times in the reconstructed history.
-        This is the core invariant that diff-based dedup protects."""
+    def test_file_blob_stripped_from_cumulative_ancestry(self):
+        """File content embedded in CONTEXT FILES blocks must be stripped from
+        reconstructed conversation history — file paths are listed separately."""
         from utils.file_diff import decide_file_representation
         from utils.palstore_builder import build_context_from_ancestry
 
@@ -678,7 +677,9 @@ class TestContextBuilder:
         )
 
         history = build_context_from_ancestry([l1, l2])
-        assert history.count("class Foo:") == 1, f"file body appeared {history.count('class Foo:')} times, expected 1"
+        assert "class Foo:" not in history, "file content should be stripped from conversation history"
+        assert "setup" in history
+        assert "update" in history
 
     def test_small_file_change_produces_diff_not_full_duplicate(self):
         """When a file has a small addition, the second layer should contain
@@ -804,10 +805,8 @@ class TestContextBuilder:
         ancestors = [store.children["L1"], store.children["L2"], store.children["L3"]]
         history = build_context_from_ancestry(ancestors)
 
-        # The file body should appear exactly once (in L1's turn)
-        assert (
-            history.count("def hello():") == 1
-        ), f"file body appeared {history.count('def hello():')} times after migration, expected 1"
+        # File content is stripped from conversation history
+        assert "def hello():" not in history, "file content should be stripped from conversation history"
         # All responses should still be present
         assert "stored L1" in history
         assert "stored L2" in history
@@ -820,7 +819,7 @@ class TestContextBuilder:
         result = build_context_from_ancestry([node])
         assert result.strip().endswith("=== END CONVERSATION HISTORY ===")
 
-    def test_build_context_uses_content_for_user_turn(self):
+    def test_build_context_strips_context_files_from_user_turn(self):
         from utils.palstore_builder import build_context_from_ancestry
 
         full_prompt = "user text\n\n=== CONTEXT FILES ===\nFILE BLOB CONTENT HERE\n=== END CONTEXT FILES ==="
@@ -831,7 +830,9 @@ class TestContextBuilder:
             output=raw_response,
         )
         result = build_context_from_ancestry([node])
-        assert "FILE BLOB CONTENT HERE" in result
+        assert "FILE BLOB CONTENT HERE" not in result
+        assert "=== CONTEXT FILES ===" not in result
+        assert "user text" in result
         assert raw_response in result
 
     def test_build_context_falls_back_to_prompt_when_no_content(self):
@@ -855,6 +856,83 @@ class TestContextBuilder:
         assert "before" in result
         assert "still part of prompt" in result
         assert "answer" in result
+
+
+# ---------------------------------------------------------------------------
+# TestMaterializeStagingDir
+# ---------------------------------------------------------------------------
+
+
+class TestMaterializeStagingDir:
+    def test_extracts_file_from_blob_to_staging_dir(self, tmp_path):
+        from utils.palstore_builder import _materialize_staging_dir
+
+        file_content = "class Widget:\n    pass"
+        blob = (
+            "=== CONTEXT LAYER SUBMISSION ===\n\nsetup"
+            "\n\n=== CONTEXT FILES ===\n"
+            f"--- BEGIN FILE: /src/widget.py (Last modified: 2026-01-01 00:00:00 UTC) ---\n"
+            f"{file_content}\n"
+            f"--- END FILE: /src/widget.py ---\n"
+            "\n=== END CONTEXT FILES ==="
+        )
+        node = PalNode(
+            timestamp="2026-01-01T00:00:00Z",
+            files=["/src/widget.py"],
+            input=blob,
+            output="ok",
+        )
+
+        staging_dir = _materialize_staging_dir([node])
+        assert staging_dir is not None
+
+        import os
+        import shutil
+
+        try:
+            staged_file = os.path.join(staging_dir, "T0", "widget.py")
+            assert os.path.isfile(staged_file)
+            with open(staged_file) as f:
+                assert f.read() == file_content
+        finally:
+            shutil.rmtree(staging_dir, ignore_errors=True)
+
+    def test_returns_none_when_no_files(self):
+        from utils.palstore_builder import _materialize_staging_dir
+
+        node = PalNode(
+            timestamp="2026-01-01T00:00:00Z",
+            input="just text",
+            output="reply",
+        )
+        assert _materialize_staging_dir([node]) is None
+
+    def test_disk_fallback_when_no_blob_match(self, tmp_path):
+        from utils.palstore_builder import _materialize_staging_dir
+
+        disk_file = tmp_path / "real.py"
+        disk_file.write_text("on disk content")
+
+        node = PalNode(
+            timestamp="2026-01-01T00:00:00Z",
+            files=[str(disk_file)],
+            input="no context files section here",
+            output="reply",
+        )
+
+        staging_dir = _materialize_staging_dir([node])
+        assert staging_dir is not None
+
+        import os
+        import shutil
+
+        try:
+            staged = os.path.join(staging_dir, "T0", "real.py")
+            assert os.path.isfile(staged)
+            with open(staged) as f:
+                assert f.read() == "on disk content"
+        finally:
+            shutil.rmtree(staging_dir, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------

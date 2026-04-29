@@ -6,7 +6,7 @@ from oboros import tome
 logger = logging.getLogger("pal_mcp")
 
 
-def _strip_context_files(text: str) -> str:
+def strip_context_files(text: str) -> str:
     """Strip the === CONTEXT FILES === section from input text.
 
     The embedded file content/diffs are already represented by the files list
@@ -51,7 +51,7 @@ def format_layer_markdown(
         for f in files:
             lines.append(f"- {f}")
     if input_text:
-        display_input = input_text if include_file_content else _strip_context_files(input_text)
+        display_input = input_text if include_file_content else strip_context_files(input_text)
         lines.extend(["", "## Input", "", display_input])
     if output_text:
         lines.extend(["", "## Output", "", output_text])

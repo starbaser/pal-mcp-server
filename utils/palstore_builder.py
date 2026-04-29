@@ -9,12 +9,63 @@ arguments directly from PalNode ancestry — no ThreadContext intermediate neede
 from __future__ import annotations
 
 import logging
+import os
 from typing import TYPE_CHECKING
+
+from utils.response_formatter import strip_context_files
 
 if TYPE_CHECKING:
     from utils.palstore import PalNode, PalRoot
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# File staging — materialize node files to a temp directory
+# ---------------------------------------------------------------------------
+
+
+def _materialize_staging_dir(content_nodes: list[PalNode]) -> str | None:
+    """Extract files from each node's input blob to a structured temp directory.
+
+    Layout: {staging_dir}/T{idx}/{basename}
+
+    Files are extracted from the node.input blob first (preserving recorded-time
+    content), with a disk fallback if the blob has no BEGIN FILE for that path.
+
+    Returns the staging directory path, or None if no nodes have files.
+    Caller is responsible for cleanup via shutil.rmtree().
+    """
+    import shutil
+    import tempfile
+
+    from utils.file_diff import extract_file_from_content_blob
+
+    has_files = any(node.files for node in content_nodes)
+    if not has_files:
+        return None
+
+    staging_dir = tempfile.mkdtemp(prefix="pal-ctx-")
+
+    for idx, node in enumerate(content_nodes):
+        if not node.files:
+            continue
+
+        layer_dir = os.path.join(staging_dir, f"T{idx}")
+        os.makedirs(layer_dir, exist_ok=True)
+
+        for file_path in node.files:
+            basename = os.path.basename(file_path)
+            dest = os.path.join(layer_dir, basename)
+
+            extracted = extract_file_from_content_blob(node.input, file_path) if node.input else None
+            if extracted is not None:
+                with open(dest, "w", encoding="utf-8", errors="replace") as f:
+                    f.write(extracted)
+            elif os.path.isfile(file_path):
+                shutil.copy2(file_path, dest)
+
+    return staging_dir
 
 
 # ---------------------------------------------------------------------------
@@ -45,6 +96,11 @@ def build_tree_context(
     # Filter to content nodes (skip empty nodes)
     content_nodes = [n for n in ancestors if n.input or n.output]
 
+    # Materialize files from node blobs to a staging directory
+    staging_dir = _materialize_staging_dir(content_nodes)
+    if staging_dir:
+        arguments["_staging_dir"] = staging_dir
+
     # Resolve model context if not provided
     if model_context is None:
         model_context = _resolve_model_context(arguments)
@@ -54,6 +110,7 @@ def build_tree_context(
         content_nodes,
         node_path,
         model_context,
+        staging_dir=staging_dir,
     )
 
     # Assemble the enhanced prompt
@@ -118,11 +175,15 @@ def _build_budgeted_history(
     content_nodes: list[PalNode],
     node_path: str,
     model_context=None,
+    staging_dir: str | None = None,
 ) -> tuple[str, int]:
     """Build token-budgeted conversation history from PalNode ancestry.
 
     Follows the same Phase 1 (reverse-chrono collection) → Phase 2 (chrono presentation)
     pattern as build_conversation_history in conversation_memory.py.
+
+    File content embedded in node.input (=== CONTEXT FILES === blocks) is stripped.
+    When staging_dir is provided, file access instructions are injected instead.
 
     Returns (history_string, tokens_used).
     """
@@ -212,7 +273,10 @@ def _build_budgeted_history(
         if node.files:
             turn_parts.append(f"Files used in this turn: {', '.join(node.files)}")
         turn_parts.append("")
-        turn_parts.append(node.input)
+        turn_parts.append(strip_context_files(node.input))
+        if staging_dir and node.files:
+            layer_dir = os.path.join(staging_dir, f"T{idx}")
+            turn_parts.append(f"\n[Files for this turn staged at: {layer_dir}/]")
 
         # Assistant turn
         if node.output:
@@ -286,7 +350,7 @@ def build_context_from_ancestry(ancestors: list[PalNode], include_files: bool = 
     for node in content_nodes:
         turn_num += 1
         parts.append(f"--- Turn {turn_num} (user) ---")
-        parts.append(node.input)
+        parts.append(strip_context_files(node.input))
         parts.append("")
         parts.append(f"--- Turn {turn_num} (assistant) ---")
         parts.append(node.output)

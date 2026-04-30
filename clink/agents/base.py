@@ -282,6 +282,11 @@ class BaseCLIAgent:
         # as two consecutive user messages, which Gemini rejects as INVALID_ARGUMENT.
         env["GEMINI_CLI_NO_RELAUNCH"] = "1"
 
+        # Node.js CLIs (Gemini) default to ~4GB heap which OOMs on large prompts.
+        node_opts = env.get("NODE_OPTIONS", "")
+        if "--max-old-space-size" not in node_opts:
+            env["NODE_OPTIONS"] = f"{node_opts} --max-old-space-size=32768".strip()
+
         expanded_client_env = expand_env_vars(self.client.env)
         env.update(expanded_client_env)
         return env

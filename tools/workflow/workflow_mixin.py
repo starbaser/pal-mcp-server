@@ -1458,8 +1458,14 @@ class BaseWorkflowMixin(ABC):
             # Prepare expert analysis context
             expert_context = self.prepare_expert_analysis_context(self.consolidated_findings)
 
-            # Check if tool wants to include files in prompt
-            if self.should_include_files_in_expert_prompt():
+            # Skip file re-embedding when resuming a clink session — the CLI
+            # already has all prior files in its own session history.
+            clink_session_id = arguments.get("_clink_session_id")
+            if clink_session_id:
+                logger.info(
+                    f"[{self.get_name()}] Clink session active — skipping file re-embedding for expert analysis"
+                )
+            elif self.should_include_files_in_expert_prompt():
                 file_content = self._prepare_files_for_expert_analysis()
                 if file_content:
                     expert_context = self._add_files_to_expert_context(expert_context, file_content)
@@ -1487,7 +1493,6 @@ class BaseWorkflowMixin(ABC):
                 logger.warning(warning)
 
             # Generate AI response - use request parameters if available
-            clink_session_id = arguments.get("_clink_session_id")
             model_response = provider.generate_content(
                 prompt=prompt,
                 model_name=model_name,

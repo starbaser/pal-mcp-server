@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import logging
+import re
 from dataclasses import replace
 from typing import Any
 
@@ -36,6 +37,15 @@ def _load_passthrough_prompt() -> str:
 
 
 PASSTHROUGH_SYSTEM_PROMPT = _load_passthrough_prompt()
+
+# Matches @path patterns that Gemini CLI would interpret as @file directives:
+# @/ (absolute), @. (relative), @~ (home), @word/ (directory-like)
+_AT_DIRECTIVE_RE = re.compile(r"(?<!\w)@(?=[./~]|[\w-]+/)")
+
+
+def _escape_at_directives(text: str) -> str:
+    """Escape @path patterns so CLI runners don't expand them as file directives."""
+    return _AT_DIRECTIVE_RE.sub("\u200b@", text)
 
 _FALLBACK_CAPABILITIES = ModelCapabilities(
     provider=ProviderType.CLINK,
@@ -182,9 +192,12 @@ class ClinkProvider(ModelProvider):
             role_args=[],
         )
 
-        composed_prompt = f"{PASSTHROUGH_SYSTEM_PROMPT}\n\n{prompt}"
+        sanitized_prompt = _escape_at_directives(prompt)
+        sanitized_system = _escape_at_directives(system_prompt) if system_prompt else None
+
+        composed_prompt = f"{PASSTHROUGH_SYSTEM_PROMPT}\n\n{sanitized_prompt}"
         composed_system_prompt = (
-            f"{PASSTHROUGH_SYSTEM_PROMPT}\n\n{system_prompt}" if system_prompt else PASSTHROUGH_SYSTEM_PROMPT
+            f"{PASSTHROUGH_SYSTEM_PROMPT}\n\n{sanitized_system}" if sanitized_system else PASSTHROUGH_SYSTEM_PROMPT
         )
 
         return await agent.run(

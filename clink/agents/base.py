@@ -275,6 +275,13 @@ class BaseCLIAgent:
         # Set marker variable to identify clink invocations
         env["PAL_MCP_CLINK"] = "1"
 
+        # Prevent Gemini CLI's sandbox relaunch path from double-reading stdin.
+        # When spawned with piped stdin, Phase 1 (sandbox detection) reads stdin
+        # and injects it as --prompt, then Phase 2 (inside sandbox) reads stdin
+        # again from the still-open pipe — duplicating the prompt in the API request
+        # as two consecutive user messages, which Gemini rejects as INVALID_ARGUMENT.
+        env["GEMINI_CLI_NO_RELAUNCH"] = "1"
+
         expanded_client_env = expand_env_vars(self.client.env)
         env.update(expanded_client_env)
         return env

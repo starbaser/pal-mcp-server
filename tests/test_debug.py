@@ -55,8 +55,8 @@ class TestDebugTool:
         # Verify field types
         assert schema["properties"]["step"]["type"] == "string"
         assert schema["properties"]["step_number"]["type"] == ["integer", "string"]
-        assert schema["properties"]["next_step_required"]["type"] == "boolean"
-        assert schema["properties"]["relevant_context"]["type"] == "array"
+        assert schema["properties"]["next_step_required"]["type"] == ["boolean", "string"]
+        assert schema["properties"]["relevant_context"]["type"] == ["array", "string"]
 
     def test_model_category_for_debugging(self):
         """Test that debug tool correctly identifies as extended reasoning category."""

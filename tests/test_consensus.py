@@ -134,13 +134,13 @@ class TestConsensusTool:
 
         # Media should be present now
         assert "media" in schema["properties"]
-        assert schema["properties"]["media"]["type"] == "array"
+        assert schema["properties"]["media"]["type"] == ["array", "string"]
         assert schema["properties"]["media"]["items"]["type"] == "string"
 
         # Verify field types
         assert schema["properties"]["step"]["type"] == "string"
         assert schema["properties"]["step_number"]["type"] == ["integer", "string"]
-        assert schema["properties"]["models"]["type"] == "array"
+        assert schema["properties"]["models"]["type"] == ["array", "string"]
 
         # Verify models array structure
         models_items = schema["properties"]["models"]["items"]

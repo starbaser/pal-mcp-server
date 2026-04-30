@@ -155,7 +155,7 @@ class TestGenTool(WorkflowTool):
                 "description": TESTGEN_WORKFLOW_FIELD_DESCRIPTIONS["total_steps"],
             },
             "next_step_required": {
-                "type": "boolean",
+                "type": ["boolean", "string"],
                 "description": TESTGEN_WORKFLOW_FIELD_DESCRIPTIONS["next_step_required"],
             },
             "findings": {
@@ -163,12 +163,12 @@ class TestGenTool(WorkflowTool):
                 "description": TESTGEN_WORKFLOW_FIELD_DESCRIPTIONS["findings"],
             },
             "files_checked": {
-                "type": "array",
+                "type": ["array", "string"],
                 "items": {"type": "string"},
                 "description": TESTGEN_WORKFLOW_FIELD_DESCRIPTIONS["files_checked"],
             },
             "relevant_files": {
-                "type": "array",
+                "type": ["array", "string"],
                 "items": {"type": "string"},
                 "description": TESTGEN_WORKFLOW_FIELD_DESCRIPTIONS["relevant_files"],
             },
@@ -178,7 +178,7 @@ class TestGenTool(WorkflowTool):
                 "description": TESTGEN_WORKFLOW_FIELD_DESCRIPTIONS["confidence"],
             },
             "media": {
-                "type": "array",
+                "type": ["array", "string"],
                 "items": {"type": "string"},
                 "description": TESTGEN_WORKFLOW_FIELD_DESCRIPTIONS["media"],
             },

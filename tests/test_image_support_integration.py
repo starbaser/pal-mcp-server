@@ -163,7 +163,7 @@ class TestImageSupportIntegration:
 
         assert "media" in schema["properties"]
         media_field = schema["properties"]["media"]
-        assert media_field["type"] == "array"
+        assert media_field["type"] == ["array", "string"]
         assert media_field["items"]["type"] == "string"
         assert "screenshots" in media_field["description"].lower()
 

@@ -37,7 +37,7 @@ class SchemaBuilder:
             "description": COMMON_FIELD_DESCRIPTIONS["continuation_id"],
         },
         "media": {
-            "type": "array",
+            "type": ["array", "string"],
             "items": {"type": "string"},
             "description": COMMON_FIELD_DESCRIPTIONS["media"],
         },
@@ -50,7 +50,7 @@ class SchemaBuilder:
     # Simple tool-specific field schemas (workflow tools use relevant_files instead)
     SIMPLE_FIELD_SCHEMAS = {
         "absolute_file_paths": {
-            "type": "array",
+            "type": ["array", "string"],
             "items": {"type": "string"},
             "description": COMMON_FIELD_DESCRIPTIONS["absolute_file_paths"],
         },

@@ -210,7 +210,7 @@ of the evidence, even when it strongly points in one direction.""",
                 "description": CONSENSUS_WORKFLOW_FIELD_DESCRIPTIONS["total_steps"],
             },
             "next_step_required": {
-                "type": "boolean",
+                "type": ["boolean", "string"],
                 "description": CONSENSUS_WORKFLOW_FIELD_DESCRIPTIONS["next_step_required"],
             },
             "findings": {
@@ -218,13 +218,13 @@ of the evidence, even when it strongly points in one direction.""",
                 "description": CONSENSUS_WORKFLOW_FIELD_DESCRIPTIONS["findings"],
             },
             "relevant_files": {
-                "type": "array",
+                "type": ["array", "string"],
                 "items": {"type": "string"},
                 "description": CONSENSUS_WORKFLOW_FIELD_DESCRIPTIONS["relevant_files"],
             },
             # consensus-specific fields (not in base workflow)
             "models": {
-                "type": "array",
+                "type": ["array", "string"],
                 "items": {
                     "type": "object",
                     "properties": {
@@ -246,12 +246,12 @@ of the evidence, even when it strongly points in one direction.""",
                 "description": CONSENSUS_WORKFLOW_FIELD_DESCRIPTIONS["current_model_index"],
             },
             "model_responses": {
-                "type": "array",
+                "type": ["array", "string"],
                 "items": {"type": "object"},
                 "description": CONSENSUS_WORKFLOW_FIELD_DESCRIPTIONS["model_responses"],
             },
             "media": {
-                "type": "array",
+                "type": ["array", "string"],
                 "items": {"type": "string"},
                 "description": CONSENSUS_WORKFLOW_FIELD_DESCRIPTIONS["media"],
             },

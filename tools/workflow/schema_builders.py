@@ -36,7 +36,7 @@ class WorkflowSchemaBuilder:
             "description": WORKFLOW_FIELD_DESCRIPTIONS["total_steps"],
         },
         "next_step_required": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
             "description": WORKFLOW_FIELD_DESCRIPTIONS["next_step_required"],
         },
         "findings": {
@@ -44,22 +44,22 @@ class WorkflowSchemaBuilder:
             "description": WORKFLOW_FIELD_DESCRIPTIONS["findings"],
         },
         "files_checked": {
-            "type": "array",
+            "type": ["array", "string"],
             "items": {"type": "string"},
             "description": WORKFLOW_FIELD_DESCRIPTIONS["files_checked"],
         },
         "relevant_files": {
-            "type": "array",
+            "type": ["array", "string"],
             "items": {"type": "string"},
             "description": WORKFLOW_FIELD_DESCRIPTIONS["relevant_files"],
         },
         "relevant_context": {
-            "type": "array",
+            "type": ["array", "string"],
             "items": {"type": "string"},
             "description": WORKFLOW_FIELD_DESCRIPTIONS["relevant_context"],
         },
         "issues_found": {
-            "type": "array",
+            "type": ["array", "string"],
             "items": {"type": "object"},
             "description": WORKFLOW_FIELD_DESCRIPTIONS["issues_found"],
         },
@@ -73,7 +73,7 @@ class WorkflowSchemaBuilder:
             "description": WORKFLOW_FIELD_DESCRIPTIONS["hypothesis"],
         },
         "use_assistant_model": {
-            "type": "boolean",
+            "type": ["boolean", "string"],
             "default": True,
             "description": WORKFLOW_FIELD_DESCRIPTIONS["use_assistant_model"],
         },

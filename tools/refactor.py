@@ -201,7 +201,7 @@ class RefactorTool(WorkflowTool):
                 "description": REFACTOR_FIELD_DESCRIPTIONS["total_steps"],
             },
             "next_step_required": {
-                "type": "boolean",
+                "type": ["boolean", "string"],
                 "description": REFACTOR_FIELD_DESCRIPTIONS["next_step_required"],
             },
             "findings": {
@@ -209,12 +209,12 @@ class RefactorTool(WorkflowTool):
                 "description": REFACTOR_FIELD_DESCRIPTIONS["findings"],
             },
             "files_checked": {
-                "type": "array",
+                "type": ["array", "string"],
                 "items": {"type": "string"},
                 "description": REFACTOR_FIELD_DESCRIPTIONS["files_checked"],
             },
             "relevant_files": {
-                "type": "array",
+                "type": ["array", "string"],
                 "items": {"type": "string"},
                 "description": REFACTOR_FIELD_DESCRIPTIONS["relevant_files"],
             },
@@ -225,12 +225,12 @@ class RefactorTool(WorkflowTool):
                 "description": REFACTOR_FIELD_DESCRIPTIONS["confidence"],
             },
             "issues_found": {
-                "type": "array",
+                "type": ["array", "string"],
                 "items": {"type": "object"},
                 "description": REFACTOR_FIELD_DESCRIPTIONS["issues_found"],
             },
             "media": {
-                "type": "array",
+                "type": ["array", "string"],
                 "items": {"type": "string"},
                 "description": REFACTOR_FIELD_DESCRIPTIONS["media"],
             },
@@ -243,12 +243,12 @@ class RefactorTool(WorkflowTool):
                 "description": REFACTOR_FIELD_DESCRIPTIONS["refactor_type"],
             },
             "focus_areas": {
-                "type": "array",
+                "type": ["array", "string"],
                 "items": {"type": "string"},
                 "description": REFACTOR_FIELD_DESCRIPTIONS["focus_areas"],
             },
             "style_guide_examples": {
-                "type": "array",
+                "type": ["array", "string"],
                 "items": {"type": "string"},
                 "description": REFACTOR_FIELD_DESCRIPTIONS["style_guide_examples"],
             },

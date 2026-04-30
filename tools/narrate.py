@@ -192,7 +192,7 @@ class NarrateTool(WorkflowTool):
                 "description": NARRATE_WORKFLOW_FIELD_DESCRIPTIONS["total_steps"],
             },
             "next_step_required": {
-                "type": "boolean",
+                "type": ["boolean", "string"],
                 "description": NARRATE_WORKFLOW_FIELD_DESCRIPTIONS["next_step_required"],
             },
             "findings": {
@@ -200,12 +200,12 @@ class NarrateTool(WorkflowTool):
                 "description": NARRATE_WORKFLOW_FIELD_DESCRIPTIONS["findings"],
             },
             "files_checked": {
-                "type": "array",
+                "type": ["array", "string"],
                 "items": {"type": "string"},
                 "description": NARRATE_WORKFLOW_FIELD_DESCRIPTIONS["files_checked"],
             },
             "relevant_files": {
-                "type": "array",
+                "type": ["array", "string"],
                 "items": {"type": "string"},
                 "description": NARRATE_WORKFLOW_FIELD_DESCRIPTIONS["relevant_files"],
             },
@@ -220,7 +220,7 @@ class NarrateTool(WorkflowTool):
                 "description": NARRATE_WORKFLOW_FIELD_DESCRIPTIONS["tree_path"],
             },
             "store_pages": {
-                "type": "array",
+                "type": ["array", "string"],
                 "items": {"type": "integer", "minimum": 1},
                 "description": NARRATE_WORKFLOW_FIELD_DESCRIPTIONS["store_pages"],
             },

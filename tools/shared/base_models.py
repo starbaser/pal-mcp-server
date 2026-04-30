@@ -10,10 +10,11 @@ Key Models:
 - ConsolidatedFindings: Model for tracking workflow progress
 """
 
+import json
 import logging
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,25 @@ class ToolRequest(BaseModel):
     # Visual context
     media: Optional[list[str]] = Field(None, description=COMMON_FIELD_DESCRIPTIONS["media"])
 
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_stringified_values(cls, data):
+        """MCP clients may serialize arrays/booleans as JSON strings."""
+        if not isinstance(data, dict):
+            return data
+        for key, value in data.items():
+            if not isinstance(value, str):
+                continue
+            stripped = value.strip()
+            if stripped.startswith("["):
+                try:
+                    data[key] = json.loads(stripped)
+                except (json.JSONDecodeError, ValueError):
+                    pass
+            elif stripped.lower() in ("true", "false"):
+                data[key] = stripped.lower() == "true"
+        return data
+
 
 class BaseWorkflowRequest(ToolRequest):
     """
@@ -128,6 +148,7 @@ class WorkflowRequest(BaseWorkflowRequest):
     )
     issues_found: list[dict] = Field(default_factory=list, description=WORKFLOW_FIELD_DESCRIPTIONS["issues_found"])
     confidence: str = Field("low", description=WORKFLOW_FIELD_DESCRIPTIONS["confidence"])
+
 
     # Optional workflow fields
     hypothesis: Optional[str] = Field(None, description=WORKFLOW_FIELD_DESCRIPTIONS["hypothesis"])

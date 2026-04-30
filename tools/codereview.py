@@ -177,7 +177,7 @@ class CodeReviewTool(WorkflowTool):
                 "description": CODEREVIEW_WORKFLOW_FIELD_DESCRIPTIONS["total_steps"],
             },
             "next_step_required": {
-                "type": "boolean",
+                "type": ["boolean", "string"],
                 "description": CODEREVIEW_WORKFLOW_FIELD_DESCRIPTIONS["next_step_required"],
             },
             "findings": {
@@ -185,12 +185,12 @@ class CodeReviewTool(WorkflowTool):
                 "description": CODEREVIEW_WORKFLOW_FIELD_DESCRIPTIONS["findings"],
             },
             "files_checked": {
-                "type": "array",
+                "type": ["array", "string"],
                 "items": {"type": "string"},
                 "description": CODEREVIEW_WORKFLOW_FIELD_DESCRIPTIONS["files_checked"],
             },
             "relevant_files": {
-                "type": "array",
+                "type": ["array", "string"],
                 "items": {"type": "string"},
                 "description": CODEREVIEW_WORKFLOW_FIELD_DESCRIPTIONS["relevant_files"],
             },
@@ -201,12 +201,12 @@ class CodeReviewTool(WorkflowTool):
                 "description": CODEREVIEW_WORKFLOW_FIELD_DESCRIPTIONS.get("review_validation_type", ""),
             },
             "issues_found": {
-                "type": "array",
+                "type": ["array", "string"],
                 "items": {"type": "object"},
                 "description": CODEREVIEW_WORKFLOW_FIELD_DESCRIPTIONS["issues_found"],
             },
             "media": {
-                "type": "array",
+                "type": ["array", "string"],
                 "items": {"type": "string"},
                 "description": CODEREVIEW_WORKFLOW_FIELD_DESCRIPTIONS["media"],
             },

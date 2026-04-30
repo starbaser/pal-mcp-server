@@ -105,7 +105,7 @@ class TestSecauditTool:
 
         # Verify field types
         assert schema["properties"]["threat_level"]["type"] == "string"
-        assert schema["properties"]["compliance_requirements"]["type"] == "array"
+        assert schema["properties"]["compliance_requirements"]["type"] == ["array", "string"]
 
     def test_step_guidance_step_1(self):
         """Test step-specific guidance for step 1 (Security Scope Analysis)."""

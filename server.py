@@ -1074,16 +1074,21 @@ def _save_response_content(
         if not result or not hasattr(result[0], "text"):
             return None
         parsed = json.loads(result[0].text)
-        content = parsed.get("content", "")
         status = parsed.get("status", "")
-        if not content or status == "error":
+        if status == "error":
             return None
+
+        content = parsed.get("content", "")
+        if not content:
+            content = json.dumps(parsed, indent=2, ensure_ascii=False)
 
         # Resolve continuation_id: prefer explicit arg, fall back to result JSON
         cid = continuation_id
         if not cid:
             cont = parsed.get("continuation", {})
             cid = cont.get("continuation_id") if isinstance(cont, dict) else None
+        if not cid:
+            cid = parsed.get("continuation_id")
 
         # Group by encoded CWD (matches context store directory encoding)
         cwd = os.getcwd()
@@ -1091,26 +1096,61 @@ def _save_response_content(
         content_dir.mkdir(parents=True, exist_ok=True)
 
         timestamp = datetime.now().strftime("%Y-%m-%d_%H:%M:%S.%f")
-        heading = f"{tool_name} ({cid})" if cid else tool_name
-        document = format_layer_markdown(
-            heading,
-            tool_name=tool_name,
-            model=model,
-            timestamp=timestamp,
-            files=files,
-            input_text=prompt,
-            output_text=content,
-        )
+        is_workflow = "next_step_required" in parsed
 
         if cid:
             safe_cid = re.sub(r"[^a-zA-Z0-9_-]", "_", cid)
-            existing = list(content_dir.glob(f"*_{safe_cid}_*.md"))
-            step = len(existing) + 1
-            filename = f"{tool_name}_{safe_cid}_{step}.md"
+            if is_workflow:
+                # Workflow tools: accumulate all steps into a single file
+                filename = f"{tool_name}_{safe_cid}.md"
+                filepath = content_dir / filename
+                if filepath.exists():
+                    step_num = parsed.get("step_number", "?")
+                    sep = f"\n\n---\n\n## Step {step_num}\n\n"
+                    filepath.write_text(filepath.read_text(encoding="utf-8") + sep + content, encoding="utf-8")
+                else:
+                    heading = f"{tool_name} ({cid})"
+                    document = format_layer_markdown(
+                        heading,
+                        tool_name=tool_name,
+                        model=model,
+                        timestamp=timestamp,
+                        files=files,
+                        input_text=prompt,
+                        output_text=content,
+                    )
+                    filepath.write_text(document, encoding="utf-8")
+            else:
+                # Non-workflow: numbered per-turn files
+                existing = list(content_dir.glob(f"*_{safe_cid}_*.md"))
+                step = len(existing) + 1
+                filename = f"{tool_name}_{safe_cid}_{step}.md"
+                heading = f"{tool_name} ({cid})"
+                document = format_layer_markdown(
+                    heading,
+                    tool_name=tool_name,
+                    model=model,
+                    timestamp=timestamp,
+                    files=files,
+                    input_text=prompt,
+                    output_text=content,
+                )
+                filepath = content_dir / filename
+                filepath.write_text(document, encoding="utf-8")
         else:
             filename = f"{tool_name}_{timestamp}.md"
-        filepath = content_dir / filename
-        filepath.write_text(document, encoding="utf-8")
+            heading = tool_name
+            document = format_layer_markdown(
+                heading,
+                tool_name=tool_name,
+                model=model,
+                timestamp=timestamp,
+                files=files,
+                input_text=prompt,
+                output_text=content,
+            )
+            filepath = content_dir / filename
+            filepath.write_text(document, encoding="utf-8")
         return str(filepath.resolve())
     except Exception:
         logger.debug(f"Failed to save response content for {tool_name}", exc_info=True)

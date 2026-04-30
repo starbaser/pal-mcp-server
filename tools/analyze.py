@@ -183,12 +183,12 @@ class AnalyzeTool(WorkflowTool):
                 "description": ANALYZE_WORKFLOW_FIELD_DESCRIPTIONS["step"],
             },
             "step_number": {
-                "type": "integer",
+                "type": ["integer", "string"],
                 "minimum": 1,
                 "description": ANALYZE_WORKFLOW_FIELD_DESCRIPTIONS["step_number"],
             },
             "total_steps": {
-                "type": "integer",
+                "type": ["integer", "string"],
                 "minimum": 1,
                 "description": ANALYZE_WORKFLOW_FIELD_DESCRIPTIONS["total_steps"],
             },

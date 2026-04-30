@@ -54,7 +54,7 @@ class TestDebugTool:
 
         # Verify field types
         assert schema["properties"]["step"]["type"] == "string"
-        assert schema["properties"]["step_number"]["type"] == "integer"
+        assert schema["properties"]["step_number"]["type"] == ["integer", "string"]
         assert schema["properties"]["next_step_required"]["type"] == "boolean"
         assert schema["properties"]["relevant_context"]["type"] == "array"
 

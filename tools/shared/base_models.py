@@ -87,11 +87,20 @@ class BaseWorkflowRequest(ToolRequest):
     allowing for maximum flexibility in tool-specific implementations.
     """
 
+    model_config = {"coerce_numbers_to_str": False, "strict": False}
+
     # Core workflow fields that ALL workflow tools need
     step: str = Field(..., description=WORKFLOW_FIELD_DESCRIPTIONS["step"])
     step_number: int = Field(..., ge=1, description=WORKFLOW_FIELD_DESCRIPTIONS["step_number"])
     total_steps: int = Field(..., ge=1, description=WORKFLOW_FIELD_DESCRIPTIONS["total_steps"])
     next_step_required: bool = Field(..., description=WORKFLOW_FIELD_DESCRIPTIONS["next_step_required"])
+
+    @field_validator("step_number", "total_steps", mode="before")
+    @classmethod
+    def coerce_to_int(cls, v):
+        if isinstance(v, str) and v.strip().isdigit():
+            return int(v)
+        return v
 
 
 class WorkflowRequest(BaseWorkflowRequest):

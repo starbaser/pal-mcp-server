@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Sequence
 from typing import Any
@@ -9,7 +10,14 @@ from typing import Any
 from clink.models import ResolvedCLIClient, ResolvedCLIRole
 from clink.parsers.base import ParsedCLIResponse
 
-from .base import AgentOutput, BaseCLIAgent
+from .base import AgentOutput, BaseCLIAgent, CLIAgentError
+
+_RETRY_DELAYS = [60, 300, 600]  # 1m, 5m, 10m
+
+
+def _is_retryable_capacity_error(stderr: str) -> bool:
+    """Check for transient capacity errors (NOT hard quota exhaustion)."""
+    return "RetryableQuotaError" in stderr or "No capacity available" in stderr
 
 
 class GeminiAgent(BaseCLIAgent):
@@ -18,6 +26,10 @@ class GeminiAgent(BaseCLIAgent):
     Gemini CLI ingests files via ``@/path/to/file`` directives prepended to
     the prompt text (sent over stdin).  This agent overrides ``run`` to inject
     those directives for every attached file and media path.
+
+    Transient capacity errors (``RetryableQuotaError``) are retried up to
+    3 times with escalating backoff (1m, 5m, 10m).  Hard quota exhaustion
+    (``TerminalQuotaError``) is returned immediately.
     """
 
     def __init__(self, client: ResolvedCLIClient):
@@ -37,17 +49,35 @@ class GeminiAgent(BaseCLIAgent):
         session_id: str | None = None,
     ) -> AgentOutput:
         prompt = self._prepend_file_directives(prompt, files=files, images=images)
-        return await super().run(
-            role=role,
-            prompt=prompt,
-            system_prompt=system_prompt,
-            files=files,
-            images=images,
-            json_schema=json_schema,
-            model=model,
-            cwd=cwd,
-            session_id=session_id,
+        run_kwargs = dict(
+            role=role, prompt=prompt, system_prompt=system_prompt,
+            files=files, images=images, json_schema=json_schema,
+            model=model, cwd=cwd, session_id=session_id,
         )
+
+        last_error: CLIAgentError | None = None
+        for attempt in range(1 + len(_RETRY_DELAYS)):
+            try:
+                return await super().run(**run_kwargs)
+            except CLIAgentError as exc:
+                if not _is_retryable_capacity_error(exc.stderr):
+                    raise
+                last_error = exc
+
+                if attempt >= len(_RETRY_DELAYS):
+                    self._logger.warning(
+                        "Gemini capacity unavailable — all %d retries exhausted", len(_RETRY_DELAYS),
+                    )
+                    raise
+
+                delay = _RETRY_DELAYS[attempt]
+                self._logger.warning(
+                    "Gemini capacity unavailable (attempt %d/%d) — retrying in %ds",
+                    attempt + 1, len(_RETRY_DELAYS), delay,
+                )
+                await asyncio.sleep(delay)
+
+        raise last_error  # unreachable, satisfies type checker
 
     @staticmethod
     def _prepend_file_directives(

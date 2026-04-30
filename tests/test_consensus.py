@@ -139,7 +139,7 @@ class TestConsensusTool:
 
         # Verify field types
         assert schema["properties"]["step"]["type"] == "string"
-        assert schema["properties"]["step_number"]["type"] == "integer"
+        assert schema["properties"]["step_number"]["type"] == ["integer", "string"]
         assert schema["properties"]["models"]["type"] == "array"
 
         # Verify models array structure

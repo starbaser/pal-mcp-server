@@ -127,6 +127,9 @@ class PalTreeBaseTool(SimpleTool):
     def get_default_model(self) -> str:
         return _PALTREE_DEFAULT_MODEL
 
+    def get_allowed_models(self) -> set[str] | None:
+        return _PALTREE_ALLOWED_MODELS
+
     def get_model_field_schema(self) -> dict[str, Any]:
         allowed = sorted(_PALTREE_ALLOWED_MODELS)
         return {

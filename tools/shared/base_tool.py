@@ -228,6 +228,10 @@ class BaseTool(ABC):
         """
         return True
 
+    def get_allowed_models(self) -> set[str] | None:
+        """Return the set of models this tool accepts, or None for unrestricted."""
+        return None
+
     def is_effective_auto_mode(self) -> bool:
         """
         Check if we're in effective auto mode for schema generation.

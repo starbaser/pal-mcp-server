@@ -1414,7 +1414,12 @@ async def _call_tool_impl(name: str, arguments: dict[str, Any], tools: dict) -> 
 
         # Get model from arguments, tool-specific default, or global default
         tool_default = getattr(tool, "get_default_model", lambda: None)()
+        allowed_models = tool.get_allowed_models()
         model_name = arguments.get("model") or tool_default or DEFAULT_MODEL
+        # If the tool restricts allowed models and the resolved model isn't in the set, use tool default
+        if allowed_models and model_name not in allowed_models and tool_default:
+            logger.info(f"Model '{model_name}' not in {name} allowed set {allowed_models}, using tool default '{tool_default}'")
+            model_name = tool_default
         logger.debug(f"Initial model for {name}: {model_name}")
 
         # Parse model:option format if present

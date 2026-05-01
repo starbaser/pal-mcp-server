@@ -2615,6 +2615,10 @@ class PalCompactTool(BaseTool):
                     "type": "string",
                     "description": "Optional: guide what to preserve (e.g. 'architecture', 'design rationale').",
                 },
+                "model": {
+                    "type": "string",
+                    "description": f"Model to use for the clink agent. Default: '{_PALTREE_DEFAULT_MODEL}'.",
+                },
             },
             "required": ["source_tree_path"],
             "additionalProperties": False,
@@ -2662,7 +2666,7 @@ class PalCompactTool(BaseTool):
         source_path = arguments.get("source_tree_path", "")
         focus = arguments.get("focus", "")
         cli_name = "claude"
-        model = _PALTREE_DEFAULT_MODEL
+        model = arguments.get("model") or _PALTREE_DEFAULT_MODEL
 
         # --- Resolve tree ---
         try:
@@ -2756,11 +2760,15 @@ class PalCompactTool(BaseTool):
             compacted_segments: list[str] = []
             layers_kept = 0
             layers_discarded = 0
+            layers_errored = 0
 
-            # Opening turn
+            # Opening turn — session cwd is the temp root so --resume works across layers
+            project_dir = tree.directory
             opening = (
                 f"TREE COMPACTION — evaluating PALTree '{canonical}' "
                 f"({len(l_nodes)} layers, ~{tlog.total_tokens} tokens) against current project state.\n\n"
+                f"Project directory: {project_dir}\n"
+                f"Layer files directory: {temp_dir}\n\n"
                 f"=== TREE OUTLINE ===\n{tree_outline}\n\n"
                 f"I will feed you each historical layer one at a time, oldest first.\n"
                 f"For each layer, evaluate it against the current state of the codebase:\n"
@@ -2770,15 +2778,14 @@ class PalCompactTool(BaseTool):
                 f"- EXTRACT architectural patterns and integration knowledge NOT obvious from code\n\n"
                 f"If a layer has no enduring value, return exactly an empty string.\n"
                 f"Otherwise return dense technical markdown — no conversational filler.\n"
-                f"The files referenced by each layer are available in your working directory.\n"
+                f"Each layer prompt will tell you which directory contains that layer's referenced files.\n"
+                f"The project source is at: {project_dir}\n"
             )
             if focus:
                 opening += f"\nFocus: {focus}\n"
 
             logger.info("[COMPACT] Phase 3: opening turn")
 
-            # Use first layer's dir as cwd for the opening turn
-            opening_cwd = os.path.join(temp_dir, l_nodes[0][0])
             try:
                 opening_result = await agent.run(
                     role=role_config,
@@ -2787,7 +2794,7 @@ class PalCompactTool(BaseTool):
                     files=[],
                     images=[],
                     model=model,
-                    cwd=opening_cwd,
+                    cwd=temp_dir,
                 )
                 session_id = opening_result.parsed.metadata.get("session_id")
                 logger.info("[COMPACT] Phase 3: opening done, session_id=%s", session_id)
@@ -2807,7 +2814,7 @@ class PalCompactTool(BaseTool):
                 if l_node.timestamp:
                     layer_parts.append(f"Date: {l_node.timestamp[:10]}")
                 if l_node.files:
-                    layer_parts.append(f"Files: {', '.join(os.path.basename(f) for f in l_node.files)}")
+                    layer_parts.append(f"Files: {', '.join(l_node.files)}")
                 if l_node.input:
                     layer_parts.append(f"\n--- INPUT ---\n{l_node.input}")
                 if l_node.output:
@@ -2820,12 +2827,15 @@ class PalCompactTool(BaseTool):
                         layer_parts.append(f"\n--- {l_key}.{child_key}: {child_label} ---\n{child.output}")
 
                 layer_content = "\n".join(layer_parts)
+                layer_dir = os.path.join(temp_dir, l_key)
                 layer_prompt = (
                     f"Layer {layer_idx + 1}/{len(l_nodes)} ({l_key}). "
-                    f"Return compacted summary or empty string.\n\n{layer_content}"
+                    f"Return compacted summary or empty string.\n\n"
+                    f"FIRST: cd {layer_dir}\n"
+                    f"Layer files are in that directory. Project source is at {project_dir}\n\n"
+                    f"{layer_content}"
                 )
 
-                layer_cwd = os.path.join(temp_dir, l_key)
                 logger.info("[COMPACT] Phase 3: feeding %s (%d chars)", l_key, len(layer_content))
 
                 try:
@@ -2836,7 +2846,7 @@ class PalCompactTool(BaseTool):
                         files=[],
                         images=[],
                         model=model,
-                        cwd=layer_cwd,
+                        cwd=temp_dir,
                         session_id=session_id,
                     )
                     if not session_id:
@@ -2853,7 +2863,7 @@ class PalCompactTool(BaseTool):
 
                 except CLIAgentError as exc:
                     logger.warning("[COMPACT] Phase 3: %s failed: %s", l_key, exc)
-                    layers_discarded += 1
+                    layers_errored += 1
 
             # Assemble blob
             blob = "\n\n---\n\n".join(compacted_segments)
@@ -2877,7 +2887,7 @@ class PalCompactTool(BaseTool):
             f"Source: {canonical}",
             f"  Nodes: {len(all_nodes)} | Tokens: ~{tlog.total_tokens}",
             "",
-            f"Compacted: {layers_kept} layers kept, {layers_discarded} discarded",
+            f"Compacted: {layers_kept} layers kept, {layers_discarded} discarded, {layers_errored} errored",
             f"  Tokens: ~{blob_tokens} | Compression: {compression}%",
             f"  CLI: {selected_cli} | Session: {session_id}",
             "",
@@ -2895,6 +2905,7 @@ class PalCompactTool(BaseTool):
                 "source_tokens": tlog.total_tokens,
                 "layers_kept": layers_kept,
                 "layers_discarded": layers_discarded,
+                "layers_errored": layers_errored,
                 "output_tokens": blob_tokens,
                 "compression_pct": compression,
                 "cli_name": selected_cli,

@@ -261,6 +261,14 @@ class BaseCLIAgent:
 
         env = os.environ.copy()
 
+        # Strip PAL's own venv so child CLIs resolve executables from the
+        # caller's real PATH — prevents agentic subprocesses (e.g. Gemini
+        # --yolo) from using PAL's python3 to create orphan venvs in the
+        # user's project directories.
+        venv = env.pop("VIRTUAL_ENV", None)
+        if venv and "PATH" in env:
+            env["PATH"] = ":".join(p for p in env["PATH"].split(":") if venv not in p)
+
         # Strip Claude Code's own session marker so nested CLI invocations don't
         # mistake themselves for running inside a Claude Code session.
         env.pop("CLAUDECODE", None)

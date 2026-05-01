@@ -1412,8 +1412,9 @@ async def _call_tool_impl(name: str, arguments: dict[str, Any], tools: dict) -> 
         from utils.file_utils import check_total_file_size
         from utils.model_context import ModelContext
 
-        # Get model from arguments or use default
-        model_name = arguments.get("model") or DEFAULT_MODEL
+        # Get model from arguments, tool-specific default, or global default
+        tool_default = getattr(tool, "get_default_model", lambda: None)()
+        model_name = arguments.get("model") or tool_default or DEFAULT_MODEL
         logger.debug(f"Initial model for {name}: {model_name}")
 
         # Parse model:option format if present

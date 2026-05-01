@@ -350,6 +350,19 @@ class SimpleTool(BaseTool):
                     # Use pre-embedded history
                     prompt = field_value
                     logger.debug(f"{self.get_name()}: Using pre-embedded conversation history")
+                elif self._current_arguments.get("_clink_session_id"):
+                    # CLI session active — the CLI already has full conversation
+                    # via --resume. Only send the new user message.
+                    logger.info(
+                        f"{self.get_name()}: Clink session active — sending new message only"
+                    )
+                    from utils.conversation_memory import add_turn
+
+                    user_prompt = self.get_request_prompt(request)
+                    user_files = self.get_request_files(request)
+                    if user_prompt:
+                        add_turn(continuation_id, "user", user_prompt, files=user_files)
+                    prompt = await self.prepare_prompt(request)
                 else:
                     # No embedded history - reconstruct it (for in-process calls)
                     logger.debug(f"{self.get_name()}: No embedded history found, reconstructing conversation")

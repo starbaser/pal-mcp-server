@@ -100,6 +100,10 @@ class PalQueryRequest(ToolRequest):
 # ---------------------------------------------------------------------------
 
 
+_PALTREE_DEFAULT_MODEL = "deepseek-v4-pro"
+_PALTREE_ALLOWED_MODELS = {"deepseek-v4-pro", "deepseek-v4-flash"}
+
+
 class PalTreeBaseTool(SimpleTool):
     """Shared base for PALTree and PALNode tools that call external models."""
 
@@ -119,6 +123,19 @@ class PalTreeBaseTool(SimpleTool):
 
     def get_websearch_guidance(self) -> Optional[str]:
         return None
+
+    def get_default_model(self) -> str:
+        return _PALTREE_DEFAULT_MODEL
+
+    def get_model_field_schema(self) -> dict[str, Any]:
+        allowed = sorted(_PALTREE_ALLOWED_MODELS)
+        return {
+            "type": "string",
+            "description": (
+                f"The default model is '{_PALTREE_DEFAULT_MODEL}'. "
+                f"Allowed models for tree operations: {', '.join(allowed)}."
+            ),
+        }
 
     def get_annotations(self) -> dict:
         return {"readOnlyHint": False, "openWorldHint": False}
@@ -2598,14 +2615,6 @@ class PalCompactTool(BaseTool):
                     "type": "string",
                     "description": "Optional: guide what to preserve (e.g. 'architecture', 'design rationale').",
                 },
-                "cli_name": {
-                    "type": "string",
-                    "description": "CLI client to use for compaction (e.g. 'gemini'). Defaults to configured default.",
-                },
-                "model": {
-                    "type": "string",
-                    "description": "Model override for the CLI agent.",
-                },
             },
             "required": ["source_tree_path"],
             "additionalProperties": False,
@@ -2652,8 +2661,8 @@ class PalCompactTool(BaseTool):
 
         source_path = arguments.get("source_tree_path", "")
         focus = arguments.get("focus", "")
-        cli_name = arguments.get("cli_name")
-        model = arguments.get("model")
+        cli_name = "claude"
+        model = _PALTREE_DEFAULT_MODEL
 
         # --- Resolve tree ---
         try:
@@ -2717,7 +2726,7 @@ class PalCompactTool(BaseTool):
             cli_names = registry.list_clients()
             if not cli_names:
                 raise ValueError("No CLI clients configured for clink.")
-            selected_cli = cli_name or ("gemini" if "gemini" in cli_names else cli_names[0])
+            selected_cli = cli_name
             client_config = registry.get_client(selected_cli)
         except (KeyError, ValueError) as exc:
             error = ToolOutput(status="error", content=f"CLI resolution failed: {exc}", content_type="text")

@@ -715,13 +715,15 @@ def copy_palnode(tree: PalRoot, source_node_path: str, dest_node_path: str, dest
 
 
 def fold_palnode_range(tree: PalRoot, start_node_path: str, end_node_path: str) -> tuple[PalNode, TraversalLog]:
-    """Aggregate a range of ancestor nodes into a single new PalNode.
+    """Aggregate a range of nodes into a single new PalNode.
 
-    Both paths are pure node segments. Does NOT insert the result.
+    Both paths are pure node segments. Uses strata traversal (calc_traversal)
+    which handles both L-node sibling ranges and sublayer ancestry paths.
+    Does NOT insert the result.
     """
     from utils.palstore_builder import build_context_from_ancestry
 
-    nodes, tlog = collect_traversal(iter_range(tree, start_node_path, end_node_path), "range")
+    nodes, tlog = collect_traversal(calc_traversal(tree, start_node_path, end_node_path), "range")
     folded_history = build_context_from_ancestry(nodes)
 
     seen: set[str] = set()

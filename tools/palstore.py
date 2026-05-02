@@ -2664,6 +2664,7 @@ class PalCompactTool(BaseTool):
             load_tree,
             resolve_tree_path,
         )
+        from utils.response_formatter import strip_context_files
         from utils.token_utils import count_tokens
 
         source_path = arguments.get("source_tree_path", "")
@@ -2759,11 +2760,20 @@ class PalCompactTool(BaseTool):
             # Phase 3: Clink compaction — layer-by-layer, single session
             # ===================================================================
             agent = create_agent(client_config)
+
+            # Route the Claude CLI to DeepSeek's Anthropic-compatible API
+            # when using a DeepSeek model (mirrors the cld wrapper script).
+            deepseek_key = os.environ.get("DEEPSEEK_API_KEY", "")
+            if deepseek_key and model and "deepseek" in model.lower():
+                agent.client.env["ANTHROPIC_AUTH_TOKEN"] = deepseek_key
+                agent.client.env["ANTHROPIC_BASE_URL"] = "https://api.deepseek.com/anthropic"
+
             session_id: str | None = None
             compacted_segments: list[str] = []
             layers_kept = 0
             layers_discarded = 0
             layers_errored = 0
+            abort_reason: str | None = None
 
             # Opening turn — session cwd is the temp root so --resume works across layers
             project_dir = tree.directory
@@ -2819,7 +2829,9 @@ class PalCompactTool(BaseTool):
                 if l_node.files:
                     layer_parts.append(f"Files: {', '.join(l_node.files)}")
                 if l_node.input:
-                    layer_parts.append(f"\n--- INPUT ---\n{l_node.input}")
+                    cleaned_input = strip_context_files(l_node.input)
+                    if cleaned_input:
+                        layer_parts.append(f"\n--- INPUT ---\n{cleaned_input}")
                 if l_node.output:
                     layer_parts.append(f"\n--- OUTPUT ---\n{l_node.output}")
 
@@ -2856,6 +2868,13 @@ class PalCompactTool(BaseTool):
                         session_id = layer_result.parsed.metadata.get("session_id")
 
                     response_text = layer_result.parsed.content.strip()
+                    is_error = layer_result.parsed.metadata.get("is_error", False)
+
+                    if is_error:
+                        logger.error("[COMPACT] Phase 3: %s → CLI error: %r", l_key, response_text[:200])
+                        abort_reason = f"Layer {l_key}: CLI error — {response_text[:200]}"
+                        break
+
                     if response_text:
                         compacted_segments.append(response_text)
                         layers_kept += 1
@@ -2865,11 +2884,14 @@ class PalCompactTool(BaseTool):
                         logger.info("[COMPACT] Phase 3: %s → discarded", l_key)
 
                 except CLIAgentError as exc:
-                    logger.warning("[COMPACT] Phase 3: %s failed: %s", l_key, exc)
-                    layers_errored += 1
+                    logger.error("[COMPACT] Phase 3: %s failed: %s", l_key, exc)
+                    abort_reason = f"Layer {l_key} failed: {exc}"
+                    break
 
-            # Assemble blob
-            blob = "\n\n---\n\n".join(compacted_segments)
+            if abort_reason:
+                blob = ""
+            else:
+                blob = "\n\n".join(compacted_segments)
 
         finally:
             # ===================================================================
@@ -2883,6 +2905,48 @@ class PalCompactTool(BaseTool):
         # ===================================================================
         blob_tokens = count_tokens(blob) if blob else 0
         compression = round((1 - blob_tokens / max(tlog.total_tokens, 1)) * 100, 1)
+
+        _compact_meta = {
+            "source_tree": canonical,
+            "source_nodes": len(all_nodes),
+            "source_tokens": tlog.total_tokens,
+            "layers_kept": layers_kept,
+            "layers_discarded": layers_discarded,
+            "layers_errored": layers_errored,
+            "output_tokens": blob_tokens,
+            "compression_pct": compression,
+            "cli_name": selected_cli,
+            "session_id": session_id,
+            **tlog.to_dict(),
+        }
+
+        if abort_reason:
+            error = ToolOutput(
+                status="error",
+                content=(
+                    f"Compaction aborted: {abort_reason}\n\n"
+                    f"Source tree unchanged: {canonical}\n"
+                    f"Processed before abort: {layers_kept} kept, {layers_discarded} discarded"
+                ),
+                content_type="text",
+                metadata={**_compact_meta, "abort_reason": abort_reason},
+            )
+            return [TextContent(type="text", text=error.model_dump_json())]
+
+        if compression > 95.0 and layers_kept > 0:
+            error = ToolOutput(
+                status="error",
+                content=(
+                    f"Compaction failed: {compression}% compression exceeds 95% safety threshold.\n\n"
+                    f"Source tree unchanged: {canonical}\n"
+                    f"  Nodes: {len(all_nodes)} | Tokens: ~{tlog.total_tokens}\n"
+                    f"  Layers: {layers_kept} kept, {layers_discarded} discarded, {layers_errored} errored\n"
+                    f"  Output tokens: ~{blob_tokens}"
+                ),
+                content_type="text",
+                metadata=_compact_meta,
+            )
+            return [TextContent(type="text", text=error.model_dump_json())]
 
         summary_parts = [
             "Compaction complete.",
@@ -2902,19 +2966,7 @@ class PalCompactTool(BaseTool):
             status="success",
             content="\n".join(summary_parts),
             content_type="text",
-            metadata={
-                "source_tree": canonical,
-                "source_nodes": len(all_nodes),
-                "source_tokens": tlog.total_tokens,
-                "layers_kept": layers_kept,
-                "layers_discarded": layers_discarded,
-                "layers_errored": layers_errored,
-                "output_tokens": blob_tokens,
-                "compression_pct": compression,
-                "cli_name": selected_cli,
-                "session_id": session_id,
-                **tlog.to_dict(),
-            },
+            metadata=_compact_meta,
         )
         return [TextContent(type="text", text=tool_output.model_dump_json())]
 
